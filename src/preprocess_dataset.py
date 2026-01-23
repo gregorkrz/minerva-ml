@@ -28,13 +28,11 @@ def merge_histograms_dict(dict1, dict2):
                 raise ValueError(f"Bin edges for {key} are different")
     return dict1
 
-# for each dataset, get the histograms for each root file
+# For each dataset, get the histograms for each root file
 result = {}
 for playlist in DATASETS:
     print("Processing playlist: ", playlist)
     result[playlist] = {}
-    root_file_max = 2
-    root_file_count = 0
     for root_file in os.listdir(DATASETS[playlist]):
         if root_file.endswith(".root"):
             print("Processing root file: ", root_file)
@@ -47,5 +45,4 @@ for playlist in DATASETS:
                 muons = remove_overflows(muons)
                 global_features = get_global_features(master_ana_dev)
                 truth_labels = get_event_labels(master_ana_dev)
-                get_event_repr(muons, photons, blobs, prongs, global_features, truth_labels, max_objects=MAX_OBJECTS, output_file=f"/data/events_{playlist}_{root_file_count}.h5")
-                
+                get_event_repr(muons, photons, blobs, prongs, global_features, truth_labels, max_objects=MAX_OBJECTS, output_file=f"/data/events_{playlist}.h5")
