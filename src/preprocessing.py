@@ -76,6 +76,7 @@ def get_photons(master_ana_dev_frame):
     # Create event boundaries
     event_boundaries = np.zeros(len(n_per_event) + 1, dtype=np.int32)
     event_boundaries[1:] = np.cumsum(n_per_event)
+    photon_four_vectors[np.isnan(photon_four_vectors)] = 0
     return DenseCollection(bounds=event_boundaries, data=photon_four_vectors, n=n_per_event, keys=gamma1_keys, column_widths=[1, 1, 1, 1])
 
 def get_muons(master_ana_dev_frame, only_keep_minos_matched=True):
@@ -105,6 +106,7 @@ def get_muons(master_ana_dev_frame, only_keep_minos_matched=True):
     muon_event_boundaries = np.zeros(len(n_muon_per_event) + 1, dtype=np.int32)
     muon_event_boundaries[1:] = np.cumsum(n_muon_per_event)
     # Use: mc_part_event_boundaries and mc_part_matrix
+    muon_matrix[np.isnan(muon_matrix)] = 0
     return DenseCollection(bounds=muon_event_boundaries, data=muon_matrix, n=n_muon_per_event, keys=muon_keys, column_widths=column_widths)
 
 def remove_overflows(coll: DenseCollection):
@@ -262,6 +264,7 @@ def get_event_repr(muons, photons, blobs, prongs, global_features, truth_labels,
             # Resize existing datasets to accommodate new events
             dset = hf['data']
             dset_global = hf['global']
+            dset_truth_labels = hf['truth_labels']
             old_size = dset.shape[0]
             new_size = old_size + N_events
             dset.resize(new_size, axis=0)
@@ -320,6 +323,8 @@ def get_event_repr(muons, photons, blobs, prongs, global_features, truth_labels,
             
             # Write chunk to disk at the appropriate offset
             dset[write_offset + chunk_start:write_offset + chunk_end] = chunk_data
+            # Write truth labels
+            dset_truth_labels[write_offset + chunk_start:write_offset + chunk_end] = truth_labels[chunk_start:chunk_end]
             print(f"Processed events {chunk_start} to {chunk_end} / {N_events} (total in file: {write_offset + chunk_end})")
         # Write global features
         dset_global[write_offset:write_offset + N_events] = global_features
