@@ -2,6 +2,9 @@ from dataclasses import dataclass
 import numpy as np
 import awkward as ak
 import os
+import h5py
+import torch
+
 
 @dataclass
 class DenseCollection:
@@ -187,6 +190,88 @@ def convert_four_momentum(four_momentum): # convert [px, py, pz, E] to eta, phi,
     return features
 
 
+def get_event_repr_nested_tensor(muons, photons, blobs, prongs, global_features, truth_labels, output_file, max_objects=150):
+    """
+    Convert event data to a nested tensor format.
+    
+    Args:
+        muons: DenseCollection of muon data
+        photons: DenseCollection of photon data
+        blobs: DenseCollection of blob data
+        prongs: DenseCollection of prong data
+        global_features: Global, event-level features
+        incoming_E: Incoming neutrino energy (Ground Truth)
+        event_type: Event type (Ground Truth)
+        output_file: Path to output HDF5 file
+        max_objects: Maximum number of objects per event
+        chunk_size: Number of events to process at once before writing to disk
+    Returns: Number of events written to file
+
+    """
+    muon_four_momentum = muons.data[:, :4]
+    photon_four_momentum = photons.data[:, :4]
+    blob_four_momentum = blobs.data[:, [0, 1, 2, 5]].copy() # really this is [x, y, z, E]
+    # Adjust blob x, y, z such that we assume a massless particle originating from the origin
+    # Convert position (x,y,z) to momentum-like (px,py,pz) by normalizing direction and scaling by energy
+    blob_norm = np.linalg.norm(blob_four_momentum[:, 0:3], axis=1, keepdims=True)
+    blob_norm = np.where(blob_norm > 1e-6, blob_norm, 1.0)  # Avoid division by zero
+    blob_four_momentum[:, 0:3] = (blob_four_momentum[:, 0:3] / blob_norm) * blob_four_momentum[:, 3:4]
+    prong_four_momentum = prongs.data[:, 4:8]
+    prong_PID = prongs.data[:, -1]
+    # Our PID hardcoded:
+    # muon = 0, photon = 1, blob = 2 (no PID), prong PIDs: -999=3, 0=4, 3=5, 4=6, 5=7
+    # Convert prong_pid according to the above mapping - for now, hardcoded
+    prong_pid = np.zeros(len(prong_PID), dtype=np.int32)
+    for i in range(len(prong_PID)):
+        if prong_PID[i] == -999:
+            prong_pid[i] = 3
+        elif prong_PID[i] == 0:
+            prong_pid[i] = 4
+        elif prong_PID[i] == 3:
+            prong_pid[i] = 5
+        elif prong_PID[i] == 4:
+            prong_pid[i] = 6
+    muon_pid = np.zeros(len(muon_four_momentum), dtype=np.int32)
+    photon_pid = np.ones(len(photon_four_momentum), dtype=np.int32)
+    blob_pid = np.ones(len(blob_four_momentum), dtype=np.int32) * 2 # Not real PID!
+    
+    # Convert all features at once (more efficient)
+    muon_features = np.concatenate([convert_four_momentum(muon_four_momentum), muon_pid[:, np.newaxis]], axis=1)
+    photon_features = np.concatenate([convert_four_momentum(photon_four_momentum), photon_pid[:, np.newaxis]], axis=1)
+    blob_features = np.concatenate([convert_four_momentum(blob_four_momentum), blob_pid[:, np.newaxis]], axis=1)
+    prong_features = np.concatenate([convert_four_momentum(prong_four_momentum), prong_pid[:, np.newaxis]], axis=1)
+
+    # Get number of events
+    N_events = len(muons.n)
+    assert N_events == len(photons.n) == len(blobs.n) == len(prongs.n)
+    assert len(global_features) == N_events, f"Global features length {len(global_features)} doesn't match N_events {N_events}"
+    
+    file_exists = os.path.exists(output_file)
+    data_nested = []
+
+    if file_exists:
+        raise ValueError(f"File {output_file} already exists")
+    for event_idx in range(N_events):
+        if event_idx % 1000 == 0:
+            print(f"Processed events {event_idx} to {event_idx+1000} / {N_events}")
+        muon_features_event = muon_features[muons.bounds[event_idx]:muons.bounds[event_idx+1]]
+        photon_features_event = photon_features[photons.bounds[event_idx]:photons.bounds[event_idx+1]]
+        blob_features_event = blob_features[blobs.bounds[event_idx]:blobs.bounds[event_idx+1]]
+        prong_features_event = prong_features[prongs.bounds[event_idx]:prongs.bounds[event_idx+1]]
+        event_features = np.concatenate([muon_features_event, photon_features_event, blob_features_event, prong_features_event], axis=0)
+        if len(event_features) > max_objects:
+            # Sort by energy (descending)
+            event_features_idx_energy = event_features[:, 3].argsort()[::-1]
+            # Keep only the max_objects per event
+            n_to_keep = min(len(event_features), max_objects)
+            event_features = event_features[event_features_idx_energy[:n_to_keep]]
+        data_nested.append(event_features)
+    data_nested = torch.nested.nested_tensor(data_nested, layout=torch.jagged)
+    torch.save({"data": data_nested, "truth_labels": truth_labels, "global_features": global_features}, output_file)
+    print(f"✓ Nested tensor data written to {output_file} (total events: {N_events})")
+    return N_events
+
+
 def get_event_repr(muons, photons, blobs, prongs, global_features, truth_labels, output_file, max_objects=100, chunk_size=1000):
     """
     Convert event data to OmniLearned format and write directly to HDF5 file.
@@ -205,7 +290,6 @@ def get_event_repr(muons, photons, blobs, prongs, global_features, truth_labels,
     Returns: Number of events written to file
 
     """
-    import h5py
     muon_four_momentum = muons.data[:, :4]
     photon_four_momentum = photons.data[:, :4]
     blob_four_momentum = blobs.data[:, [0, 1, 2, 5]].copy() # really this is [x, y, z, E]
@@ -326,12 +410,12 @@ def get_event_repr(muons, photons, blobs, prongs, global_features, truth_labels,
                 photon_features_event = photon_features[photons.bounds[event_idx]:photons.bounds[event_idx+1]]
                 blob_features_event = blob_features[blobs.bounds[event_idx]:blobs.bounds[event_idx+1]]
                 prong_features_event = prong_features[prongs.bounds[event_idx]:prongs.bounds[event_idx+1]]
-                # stack them all
+                # Stack them all into a single array
                 event_features = np.concatenate([muon_features_event, photon_features_event, blob_features_event, prong_features_event], axis=0)
                 if len(event_features) > 0:
-                    # sort by energy (descending)
+                    # Sort by energy (descending)
                     event_features_idx_energy = event_features[:, 3].argsort()[::-1]
-                    # keep only the max_objects per event
+                    # Keep only the max_objects per event
                     n_to_keep = min(len(event_features), max_objects)
                     event_features_sorted = event_features[event_features_idx_energy[:n_to_keep]]
                     chunk_data[i, :n_to_keep] = event_features_sorted

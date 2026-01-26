@@ -6,8 +6,8 @@ import os
 import uproot
 import awkward as ak
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from src.resolution_tools import find_narrowest_interval
-from src.preprocessing import get_event_repr, get_muons, get_photons, get_dense, remove_overflows, get_global_features, get_event_labels
+from src.dataset.resolution_tools import find_narrowest_interval
+from src.dataset.preprocessing import get_event_repr_nested_tensor, get_muons, get_photons, get_dense, remove_overflows, get_global_features, get_event_labels
 import argparse
 import time
 
@@ -34,7 +34,6 @@ def process_playlist(playlist, dataset_path, output_dir="/data"):
     Returns:
         Tuple of (playlist, num_files_processed, num_files_failed, errors)
     """
-    output_file = f"{output_dir}/events_{playlist}.h5"
     root_files = sorted([f for f in os.listdir(dataset_path) if f.endswith(".root")])
     
     print(f"[{playlist}] Starting processing of {len(root_files)} files")
@@ -47,6 +46,9 @@ def process_playlist(playlist, dataset_path, output_dir="/data"):
     total_events_written = 0
     for i, root_file in enumerate(root_files):
         try:
+            output_file = f"{output_dir}/{playlist}/{i}.pb"
+            # make dir if it doesnt exist
+            os.makedirs(os.path.dirname(output_file), exist_ok=True)
             root_file_path = os.path.join(dataset_path, root_file)
             with uproot.open(root_file_path) as f:
                 master_ana_dev = f["MasterAnaDev"]
@@ -57,11 +59,10 @@ def process_playlist(playlist, dataset_path, output_dir="/data"):
                 muons = remove_overflows(muons)
                 global_features = get_global_features(master_ana_dev)
                 truth_labels = get_event_labels(master_ana_dev)
-                n_events_written = get_event_repr(
+                n_events_written = get_event_repr_nested_tensor(
                     muons, photons, blobs, prongs, 
                     global_features, truth_labels, 
-                    max_objects=MAX_OBJECTS, 
-                    output_file=output_file
+                    output_file=output_file,
                 )
                 total_events_written += n_events_written
                 event_boundaries.append(total_events_written)

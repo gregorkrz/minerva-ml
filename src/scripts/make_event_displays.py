@@ -1,5 +1,5 @@
 import argparse
-from src.event_displays import event_display, event_display_interactive
+from src.dataset.event_displays import event_display
 from src.preprocessing import get_event_collections
 import uproot
 import os

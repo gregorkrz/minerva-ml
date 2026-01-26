@@ -98,15 +98,12 @@ def event_display(event_idx, muons=None, photons=None, mc_part=None, blobs=None,
     # Process blobs
     if blobs is not None and blobs.n[event_idx] > 0:
         start, end = blobs.bounds[event_idx], blobs.bounds[event_idx + 1]
-        #x = get_column_slice(blobs, 'MasterAnaDev_BlobX')[start:end]
-        #y = get_column_slice(blobs, 'MasterAnaDev_BlobY')[start:end]
-        #z = get_column_slice(blobs, 'MasterAnaDev_BlobZ')[start:end]
-        #E = get_column_slice(blobs, 'MasterAnaDev_BlobTotalE')[start:end]
-        blob_pxyzE = get_column_slice(blobs, 'MasterAnaDev_BlobTotalE')[start:end]
-        px, py, pz, E = blob_pxyzE[:, 0], blob_pxyzE[:, 1], blob_pxyzE[:, 2], blob_pxyzE[:, 3]
-        
-        # Treat position as direction
-        theta, phi, energy = compute_theta_phi_energy(px, py, pz, E)
+        x = get_column_slice(blobs, 'MasterAnaDev_BlobX')[start:end]
+        y = get_column_slice(blobs, 'MasterAnaDev_BlobY')[start:end]
+        z = get_column_slice(blobs, 'MasterAnaDev_BlobZ')[start:end]
+        E = get_column_slice(blobs, 'MasterAnaDev_BlobTotalE')[start:end]
+        # Treat position as direction, assuming the particle starts from the origin
+        theta, phi, energy = compute_theta_phi_energy(x, y, z, E)
         collections_data.append(('Blobs', theta, phi, energy, 'orange', 'D', None))
     
     # Process prongs
@@ -116,7 +113,6 @@ def event_display(event_idx, muons=None, photons=None, mc_part=None, blobs=None,
         pxyz = get_column_slice(prongs, 'prong_part_E')[start:end][:, :3]
         E = get_column_slice(prongs, 'prong_part_E')[start:end][:, -1]
         pid = get_column_slice(prongs, 'prong_part_pid')[start:end].astype(int)
-        
         px, py, pz = pxyz[:, 0], pxyz[:, 1], pxyz[:, 2]
         theta, phi, energy = compute_theta_phi_energy(px, py, pz, E)
         collections_data.append(('Prongs', theta, phi, energy, 'purple', '^', pid))
@@ -126,7 +122,7 @@ def event_display(event_idx, muons=None, photons=None, mc_part=None, blobs=None,
         # Size proportional to energy (scale for visibility)
         sizes = (energy / np.max(energy) * 500) if len(energy) > 0 and np.max(energy) > 0 else 100
         scatter = ax.scatter(phi, theta, s=sizes, c=color, marker=marker, 
-                           alpha=0.6, edgecolors='black', linewidths=0.5, label=name)
+                             alpha=0.6, edgecolors='black', linewidths=0.5, label=name)
         
         # Add labels for particles with PID information
         if labels is not None:
