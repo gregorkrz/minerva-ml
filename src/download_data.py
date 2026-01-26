@@ -1,5 +1,5 @@
-# to download MC:  python src/download_data.py 
-# to download data: python src/download_data.py --prefix MediumEnergy_FHC_Data_Playlist
+# To download MC:  python src/download_data.py --prefix MediumEnergy_FHC_StandardMC_Playlist
+# To download data: python src/download_data.py --prefix MediumEnergy_FHC_Data_Playlist
 
 import argparse
 import os

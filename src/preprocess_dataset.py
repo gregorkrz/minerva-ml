@@ -39,15 +39,15 @@ def process_playlist(playlist, dataset_path, output_dir="/data"):
     
     print(f"[{playlist}] Starting processing of {len(root_files)} files")
     start_time = time.time()
-    
     num_processed = 0
     num_failed = 0
     errors = []
-    
+    root_file_names = [] # List of root file names in order in which they were processed
+    event_boundaries = [0] # List of event boundaries in the HDF5 file
+    total_events_written = 0
     for i, root_file in enumerate(root_files):
         try:
             root_file_path = os.path.join(dataset_path, root_file)
-            
             with uproot.open(root_file_path) as f:
                 master_ana_dev = f["MasterAnaDev"]
                 muons = get_muons(master_ana_dev)
@@ -57,14 +57,15 @@ def process_playlist(playlist, dataset_path, output_dir="/data"):
                 muons = remove_overflows(muons)
                 global_features = get_global_features(master_ana_dev)
                 truth_labels = get_event_labels(master_ana_dev)
-                
-                get_event_repr(
+                n_events_written = get_event_repr(
                     muons, photons, blobs, prongs, 
                     global_features, truth_labels, 
                     max_objects=MAX_OBJECTS, 
                     output_file=output_file
                 )
-            
+                total_events_written += n_events_written
+                event_boundaries.append(total_events_written)
+                root_file_names.append(root_file)
             num_processed += 1
             if (i + 1) % 10 == 0:  # Progress update every 10 files
                 elapsed = time.time() - start_time

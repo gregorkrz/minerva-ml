@@ -1,5 +1,9 @@
-def event_display(event_idx, muons=None, photons=None, mc_part=None, blobs=None, prongs=None, 
-                  figsize=(7, 7), title=None):
+import matplotlib.pyplot as plt
+import numpy as np
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
+def event_display(event_idx, muons=None, photons=None, mc_part=None, blobs=None, prongs=None, figsize=(7, 7), title=None):
     """
     Display an event in the theta-phi plane with particle energies shown as marker sizes.
     
@@ -55,24 +59,16 @@ def event_display(event_idx, muons=None, photons=None, mc_part=None, blobs=None,
     # Process muons
     if muons is not None and muons.n[event_idx] > 0:
         start, end = muons.bounds[event_idx], muons.bounds[event_idx + 1]
-        muon_data = muons.data[start:end]
-        
         # Get momentum components - check if using MasterAnaDev_muon or corrected_p
-        if 'MasterAnaDev_muon_Px' in muons.keys:
-            px = get_column_slice(muons, 'MasterAnaDev_muon_Px')[start:end]
-            py = get_column_slice(muons, 'MasterAnaDev_muon_Py')[start:end]
-            pz = get_column_slice(muons, 'MasterAnaDev_muon_Pz')[start:end]
-            E = get_column_slice(muons, 'MasterAnaDev_muon_E')[start:end]
-        else:
-            # Compute from angles if available
-            p = get_column_slice(muons, 'muon_corrected_p')[start:end, 0]
-            theta_x = get_column_slice(muons, 'muon_thetaX')[start:end]
-            theta_y = get_column_slice(muons, 'muon_thetaY')[start:end]
-            px = p * np.sin(theta_x)
-            py = p * np.sin(theta_y)
-            pz = p * np.sqrt(1 - np.sin(theta_x)**2 - np.sin(theta_y)**2)
-            E = get_column_slice(muons, 'MasterAnaDev_muon_E')[start:end]
-        
+        #if 'MasterAnaDev_muon_Px' in muons.keys:
+        #    px = get_column_slice(muons, 'MasterAnaDev_muon_Px')[start:end]
+        #    py = get_column_slice(muons, 'MasterAnaDev_muon_Py')[start:end]
+        #    pz = get_column_slice(muons, 'MasterAnaDev_muon_Pz')[start:end]
+        #    E = get_column_slice(muons, 'MasterAnaDev_muon_E')[start:end]
+        #else:
+        # Compute from angles if available
+        pxyzE = get_column_slice(muons, 'muon_corrected_p')[start:end]
+        px, py, pz, E = pxyzE[:, 0], pxyzE[:, 1], pxyzE[:, 2], pxyzE[:, 3]
         theta, phi, energy = compute_theta_phi_energy(px, py, pz, E)
         collections_data.append(('Muons', theta, phi, energy, 'blue', 'o', None))
     
@@ -102,29 +98,29 @@ def event_display(event_idx, muons=None, photons=None, mc_part=None, blobs=None,
     # Process blobs
     if blobs is not None and blobs.n[event_idx] > 0:
         start, end = blobs.bounds[event_idx], blobs.bounds[event_idx + 1]
-        x = get_column_slice(blobs, 'MasterAnaDev_BlobX')[start:end]
-        y = get_column_slice(blobs, 'MasterAnaDev_BlobY')[start:end]
-        z = get_column_slice(blobs, 'MasterAnaDev_BlobZ')[start:end]
-        E = get_column_slice(blobs, 'MasterAnaDev_BlobTotalE')[start:end]
+        #x = get_column_slice(blobs, 'MasterAnaDev_BlobX')[start:end]
+        #y = get_column_slice(blobs, 'MasterAnaDev_BlobY')[start:end]
+        #z = get_column_slice(blobs, 'MasterAnaDev_BlobZ')[start:end]
+        #E = get_column_slice(blobs, 'MasterAnaDev_BlobTotalE')[start:end]
+        blob_pxyzE = get_column_slice(blobs, 'MasterAnaDev_BlobTotalE')[start:end]
+        px, py, pz, E = blob_pxyzE[:, 0], blob_pxyzE[:, 1], blob_pxyzE[:, 2], blob_pxyzE[:, 3]
         
         # Treat position as direction
-        theta, phi, energy = compute_theta_phi_energy(x, y, z, E)
+        theta, phi, energy = compute_theta_phi_energy(px, py, pz, E)
         collections_data.append(('Blobs', theta, phi, energy, 'orange', 'D', None))
     
     # Process prongs
     if prongs is not None and prongs.n[event_idx] > 0:
         start, end = prongs.bounds[event_idx], prongs.bounds[event_idx + 1]
         #pos = get_column_slice(prongs, 'prong_part_pos')[start:end]
-        pos = get_column_slice(prongs, 'prong_part_E')[start:end][:, :3]
+        pxyz = get_column_slice(prongs, 'prong_part_E')[start:end][:, :3]
         E = get_column_slice(prongs, 'prong_part_E')[start:end][:, -1]
         pid = get_column_slice(prongs, 'prong_part_pid')[start:end].astype(int)
         
-        # Extract x, y, z from position (assuming it's 3D)
-        if len(pos.shape) == 2 and pos.shape[1] >= 3:
-            x, y, z = pos[:, 0], pos[:, 1], pos[:, 2]
-            theta, phi, energy = compute_theta_phi_energy(x, y, z, E)
-            collections_data.append(('Prongs', theta, phi, energy, 'purple', '^', pid))
-    
+        px, py, pz = pxyz[:, 0], pxyz[:, 1], pxyz[:, 2]
+        theta, phi, energy = compute_theta_phi_energy(px, py, pz, E)
+        collections_data.append(('Prongs', theta, phi, energy, 'purple', '^', pid))
+
     # Plot all collections
     for name, theta, phi, energy, color, marker, labels in collections_data:
         # Size proportional to energy (scale for visibility)

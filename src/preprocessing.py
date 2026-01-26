@@ -161,8 +161,10 @@ def convert_four_momentum(four_momentum): # convert [px, py, pz, E] to eta, phi,
     
     # Pseudorapidity: η = -ln(tan(θ/2)) = 0.5 * ln((|p| + pz) / (|p| - pz))
     eta = np.zeros_like(pz)
-    valid = (p > 1e-6) & (np.abs(p - pz) > 1e-6)
-    eta[valid] = 0.5 * np.log((p[valid] + pz[valid]) / (p[valid] - pz[valid]))
+    # Need to check both numerator and denominator are not too small
+    valid = (p > 1e-6) & (np.abs(p + pz) > 1e-6) & (np.abs(p - pz) > 1e-6)
+    # Clip eta to reasonable range to avoid infinities
+    eta[valid] = np.clip(0.5 * np.log((p[valid] + pz[valid]) / (p[valid] - pz[valid])), -10, 10)
     
     # Azimuthal angle
     phi = np.arctan2(py, px)
@@ -200,12 +202,14 @@ def get_event_repr(muons, photons, blobs, prongs, global_features, truth_labels,
         output_file: Path to output HDF5 file
         max_objects: Maximum number of objects per event
         chunk_size: Number of events to process at once before writing to disk
+    Returns: Number of events written to file
+
     """
     import h5py
     muon_four_momentum = muons.data[:, :4]
     photon_four_momentum = photons.data[:, :4]
     blob_four_momentum = blobs.data[:, [0, 1, 2, 5]].copy() # really this is [x, y, z, E]
-    # adjust blob x, y, z such that we assume a massless particle originating from the origin
+    # Adjust blob x, y, z such that we assume a massless particle originating from the origin
     # Convert position (x,y,z) to momentum-like (px,py,pz) by normalizing direction and scaling by energy
     blob_norm = np.linalg.norm(blob_four_momentum[:, 0:3], axis=1, keepdims=True)
     blob_norm = np.where(blob_norm > 1e-6, blob_norm, 1.0)  # Avoid division by zero
@@ -214,7 +218,7 @@ def get_event_repr(muons, photons, blobs, prongs, global_features, truth_labels,
     prong_PID = prongs.data[:, -1]
     # Our PID hardcoded:
     # muon = 0, photon = 1, blob = 2 (no PID), prong PIDs: -999=3, 0=4, 3=5, 4=6, 5=7
-    # convert prong_pid according to the above mapping - for now, hardcoded
+    # Convert prong_pid according to the above mapping - for now, hardcoded
     prong_pid = np.zeros(len(prong_PID), dtype=np.int32)
     for i in range(len(prong_PID)):
         if prong_PID[i] == -999:
@@ -265,10 +269,13 @@ def get_event_repr(muons, photons, blobs, prongs, global_features, truth_labels,
             dset = hf['data']
             dset_global = hf['global']
             dset_truth_labels = hf['truth_labels']
+            dset_number_of_particles = hf['number_of_particles']
             old_size = dset.shape[0]
             new_size = old_size + N_events
             dset.resize(new_size, axis=0)
             dset_global.resize(new_size, axis=0)
+            dset_truth_labels.resize(new_size, axis=0)
+            dset_number_of_particles.resize(new_size, axis=0)
             write_offset = old_size
         else:
             # Create datasets with chunking for efficient writing
@@ -292,20 +299,28 @@ def get_event_repr(muons, photons, blobs, prongs, global_features, truth_labels,
             )
             dset_truth_labels = hf.create_dataset(
                 'truth_labels',
-                shape=(N_events, 2),
-                maxshape=(None, 2),
+                shape=(N_events, 3),
+                maxshape=(None, 3),
                 dtype=np.float32,
-                chunks=(min(chunk_size, N_events), 2),
+                chunks=(min(chunk_size, N_events), 3),
                 compression='gzip',
                 compression_opts=4
             )
+            dset_number_of_particles = hf.create_dataset(
+                'number_of_particles',
+                shape=(N_events,),
+                maxshape=(None,),
+                dtype=np.int32,
+                chunks=(min(chunk_size, N_events),),
+                compression='gzip',
+                compression_opts=4
+            ) # Number of tokens per event - to make it easier to plot histograms of quantities
             write_offset = 0
-        
         # Process events in chunks to save memory
         for chunk_start in range(0, N_events, chunk_size):
             chunk_end = min(chunk_start + chunk_size, N_events)
             chunk_data = np.zeros((chunk_end - chunk_start, max_objects, 5), dtype=np.float32)
-            
+            n_particles_in_chunk = np.zeros(chunk_end - chunk_start, dtype=np.int32)
             for i, event_idx in enumerate(range(chunk_start, chunk_end)):
                 muon_features_event = muon_features[muons.bounds[event_idx]:muons.bounds[event_idx+1]]
                 photon_features_event = photon_features[photons.bounds[event_idx]:photons.bounds[event_idx+1]]
@@ -320,11 +335,14 @@ def get_event_repr(muons, photons, blobs, prongs, global_features, truth_labels,
                     n_to_keep = min(len(event_features), max_objects)
                     event_features_sorted = event_features[event_features_idx_energy[:n_to_keep]]
                     chunk_data[i, :n_to_keep] = event_features_sorted
-            
+                    n_particles_in_chunk[i] = n_to_keep  # Store number actually kept
+                else:
+                    n_particles_in_chunk[i] = 0
             # Write chunk to disk at the appropriate offset
             dset[write_offset + chunk_start:write_offset + chunk_end] = chunk_data
             # Write truth labels
             dset_truth_labels[write_offset + chunk_start:write_offset + chunk_end] = truth_labels[chunk_start:chunk_end]
+            dset_number_of_particles[write_offset + chunk_start:write_offset + chunk_end] = n_particles_in_chunk
             print(f"Processed events {chunk_start} to {chunk_end} / {N_events} (total in file: {write_offset + chunk_end})")
         # Write global features
         dset_global[write_offset:write_offset + N_events] = global_features
@@ -338,7 +356,7 @@ def get_event_repr(muons, photons, blobs, prongs, global_features, truth_labels,
         hf.attrs['global_feature_names'] = ['muon_fuzz_energy', 'muon_iso_blobs_energy', 'E_recoil', 'E_recoil_CCinc']
         hf.attrs['pid_mapping'] = 'muon=0, photon=1, blob=2, prong_-999=3, prong_0=4, prong_3=5, prong_4=6'
     print(f"✓ Data written to {output_file} (total events: {total_events})")
-    return output_file
+    return N_events
 
 
 def get_global_features(master_ana_dev):
@@ -360,5 +378,25 @@ def get_global_features(master_ana_dev):
 def get_event_labels(master_ana_dev):
     incoming_E = master_ana_dev["mc_incomingE"].array().to_numpy()
     event_type = master_ana_dev["mc_intType"].array().to_numpy()
-    return np.stack([incoming_E, event_type], axis=1)
+    muon_reco_energy = master_ana_dev["muon_corrected_p"].array().to_numpy()[:, 3]
+    bad_muons = muon_reco_energy < 0
+    E_nu_minus_muon_reco_energy = incoming_E - muon_reco_energy
+    E_nu_minus_muon_reco_energy[bad_muons] = -1
+    return np.stack([incoming_E, event_type, E_nu_minus_muon_reco_energy], axis=1)
 
+def get_event_collections(master_ana_dev):
+    mc_part_keys = ["mc_FSPartPx", "mc_FSPartPy", "mc_FSPartPz", "mc_FSPartE", "mc_FSPartPDG"]
+    prong_keys = ["prong_part_pos", "prong_part_E", "prong_part_score", "prong_part_mass", "prong_part_charge", "prong_part_pid"]
+    blob_keys = ["MasterAnaDev_BlobX", "MasterAnaDev_BlobY", "MasterAnaDev_BlobZ", "MasterAnaDev_BlobT", "MasterAnaDev_BlobTPos", "MasterAnaDev_BlobTotalE"]
+    mc_part = get_dense(mc_part_keys, master_ana_dev)
+    prong = get_dense(prong_keys, master_ana_dev)
+    blob = get_dense(blob_keys, master_ana_dev)
+    muons = get_muons(master_ana_dev)
+    photons = get_photons(master_ana_dev)
+    muons = remove_overflows(muons)
+    photons = remove_overflows(photons)
+    # remove overflows
+    mc_part = remove_overflows(mc_part)
+    prong = remove_overflows(prong)
+    blob = remove_overflows(blob)
+    return mc_part, prong, blob, muons, photons
