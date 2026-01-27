@@ -155,7 +155,7 @@ def print_summary(all_results):
         
         # Print errors if any
         if errors:
-            for error in errors[:3]:  # Show first 3 errors
+            for error in errors[:3]: # Show first 3 errors
                 print(f"    {error}")
             if len(errors) > 3:
                 print(f"    ... and {len(errors) - 3} more errors")
