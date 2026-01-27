@@ -1,0 +1,128 @@
+# Filters and splits the dataset into train, val, test sets. It's not super optimized, but the datasets are not large, so it kind of works in the ened.
+
+
+import numpy as np
+import argparse
+from sklearn.model_selection import train_test_split
+import h5py
+import os
+import torch
+import pickle
+from pathlib import Path
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--input-dir", type=str, required=True)
+parser.add_argument("--output-dir", type=str, required=True)
+parser.add_argument("--playlist", type=str, required=False, default=None) # restrict to a specific playlist (if None, all playlists will be processed)
+parser.add_argument("--val-ratio", type=float, required=False, default=0.1)
+parser.add_argument("--test-ratio", type=float, required=False, default=0.1)
+parser.add_argument("--seed", type=int, required=False, default=42)
+
+args = parser.parse_args()
+
+
+def filter_weird_events(truth_labels):
+    # Only keep events where the interaction type is [1, 2, 3, 4, 7, 8]
+    allowed_event_types = torch.tensor([1, 2, 3, 4, 7, 8])
+    passing_idx = torch.where(torch.isin(truth_labels.int(), allowed_event_types))[0]
+    return passing_idx
+
+result = {} # Dictionary of {dataset: {train_idx, val_idx, test_idx}} - used to debug. In the end, store it in output_dir too.
+def select_from_list(lst, idx):
+    return [lst[i] for i in idx]
+
+for dataset in os.listdir(args.input_dir):
+    # This assumes the data for each dataset can fit in memory, which is reasonable for now. We could optimize this later if needed.
+    # Dataset: 1A, 1B...
+    if args.playlist is not None and dataset != args.playlist:
+        continue
+    truth_labels = []
+    global_features = []
+    data = []
+    filenames = sorted(os.listdir(os.path.join(args.input_dir, dataset)))
+    for file in filenames:
+        if file.endswith(".pb"): # There's 'data', 'truth_labels', 'global_features' keys in the file; add it to the list
+            print(f"Processing file: {file}")
+            f = torch.load(os.path.join(args.input_dir, dataset, file), weights_only=False)
+            data.append(f["data"])
+            truth_labels.append(f["truth_labels"])
+            global_features.append(f["global_features"])
+    # Concatenate the different chunks
+    # For nested tensors, we need to flatten the list first
+    print("Concatenating truth_labels")
+    truth_labels = torch.cat([torch.tensor(x) if not isinstance(x, torch.Tensor) else x for x in truth_labels], dim=0)
+    global_features = torch.cat([torch.tensor(x) if not isinstance(x, torch.Tensor) else x for x in global_features], dim=0)
+    truth_event_types = truth_labels[:, 1]
+    passing_idx = filter_weird_events(truth_event_types)
+    
+    # Now split the remaining idx using train_test_split
+    train_idx, temp_idx = train_test_split(
+        passing_idx, 
+        test_size=args.test_ratio + args.val_ratio, 
+        random_state=args.seed, 
+        stratify=truth_event_types[passing_idx]
+    )
+    temp_idx = sorted(temp_idx)
+    # Split temp into val and test
+    temp_event_types = truth_event_types[temp_idx]
+    val_ratio_adjusted = args.val_ratio / (args.test_ratio + args.val_ratio)
+    val_idx, test_idx = train_test_split(
+        temp_idx, 
+        test_size=(1 - val_ratio_adjusted), 
+        random_state=args.seed, 
+        stratify=temp_event_types
+    )
+
+    train_idx = np.sort(train_idx)
+    val_idx = np.sort(val_idx)
+    test_idx = np.sort(test_idx)
+
+    print(f"Train size: {len(train_idx)}, Val size: {len(val_idx)}, Test size: {len(test_idx)}")
+    result[file] = {
+        "train_idx": train_idx,
+        "val_idx": val_idx,
+        "test_idx": test_idx
+    }
+    # Save the files split in this way to <DATASET>/<train/val/test>/0.pb
+    Path(os.path.join(args.output_dir, dataset, "train")).mkdir(parents=True, exist_ok=True)
+    Path(os.path.join(args.output_dir, dataset, "val")).mkdir(parents=True, exist_ok=True)
+    Path(os.path.join(args.output_dir, dataset, "test")).mkdir(parents=True, exist_ok=True)
+    #if len(data) > 0 and isinstance(data[0], torch.Tensor) and data[0].is_nested:
+    # Nested tensors: flatten all nested components into a single list
+    # This may not be the best way to do it...
+    print("Concatenating data")
+    flattened_data = []
+    event_idx_offset = 0
+    for nested_tensor in data:
+        print(f"Nested tensor: {nested_tensor.shape}")
+        flattened_data += list(nested_tensor.unbind())
+    #data = torch.nested.nested_tensor(flattened_data, layout=torch.jagged)
+ 
+    print("Splitting data...")
+    # assert that the indices dont overlap
+    assert len(set(train_idx.tolist() + val_idx.tolist() + test_idx.tolist())) == len(train_idx.tolist() + val_idx.tolist() + test_idx.tolist()), "Indices overlap"
+    train = {
+        "data": torch.nested.nested_tensor(select_from_list(flattened_data, train_idx.tolist()), layout=torch.jagged), # only now convert back to nested tensor
+        "truth_labels": truth_labels[train_idx.tolist()],
+        "global_features": global_features[train_idx.tolist()]
+    }
+    val = {
+        "data": torch.nested.nested_tensor(select_from_list(flattened_data, val_idx.tolist()), layout=torch.jagged),
+        "truth_labels": truth_labels[val_idx.tolist()],
+        "global_features": global_features[val_idx.tolist()]
+    }
+    test = {
+        "data": torch.nested.nested_tensor(select_from_list(flattened_data, test_idx.tolist()), layout=torch.jagged),
+        "truth_labels": truth_labels[test_idx.tolist()],
+        "global_features": global_features[test_idx.tolist()]
+    }
+    
+    torch.save(train, os.path.join(args.output_dir, dataset, "train", "0.pb"))
+    torch.save(val, os.path.join(args.output_dir, dataset, "val", "0.pb"))
+    torch.save(test, os.path.join(args.output_dir, dataset, "test", "0.pb"))
+    
+    print(f"✓ {dataset} split and written to {args.output_dir}")
+
+# Save the result to the output directory
+with open(os.path.join(args.output_dir, "result.pkl"), "wb") as f:
+    pickle.dump(result, f)

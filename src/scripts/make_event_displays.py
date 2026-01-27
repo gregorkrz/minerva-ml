@@ -23,7 +23,8 @@ human_readable_intType = { # mc_intType in the masterAnaDev
 }
 
 parser = argparse.ArgumentParser(description='Make event displays')
-# make folders CC and NC, and then also for different int types
+
+# Make folders CC and NC, and then also for different int types
 parser.add_argument('--input_file', type=str, required=True, help='Input file')
 parser.add_argument('--output_dir', type=str, required=True, help='Output directory')
 parser.add_argument("--n_events", type=int, required=False, help='Max number of events to plot per interaction type', default=10)
