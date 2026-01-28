@@ -55,16 +55,20 @@ for dataset in os.listdir(args.input_dir):
     truth_event_types = truth_labels[:, 1]
     passing_idx = filter_weird_events(truth_event_types)
     
+    # Convert to numpy for sklearn
+    passing_idx_np = passing_idx.cpu().numpy()
+    truth_event_types_np = truth_event_types.cpu().numpy()
+    
     # Now split the remaining idx using train_test_split
     train_idx, temp_idx = train_test_split(
-        passing_idx, 
+        passing_idx_np, 
         test_size=args.test_ratio + args.val_ratio, 
         random_state=args.seed, 
-        stratify=truth_event_types[passing_idx]
+        stratify=truth_event_types_np[passing_idx_np]
     )
-    temp_idx = sorted(temp_idx)
+    
     # Split temp into val and test
-    temp_event_types = truth_event_types[temp_idx]
+    temp_event_types = truth_event_types_np[temp_idx]
     val_ratio_adjusted = args.val_ratio / (args.test_ratio + args.val_ratio)
     val_idx, test_idx = train_test_split(
         temp_idx, 
@@ -78,7 +82,7 @@ for dataset in os.listdir(args.input_dir):
     test_idx = np.sort(test_idx)
 
     print(f"Train size: {len(train_idx)}, Val size: {len(val_idx)}, Test size: {len(test_idx)}")
-    result[file] = {
+    result[dataset] = {
         "train_idx": train_idx,
         "val_idx": val_idx,
         "test_idx": test_idx

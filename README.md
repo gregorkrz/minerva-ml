@@ -18,12 +18,11 @@ This doesn't do any filtering.
 
 ## Data selection and split
 
-
+```python -m src.scripts.make_event_displays --input_file <PATH_TO_ROOT_FILE> --output_dir <PATH_TO_OUTPUT_DIR> --n_events 10```
 
 ## Event displays
 
 The script will plot event displays with directions of the particles in the theta-phi plane. For blobs, we assume the direction from `(0, 0, 0)` to the primary vertex to the blob position.
 
 ```python -m src.scripts.make_event_displays --input_file <PATH_TO_ROOT_FILE> --output_dir <PATH_TO_OUTPUT_DIR> --n_events 10```
-
 

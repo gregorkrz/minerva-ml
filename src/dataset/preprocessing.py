@@ -5,7 +5,6 @@ import os
 import h5py
 import torch
 
-
 @dataclass
 class DenseCollection:
     bounds: np.ndarray  # shape (n_events + 1,)
@@ -14,8 +13,12 @@ class DenseCollection:
     keys: list = None
     column_widths: list = None
 
-def get_dense(keys, master_ana_dev_frame):
+def get_dense(keys, master_ana_dev_frame, filter_prongs=False):
+    # filter_prongs: bool. If True, filter out prongs with prong_part_pid == -999 or 0
     column_arrays = [master_ana_dev_frame[key].array() for key in keys]
+    if filter_prongs:
+        mask = (column_arrays[-1] != -999) & (column_arrays[-1] != 0) & (column_arrays[1][..., 3] > 1e-6) # remove the weird prongs with zero energy
+        column_arrays = [arr[mask] for arr in column_arrays]
     # Get number of particles per event from mc_part_arrays[0]
     n_per_event = ak.num(column_arrays[0])
     column_arrays = [ak.flatten(arr).to_numpy() for arr in column_arrays]
@@ -157,6 +160,8 @@ def convert_four_momentum(four_momentum): # convert [px, py, pz, E] to eta, phi,
     py = four_momentum[:, 1]
     pz = four_momentum[:, 2]
     E = four_momentum[:, 3]
+    if (E < 1e-5).any():
+        raise Exception("E too small")
     
     # Compute kinematic variables
     pt = np.sqrt(px**2 + py**2)
@@ -219,18 +224,18 @@ def get_event_repr_nested_tensor(muons, photons, blobs, prongs, global_features,
     prong_four_momentum = prongs.data[:, 4:8]
     prong_PID = prongs.data[:, -1]
     # Our PID hardcoded:
-    # muon = 0, photon = 1, blob = 2 (no PID), prong PIDs: -999=3, 0=4, 3=5, 4=6, 5=7
+    # muon = 0, photon = 1, blob = 2 (no PID), prong PIDs: 3=3, 8=4, 13=5
     # Convert prong_pid according to the above mapping - for now, hardcoded
     prong_pid = np.zeros(len(prong_PID), dtype=np.int32)
     for i in range(len(prong_PID)):
-        if prong_PID[i] == -999:
+        if prong_PID[i] == 3:
             prong_pid[i] = 3
-        elif prong_PID[i] == 0:
+        elif prong_PID[i] == 8:
             prong_pid[i] = 4
-        elif prong_PID[i] == 3:
+        elif prong_PID[i] == 13:
             prong_pid[i] = 5
-        elif prong_PID[i] == 4:
-            prong_pid[i] = 6
+        else:
+            raise ValueError(f"Unknown prong PID: {prong_PID[i]}")
     muon_pid = np.zeros(len(muon_four_momentum), dtype=np.int32)
     photon_pid = np.ones(len(photon_four_momentum), dtype=np.int32)
     blob_pid = np.ones(len(blob_four_momentum), dtype=np.int32) * 2 # Not real PID!
