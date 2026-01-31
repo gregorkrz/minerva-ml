@@ -18,7 +18,9 @@ This doesn't do any filtering.
 
 ## Data selection and split
 
-```python -m src.scripts.make_event_displays --input_file <PATH_TO_ROOT_FILE> --output_dir <PATH_TO_OUTPUT_DIR> --n_events 10```
+```python -m src.scripts.split_dataset --input-dir /data/Minerva/20260127_nested  --output-dir /data/Minerva/20260127_nested_split```
+
+To investigate the features of the created dataset, look at `notebooks/stats.ipynb`.
 
 ## Event displays
 
@@ -26,3 +28,6 @@ The script will plot event displays with directions of the particles in the thet
 
 ```python -m src.scripts.make_event_displays --input_file <PATH_TO_ROOT_FILE> --output_dir <PATH_TO_OUTPUT_DIR> --n_events 10```
 
+## Training (OmniLearned repo)
+
+`python -m omnilearned.cli train --dataset minerva_1A --path /data/Minerva/20260127_nested_split --output_dir ./test_run --save_tag "test" --size small --num_feat 4 --use_pid --pid_idx 4 --pid_dim 6 --conditional --num_cond 4 --mode regression_E_nu --num_classes 1 --batch 16 --epoch 2 --lr 5e-5 --num_workers 2 --nevts 1000`

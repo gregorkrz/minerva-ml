@@ -10,11 +10,12 @@ from src.dataset.resolution_tools import find_narrowest_interval
 from src.dataset.preprocessing import get_event_repr_nested_tensor, get_muons, get_photons, get_dense, remove_overflows, get_global_features, get_event_labels
 import argparse
 import time
+from src.scripts.compute_enu_baselines import compute_enu_baselines
 
 DATASETS = {}
 #for playlist in ["1A", "1B", "1C", "1D", "1E", "1F", "1G", "1L", "1M", "1N", "1O", "1P"]:
 for playlist in ["1A", "1B", "1C", "1D", "1E", "1F", "1G", "1L", "1M", "1N", "1O", "1P"]:
-    DATASETS[playlist] = f"/scratch/MINERvA/raw_data/MediumEnergy_FHC_StandardMC_Playlist/{playlist}"
+    DATASETS[playlist] = f"/pscratch/sd/g/gregork/MINERvA/raw_data/MediumEnergy_FHC_StandardMC_Playlist/{playlist}"
 MAX_OBJECTS = 100
 
 mc_part_keys = ["mc_FSPartPx", "mc_FSPartPy", "mc_FSPartPz", "mc_FSPartE", "mc_FSPartPDG"]
@@ -22,7 +23,7 @@ prong_keys = ["prong_part_pos", "prong_part_E", "prong_part_score", "prong_part_
 blob_keys = ["MasterAnaDev_BlobX", "MasterAnaDev_BlobY", "MasterAnaDev_BlobZ", "MasterAnaDev_BlobT", "MasterAnaDev_BlobTPos", "MasterAnaDev_BlobTotalE"]
 
 
-def process_single_root_file(playlist, root_file, i, dataset_path, output_dir):
+def process_single_root_file(playlist, root_file, dataset_path, output_dir):
     """
     Process a single ROOT file.
     
@@ -37,7 +38,8 @@ def process_single_root_file(playlist, root_file, i, dataset_path, output_dir):
         Tuple of (success, root_file, n_events_written, error_msg)
     """
     try:
-        output_file = f"{output_dir}/{playlist}/{i}.pb"
+        filename = root_file.replace(".root", "")
+        output_file = f"{output_dir}/{playlist}/{filename}.pb"
         # make dir if it doesnt exist
         os.makedirs(os.path.dirname(output_file), exist_ok=True)
         root_file_path = os.path.join(dataset_path, root_file)
@@ -85,17 +87,15 @@ def process_playlist(playlist, dataset_path, output_dir="/data", max_workers_per
     with ThreadPoolExecutor(max_workers=max_workers_per_playlist) as executor:
         # Submit all ROOT files for processing
         future_to_file = {
-            executor.submit(process_single_root_file, playlist, root_file, i, dataset_path, output_dir): (i, root_file)
-            for i, root_file in enumerate(root_files)
+            executor.submit(process_single_root_file, playlist, root_file, dataset_path, output_dir): root_file
+            for root_file in root_files
         }
-        
         # Collect results as they complete
         completed = 0
         for future in as_completed(future_to_file):
-            i, root_file = future_to_file[future]
+            root_file = future_to_file[future]
             try:
-                success, root_file_name, n_events_written, error_msg = future.result()
-                
+                success, root_file, n_events_written, error_msg = future.result()
                 if success:
                     num_processed += 1
                 else:

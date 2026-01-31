@@ -468,10 +468,10 @@ def get_event_labels(master_ana_dev):
     incoming_E = master_ana_dev["mc_incomingE"].array().to_numpy()
     event_type = master_ana_dev["mc_intType"].array().to_numpy()
     muon_reco_energy = master_ana_dev["muon_corrected_p"].array().to_numpy()[:, 3]
-    bad_muons = muon_reco_energy < 0
-    E_nu_minus_muon_reco_energy = incoming_E - muon_reco_energy
-    E_nu_minus_muon_reco_energy[bad_muons] = -1
-    return np.stack([incoming_E, event_type, E_nu_minus_muon_reco_energy], axis=1)
+    bad_muons = (muon_reco_energy < 0) | (np.isnan(muon_reco_energy))
+    E_nu_true_over_reco = incoming_E / muon_reco_energy # learning a correction factor to the muon reco energy
+    E_nu_true_over_reco[bad_muons] = -1
+    return np.stack([incoming_E, event_type, E_nu_true_over_reco], axis=1)
 
 def get_event_collections(master_ana_dev):
     mc_part_keys = ["mc_FSPartPx", "mc_FSPartPy", "mc_FSPartPz", "mc_FSPartE", "mc_FSPartPDG"]
