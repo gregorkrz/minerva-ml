@@ -1,0 +1,19 @@
+2026-01-30 16:48:49,061 INFO    MainThread:2185606 [wandb_setup.py:_flush():81] Current SDK version is 0.24.0
+2026-01-30 16:48:49,062 INFO    MainThread:2185606 [wandb_setup.py:_flush():81] Configure stats pid to 2185606
+2026-01-30 16:48:49,062 INFO    MainThread:2185606 [wandb_setup.py:_flush():81] Loading settings from environment variables
+2026-01-30 16:48:49,062 INFO    MainThread:2185606 [wandb_init.py:setup_run_log_directory():717] Logging user logs to /global/u2/g/gregork/minerva-data-processing/wandb/run-20260130_164848-jw25gpty/logs/debug.log
+2026-01-30 16:48:49,063 INFO    MainThread:2185606 [wandb_init.py:setup_run_log_directory():718] Logging internal logs to /global/u2/g/gregork/minerva-data-processing/wandb/run-20260130_164848-jw25gpty/logs/debug-internal.log
+2026-01-30 16:48:49,064 INFO    MainThread:2185606 [wandb_init.py:init():844] calling init triggers
+2026-01-30 16:48:49,064 INFO    MainThread:2185606 [wandb_init.py:init():849] wandb.init called with sweep_config: {}
+config: {'learning_rate': 5e-05, 'epochs': 100, 'batch size': 128, 'mode': 'regression', '_wandb': {}}
+2026-01-30 16:48:49,064 INFO    MainThread:2185606 [wandb_init.py:init():892] starting backend
+2026-01-30 16:48:49,627 INFO    MainThread:2185606 [wandb_init.py:init():895] sending inform_init request
+2026-01-30 16:48:49,655 INFO    MainThread:2185606 [wandb_init.py:init():903] backend started and connected
+2026-01-30 16:48:49,657 INFO    MainThread:2185606 [wandb_init.py:init():973] updated telemetry
+2026-01-30 16:48:49,736 INFO    MainThread:2185606 [wandb_init.py:init():997] communicating run to backend with 90.0 second timeout
+2026-01-30 16:48:50,235 INFO    MainThread:2185606 [wandb_init.py:init():1044] starting run threads in backend
+2026-01-30 16:48:50,680 INFO    MainThread:2185606 [wandb_run.py:_console_start():2529] atexit reg
+2026-01-30 16:48:50,680 INFO    MainThread:2185606 [wandb_run.py:_redirect():2377] redirect: wrap_raw
+2026-01-30 16:48:50,680 INFO    MainThread:2185606 [wandb_run.py:_redirect():2446] Wrapping output streams.
+2026-01-30 16:48:50,680 INFO    MainThread:2185606 [wandb_run.py:_redirect():2469] Redirects installed.
+2026-01-30 16:48:50,697 INFO    MainThread:2185606 [wandb_init.py:init():1084] run started, returning control to user process

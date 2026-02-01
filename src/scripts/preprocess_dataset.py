@@ -10,7 +10,6 @@ from src.dataset.resolution_tools import find_narrowest_interval
 from src.dataset.preprocessing import get_event_repr_nested_tensor, get_muons, get_photons, get_dense, remove_overflows, get_global_features, get_event_labels
 import argparse
 import time
-from src.scripts.compute_enu_baselines import compute_enu_baselines
 
 DATASETS = {}
 #for playlist in ["1A", "1B", "1C", "1D", "1E", "1F", "1G", "1L", "1M", "1N", "1O", "1P"]:
@@ -23,7 +22,7 @@ prong_keys = ["prong_part_pos", "prong_part_E", "prong_part_score", "prong_part_
 blob_keys = ["MasterAnaDev_BlobX", "MasterAnaDev_BlobY", "MasterAnaDev_BlobZ", "MasterAnaDev_BlobT", "MasterAnaDev_BlobTPos", "MasterAnaDev_BlobTotalE"]
 
 
-def process_single_root_file(playlist, root_file, dataset_path, output_dir):
+def process_single_root_file(playlist, root_file, dataset_path, output_dir, use_max_blobs_and_prongs=False):
     """
     Process a single ROOT file.
     
@@ -52,10 +51,15 @@ def process_single_root_file(playlist, root_file, dataset_path, output_dir):
             muons = remove_overflows(muons)
             global_features = get_global_features(master_ana_dev)
             truth_labels = get_event_labels(master_ana_dev)
+            max_blobs = 20 if use_max_blobs_and_prongs else -1
+            max_prongs = 10 if use_max_blobs_and_prongs else -1 # Max. number of tokens per event is then 20(blobs)+10(prongs)+2(photons)+1(muons)=33
             n_events_written = get_event_repr_nested_tensor(
                 muons, photons, blobs, prongs, 
                 global_features, truth_labels, 
                 output_file=output_file,
+                max_blobs=max_blobs,
+                max_prongs=max_prongs,
+                use_max_blobs_and_prongs=use_max_blobs_and_prongs
             )
         return (True, root_file, n_events_written, None)
     except Exception as e:
@@ -63,7 +67,7 @@ def process_single_root_file(playlist, root_file, dataset_path, output_dir):
         return (False, root_file, 0, error_msg)
 
 
-def process_playlist(playlist, dataset_path, output_dir="/data", max_workers_per_playlist=4):
+def process_playlist(playlist, dataset_path, output_dir="/data", max_workers_per_playlist=4, use_max_blobs_and_prongs=False):
     """
     Process all ROOT files in a playlist in parallel.
     
@@ -72,6 +76,7 @@ def process_playlist(playlist, dataset_path, output_dir="/data", max_workers_per
         dataset_path: Path to directory containing ROOT files
         output_dir: Output directory for processed files
         max_workers_per_playlist: Maximum number of ROOT files to process simultaneously
+        use_max_blobs_and_prongs: Use max_blobs and max_prongs to aggregate blobs and prongs into a special token.
     
     Returns:
         Tuple of (playlist, num_files_processed, num_files_failed, errors)
@@ -87,7 +92,7 @@ def process_playlist(playlist, dataset_path, output_dir="/data", max_workers_per
     with ThreadPoolExecutor(max_workers=max_workers_per_playlist) as executor:
         # Submit all ROOT files for processing
         future_to_file = {
-            executor.submit(process_single_root_file, playlist, root_file, dataset_path, output_dir): root_file
+            executor.submit(process_single_root_file, playlist, root_file, dataset_path, output_dir, use_max_blobs_and_prongs): root_file
             for root_file in root_files
         }
         # Collect results as they complete
@@ -122,7 +127,7 @@ def process_playlist(playlist, dataset_path, output_dir="/data", max_workers_per
     return (playlist, num_processed, num_failed, errors)
 
 
-def process_all_playlists_parallel(datasets, output_dir="/data", max_workers=None, max_workers_per_playlist=4):
+def process_all_playlists_parallel(datasets, output_dir="/data", max_workers=None, max_workers_per_playlist=4, use_max_blobs_and_prongs=False):
     """
     Process multiple playlists in parallel (each playlist processes its files in parallel).
     
@@ -131,6 +136,7 @@ def process_all_playlists_parallel(datasets, output_dir="/data", max_workers=Non
         output_dir: Output directory for processed files
         max_workers: Maximum number of playlists to process simultaneously (None = all)
         max_workers_per_playlist: Maximum number of ROOT files to process simultaneously per playlist
+        use_max_blobs_and_prongs: Use max_blobs and max_prongs to aggregate blobs and prongs into a special token.
     """
     os.makedirs(output_dir, exist_ok=True)
     
@@ -150,7 +156,7 @@ def process_all_playlists_parallel(datasets, output_dir="/data", max_workers=Non
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         # Submit all playlists
         future_to_playlist = {
-            executor.submit(process_playlist, playlist, datasets[playlist], output_dir, max_workers_per_playlist): playlist
+            executor.submit(process_playlist, playlist, datasets[playlist], output_dir, max_workers_per_playlist, use_max_blobs_and_prongs): playlist
             for playlist in playlists
         }
         
@@ -212,6 +218,8 @@ if __name__ == "__main__":
                         help="Maximum number of ROOT files to process simultaneously per playlist (default: 4)")
     parser.add_argument("--playlists", nargs="+", default=None,
                         help="Specific playlists to process (default: all)")
+    parser.add_argument("--use-max-blobs-and-prongs", action="store_true", default=False,
+                        help="Use max_blobs and max_prongs to aggregate blobs and prongs into a special token.")
     
     args = parser.parse_args()
     
@@ -229,12 +237,12 @@ if __name__ == "__main__":
         datasets_to_process,
         output_dir=args.output_dir,
         max_workers=args.max_workers,
-        max_workers_per_playlist=args.max_workers_per_playlist
+        max_workers_per_playlist=args.max_workers_per_playlist,
+        use_max_blobs_and_prongs=args.use_max_blobs_and_prongs
     )
     
     total_time = time.time() - start_time
     
     print_summary(all_results)
     print(f"\nTotal processing time: {total_time/60:.1f} minutes ({total_time/3600:.2f} hours)")
-
 

@@ -101,7 +101,6 @@ for dataset in os.listdir(args.input_dir):
         print(f"Nested tensor: {nested_tensor.shape}")
         flattened_data += list(nested_tensor.unbind())
     #data = torch.nested.nested_tensor(flattened_data, layout=torch.jagged)
- 
     print("Splitting data...")
     # assert that the indices dont overlap
     assert len(set(train_idx.tolist() + val_idx.tolist() + test_idx.tolist())) == len(train_idx.tolist() + val_idx.tolist() + test_idx.tolist()), "Indices overlap"

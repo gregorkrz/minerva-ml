@@ -1,0 +1,16 @@
+
+Epoch 1/100 - Training:
+Number of events per file [6080806]
+/global/homes/g/gregork/.conda/envs/omni/lib/python3.12/site-packages/torch/utils/data/dataloader.py:432: UserWarning: This DataLoader will create 32 worker processes in total. Our suggested max number of worker in current system is 16, which is smaller than what this DataLoader is going to create. Please be aware that excessive worker creation might get DataLoader running slow or even freeze, lower the worker number to avoid potential slowness/freeze if necessary.
+  self.check_worker_number_rationality()
+Number of events per file [6080806]
+Number of events per file [6080806]
+  [1000/47507] (2.1%) - Loss: 2.3691, LR: 5.00e-05
+  [2000/47507] (4.2%) - Loss: 2.2001, LR: 5.00e-05
+  [3000/47507] (6.3%) - Loss: 2.1283, LR: 5.00e-05
+  [4000/47507] (8.4%) - Loss: 2.1055, LR: 5.00e-05
+  [5000/47507] (10.5%) - Loss: 2.2130, LR: 5.00e-05
+  [6000/47507] (12.6%) - Loss: 2.0679, LR: 5.00e-05
+  [7000/47507] (14.7%) - Loss: 2.4285, LR: 5.00e-05
+  [8000/47507] (16.8%) - Loss: 2.1966, LR: 5.00e-05
+  [9000/47507] (18.9%) - Loss: 1.9987, LR: 5.00e-05
