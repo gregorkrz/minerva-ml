@@ -15,14 +15,21 @@ parser.add_argument("--playlist", type=str, default="1A", help="Playlist to use"
 parser.add_argument("--loss", type=str, default="l1")
 parser.add_argument("--use-pretrained", type=str, default=None) # If turned on, use a pretrained small model.
 parser.add_argument("--run", action="store_true", default=False) # If turned on, run the job immediately.
-
-
+parser.add_argument("--max-particles", type=int, default=33)
+parser.add_argument("--print-cmd-only", action="store_true", default=False)
+parser.add_argument("--regress-log", action="store_true", default=False)
+parser.add_argument("--batch-size", "-bs", type=int, default=128)
+parser.add_argument("--num-workers", "-nw", type=int, default=32)
+# add --class-event-type  and --class-current-type
+parser.add_argument("--class-event-type", action="store_true", default=False)
+parser.add_argument("--class-current-type", action="store_true", default=False)
 args = parser.parse_args()
 
 DATA_DIR = args.data_dir
 
 DATASETS = {
-    "default_Minerva": f"{DATA_DIR}/Minerva/20260129_split_all"
+    "default_Minerva": f"{DATA_DIR}/Minerva/20260129_split_all",
+    "Minerva_v2": f"{DATA_DIR}/Minerva/20260201_all_max_blobs_and_prongs_split_fix_anomalies"
 }
 
 timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -39,21 +46,41 @@ export DATASET_PATH={DATASETS[args.dataset]}
 export CHECKPOINT_DIR={output_dir}
 """
 
-train_cmd = f"""srun omnilearned train \
+regress_log_flag = ""
+regress_loss_flag = ""
+class_event_type_flag = ""
+class_current_type_flag = ""
+
+if args.regress_log:
+    regress_log_flag = " --regress-log "
+    regress_loss_flag = f" --regression-loss {args.loss} "
+if args.class_event_type and args.class_current_type:
+    assert False, "Cannot use both class-event-type and class-current-type"
+elif args.class_event_type:
+    class_event_type_flag = " --class-event-type --num-classes 5 "
+    mode = "classifier"
+elif args.class_current_type:
+    class_current_type_flag = " --class-current-type --num-classes 2 "
+    mode = "classifier"
+else:
+    mode = "regression"
+
+train_cmd = f"""  -m omnilearned.cli train \
   --output_dir $CHECKPOINT_DIR \
   --save-tag {job_name} \
   --dataset minerva_{args.playlist} \
   --path $DATASET_PATH \
-  --mode regression \
-  --regression-loss {args.loss} \
-  --batch 128 \
+  --mode {mode} \
+  {regress_loss_flag} \
+  --batch {args.batch_size} \
   --epoch 100 \
   --lr 5e-5 \
   --size small \
   --wd 0.1 \
-  --num-workers 32 \
-  --use-pid\
-  --wandb """
+  --num-workers {args.num_workers} \
+  --use-pid \
+  --wandb \
+  --max-particles {args.max_particles} {regress_log_flag} {class_event_type_flag} {class_current_type_flag}"""
 
 
 if args.use_pretrained is not None:
@@ -68,9 +95,13 @@ slurm_file_content = SLURM_TEMPLATE_GPU.format(
     log_dir=log_output,
     error_dir=log_error,
     env_commands=env_commands,
-    commands=train_cmd,
+    commands="srun "  + train_cmd,
     queue_name="regular"
 )
+if args.print_cmd_only:
+    print(env_commands)
+    print("torchrun --nproc_per_node=2 " +train_cmd)
+    exit()
 with open(sbatch_file, "w") as f:
     f.write(slurm_file_content)
     print("Written to sbatch file: ", sbatch_file)

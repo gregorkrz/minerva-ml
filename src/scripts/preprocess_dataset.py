@@ -10,6 +10,7 @@ from src.dataset.resolution_tools import find_narrowest_interval
 from src.dataset.preprocessing import get_event_repr_nested_tensor, get_muons, get_photons, get_dense, remove_overflows, get_global_features, get_event_labels
 import argparse
 import time
+import traceback
 
 DATASETS = {}
 #for playlist in ["1A", "1B", "1C", "1D", "1E", "1F", "1G", "1L", "1M", "1N", "1O", "1P"]:
@@ -59,11 +60,10 @@ def process_single_root_file(playlist, root_file, dataset_path, output_dir, use_
                 output_file=output_file,
                 max_blobs=max_blobs,
                 max_prongs=max_prongs,
-                use_max_blobs_and_prongs=use_max_blobs_and_prongs
             )
         return (True, root_file, n_events_written, None)
-    except Exception as e:
-        error_msg = f"Error in {root_file}: {str(e)}"
+    except Exception:
+        error_msg = f"Error in {root_file}:\n{traceback.format_exc()}"
         return (False, root_file, 0, error_msg)
 
 

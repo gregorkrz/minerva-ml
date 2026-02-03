@@ -280,9 +280,9 @@ def main():
             all_playlist_results[playlist] = results
             
             # Save results for this playlist
-            output_file = os.path.join(args.output_dir, f"{playlist}_enu_baselines.pkl")
-            with open(output_file, 'wb') as f:
-                pickle.dump(results, f)
+            #output_file = os.path.join(args.output_dir, f"{playlist}_enu_baselines.pkl")
+            #with open(output_file, 'wb') as f:
+            #    pickle.dump(results, f)
             
             # Also save as numpy arrays for easier loading
             output_npz = os.path.join(args.output_dir, f"{playlist}_enu_baselines.npz")

@@ -12,7 +12,7 @@ class DenseCollection:
     n: np.ndarray       # shape (n_events,) - simply the one-difference of bounds
     keys: list = None
     column_widths: list = None
-    flags: list = None  # optional use
+    flags: list = None  # Optional use
 
 def get_dense(keys, master_ana_dev_frame, filter_prongs=False):
     # filter_prongs: bool. If True, filter out prongs with prong_part_pid == -999 or 0
@@ -233,39 +233,8 @@ def aggregate_low_energy_blobs_from_four_momentum(blob_four_momentum, blob_pid, 
     return np.vstack([high_energy_four_momentum, aggregated_four_momentum]), np.concatenate([high_energy_pid, aggregated_pid])
 
 
-def aggregate_low_energy_prongs_from_four_momentum(prong_four_momentum, prong_pid, n_keep=10, aggregate_pid=8):
-    """
-    Takes the N highest-energy prongs and aggregates the rest into a single composite prong.
-    This version works with four-momentum directly (before convert_four_momentum transformation).
-    
-    Args:
-        prong_four_momentum: array of shape (n_prongs, 4) with [px, py, pz, E]
-        prong_pid: array of shape (n_prongs,) with PID values
-        n_keep: number of highest-energy prongs to keep individually (default: 10)
-        aggregate_pid: PID to assign to the aggregated prong (default: 8)
-    
-    Returns:
-        aggregated_four_momentum: array of shape (min(n_keep+1, n_prongs), 4)
-        aggregated_pid: array of shape (min(n_keep+1, n_prongs),)
-    """
-    n_prongs = len(prong_four_momentum)
-    # If we have fewer prongs than n_keep, return as-is
-    if n_prongs <= n_keep:
-        return prong_four_momentum, prong_pid
-    # Sort by energy (descending), keep top N, aggregate the rest
-    energy_idx = prong_four_momentum[:, 3].argsort()[::-1]
-    sorted_four_momentum = prong_four_momentum[energy_idx]
-    sorted_pid = prong_pid[energy_idx]
-    high_energy_four_momentum = sorted_four_momentum[:n_keep]
-    high_energy_pid = sorted_pid[:n_keep]
-    low_energy_four_momentum = sorted_four_momentum[n_keep:]
-    # sum the low-energy four-momenta
-    aggregated_four_momentum = np.sum(low_energy_four_momentum, axis=0, keepdims=True)
-    aggregated_pid = np.array([aggregate_pid], dtype=prong_pid.dtype)
-    return np.vstack([high_energy_four_momentum, aggregated_four_momentum]), np.concatenate([high_energy_pid, aggregated_pid])
-
-
-def get_event_repr_nested_tensor(muons, photons, blobs, prongs, global_features, truth_labels, output_file, max_objects=150, max_blobs=-1, max_prongs=-1):
+def get_event_repr_nested_tensor(muons, photons, blobs, prongs, global_features, truth_labels, output_file, max_objects=150,
+        max_blobs=-1, max_prongs=-1):
     """
     Convert event data to a nested tensor format.
     
@@ -297,7 +266,7 @@ def get_event_repr_nested_tensor(muons, photons, blobs, prongs, global_features,
     prong_four_momentum = prongs.data[:, 4:8]
     prong_PID = prongs.data[:, -1]
     # Our PID hardcoded:
-    # muon = 0, photon = 1, blob = 2 (no PID), aggregated_blob = 7, aggregated_prong = 8, prong PIDs: 3=3, 8=4, 13=5
+    # muon = 0, photon = 1, blob = 2 (no PID), prong PIDs: 3=3, 8=4, 13=5, aggregated_blob = 6, aggregated_prong = 7,
     # Convert prong_pid according to the above mapping - for now, hardcoded
     prong_pid = np.zeros(len(prong_PID), dtype=np.int32)
     for i in range(len(prong_PID)):
@@ -341,12 +310,12 @@ def get_event_repr_nested_tensor(muons, photons, blobs, prongs, global_features,
         blob_four_momentum_event = blob_four_momentum[blobs.bounds[event_idx]:blobs.bounds[event_idx+1]]
         blob_pid_event = blob_pid[blobs.bounds[event_idx]:blobs.bounds[event_idx+1]]
         if max_blobs > 0:
-            # Aggregate low-energy blobs (keep top 20, combine rest with PID=7)
+            # Aggregate low-energy blobs (keep top 20, combine rest with PID=6)
             four_momentum_blob, pid_blob = aggregate_low_energy_blobs_from_four_momentum(
                 blob_four_momentum_event,
                 blob_pid_event,
                 n_keep=max_blobs,
-                aggregate_pid=7
+                aggregate_pid=6
             )
             blob_features_event = np.concatenate([convert_four_momentum(four_momentum_blob), pid_blob[:, np.newaxis]], axis=1)
             assert blob_features_event.shape[0] <= max_blobs
@@ -354,14 +323,14 @@ def get_event_repr_nested_tensor(muons, photons, blobs, prongs, global_features,
             blob_features_event = np.concatenate([convert_four_momentum(blob_four_momentum_event), blob_pid_event[:, np.newaxis]], axis=1)
         # similar for prongs
         if max_prongs > 0:
-            four_momentum_prong, pid_prong = aggregate_low_energy_prongs_from_four_momentum(
+            four_momentum_prong, pid_prong = aggregate_low_energy_blobs_from_four_momentum(
                 prong_four_momentum_event,
                 prong_pid_event,
                 n_keep=max_prongs,
-                aggregate_pid=8
+                aggregate_pid=7
             )
             prong_features_event = np.concatenate([convert_four_momentum(four_momentum_prong), pid_prong[:, np.newaxis]], axis=1)
-            assert prong_features_event.shape[0] <= max_prongs
+            assert prong_features_event.shape[0] <= max_prongs, f"Prong features length {prong_features_event.shape[0]} > max_prongs {max_prongs}"
         else:
             prong_features_event = np.concatenate([convert_four_momentum(prong_four_momentum_event), prong_pid_event[:, np.newaxis]], axis=1)
         event_features = np.concatenate([muon_features_event, photon_features_event, blob_features_event, prong_features_event], axis=0)
@@ -372,7 +341,7 @@ def get_event_repr_nested_tensor(muons, photons, blobs, prongs, global_features,
             n_to_keep = min(len(event_features), max_objects)
             event_features = event_features[event_features_idx_energy[:n_to_keep]]
         else:
-            assert event_features <= max_prongs + max_blobs + 2 + 1
+            assert event_features.shape[0] <= max_prongs + max_blobs + 2 + 1
         data_nested.append(event_features)
     data_nested = torch.nested.nested_tensor(data_nested, layout=torch.jagged)
     torch.save({"data": data_nested, "truth_labels": truth_labels, "global_features": global_features}, output_file)
@@ -491,10 +460,10 @@ def get_event_repr(muons, photons, blobs, prongs, global_features, truth_labels,
             )
             dset_truth_labels = hf.create_dataset(
                 'truth_labels',
-                shape=(N_events, 3),
-                maxshape=(None, 3),
+                shape=(N_events, 4),
+                maxshape=(None, 4),
                 dtype=np.float32,
-                chunks=(min(chunk_size, N_events), 3),
+                chunks=(min(chunk_size, N_events), 4),
                 compression='gzip',
                 compression_opts=4
             )
@@ -585,14 +554,17 @@ def get_global_features(master_ana_dev):
     global_features = np.log(global_features + 1e-5)
     return global_features
 
+
 def get_event_labels(master_ana_dev):
     incoming_E = master_ana_dev["mc_incomingE"].array().to_numpy()
     event_type = master_ana_dev["mc_intType"].array().to_numpy()
+    current_type = master_ana_dev["mc_current"].array().to_numpy()
     muon_reco_energy = master_ana_dev["muon_corrected_p"].array().to_numpy()[:, 3]
     bad_muons = (muon_reco_energy < 0) | (np.isnan(muon_reco_energy))
     E_nu_true_over_reco = incoming_E / muon_reco_energy # learning a correction factor to the muon reco energy
     E_nu_true_over_reco[bad_muons] = -1
-    return np.stack([incoming_E, event_type, E_nu_true_over_reco], axis=1)
+    return np.stack([incoming_E, event_type, E_nu_true_over_reco, current_type], axis=1)
+
 
 def get_event_collections(master_ana_dev):
     mc_part_keys = ["mc_FSPartPx", "mc_FSPartPy", "mc_FSPartPz", "mc_FSPartE", "mc_FSPartPDG"]
