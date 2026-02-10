@@ -9,3 +9,4 @@ python -m src.jobs.train -name initial_traing_longl1 --run --loss l1 --use-pretr
 python -m src.jobs.train -name initial_traing_long_huber_pretrained --run --loss huber --use-pretrained pretrain_s
 python -m src.jobs.train -name initial_traing_long_huber --run --loss huber 
 
+

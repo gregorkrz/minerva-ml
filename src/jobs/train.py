@@ -1,6 +1,7 @@
 
 import argparse
 import os
+import shutil
 import datetime
 from src.jobs.slurm_template import SLURM_TEMPLATE_GPU
 
@@ -13,7 +14,8 @@ parser.add_argument("--logs-dir", type=str, default="/pscratch/sd/g/gregork/logs
 parser.add_argument("--training-name", "-name", type=str, required=True) #Training name; will be suffixed with the current timestamp
 parser.add_argument("--playlist", type=str, default="1A", help="Playlist to use")
 parser.add_argument("--loss", type=str, default="l1")
-parser.add_argument("--use-pretrained", type=str, default=None) # If turned on, use a pretrained small model.
+parser.add_argument("--use-pretrained", type=str, default=None) # If turned on, use a pretrained small model for fine-tuning.
+parser.add_argument("--resume-from", type=str, default=None) # If turned on, resume training from this checkpoint.
 parser.add_argument("--run", action="store_true", default=False) # If turned on, run the job immediately.
 parser.add_argument("--max-particles", type=int, default=33)
 parser.add_argument("--print-cmd-only", action="store_true", default=False)
@@ -82,10 +84,48 @@ train_cmd = f"""  -m omnilearned.cli train \
   --wandb \
   --max-particles {args.max_particles} {regress_log_flag} {class_event_type_flag} {class_current_type_flag}"""
 
+# Handle pretrained checkpoint for fine-tuning
+if args.use_pretrained is not None and args.resume_from is not None:
+    raise ValueError("Cannot use both --use-pretrained and --resume-from. Choose one.")
 
 if args.use_pretrained is not None:
-    train_cmd += f"--pretrain-tag {args.use_pretrained} --fine-tune"
+    # Check if it's a file path
+    if os.path.isfile(args.use_pretrained):
+        print(f"Detected pretrained checkpoint as file path: {args.use_pretrained}")
+        
+        # Copy the checkpoint to the output directory
+        checkpoint_basename = os.path.basename(args.use_pretrained)
+        dest_path = os.path.join(output_dir, checkpoint_basename)
+        print(f"Copying checkpoint: {args.use_pretrained} -> {dest_path}")
+        shutil.copy2(args.use_pretrained, dest_path)
+        
+        # Extract the tag from the filename (remove "best_model_" prefix and ".pt" suffix)
+        if checkpoint_basename.startswith("best_model_") and checkpoint_basename.endswith(".pt"):
+            pretrain_tag = checkpoint_basename[11:-3]  # Remove "best_model_" and ".pt"
+        else:
+            # If it doesn't follow the expected naming convention, use the basename without extension
+            pretrain_tag = os.path.splitext(checkpoint_basename)[0]
+        
+        print(f"Using pretrain_tag: {pretrain_tag}")
+        train_cmd += f" --pretrain-tag {pretrain_tag} --fine-tune"
+    else:
+        # It's just a tag name, use it directly
+        train_cmd += f" --pretrain-tag {args.use_pretrained} --fine-tune"
 
+# Handle resuming from checkpoint
+elif args.resume_from is not None:
+    if os.path.isfile(args.resume_from):
+        print(f"Resuming training from checkpoint: {args.resume_from}")
+        
+        # Copy the checkpoint to the output directory with the current job_name
+        checkpoint_basename = f"best_model_{job_name}.pt"
+        dest_path = os.path.join(output_dir, checkpoint_basename)
+        print(f"Copying checkpoint: {args.resume_from} -> {dest_path}")
+        shutil.copy2(args.resume_from, dest_path)
+        
+        train_cmd += " --resuming"
+    else:
+        raise ValueError(f"Resume checkpoint not found: {args.resume_from}")
 
 slurm_file_content = SLURM_TEMPLATE_GPU.format(
     time="16:00:00",
@@ -100,7 +140,7 @@ slurm_file_content = SLURM_TEMPLATE_GPU.format(
 )
 if args.print_cmd_only:
     print(env_commands)
-    print("torchrun --nproc_per_node=2 " +train_cmd)
+    print("torchrun --nproc_per_node=4 " +train_cmd)
     exit()
 with open(sbatch_file, "w") as f:
     f.write(slurm_file_content)
@@ -108,3 +148,4 @@ with open(sbatch_file, "w") as f:
 
 if args.run:
     os.system(f"sbatch {sbatch_file}")
+

@@ -13,13 +13,14 @@ from pathlib import Path
 parser = argparse.ArgumentParser()
 parser.add_argument("--input-dir", type=str, required=True)
 parser.add_argument("--output-dir", type=str, required=True)
-parser.add_argument("--playlist", type=str, required=False, default=None) # restrict to a specific playlist (if None, all playlists will be processed)
+parser.add_argument("--playlists", nargs="+", required=False, default=None) # restrict to a specific playlist (if None, all playlists will be processed)
 parser.add_argument("--val-ratio", type=float, required=False, default=0.1)
 parser.add_argument("--test-ratio", type=float, required=False, default=0.1)
 parser.add_argument("--seed", type=int, required=False, default=42)
+parser.add_argument("--only-save-result", action="store_true", required=False, default=False)
+# If set to true, only save the result.pkl file and don't save the train, val, test files.
 
 args = parser.parse_args()
-
 
 def filter_weird_events(truth_labels):
     # Only keep events where the interaction type is [1, 2, 3, 4, 8] (the other events are weird)
@@ -32,10 +33,12 @@ def select_from_list(lst, idx):
     return [lst[i] for i in idx]
 
 for dataset in os.listdir(args.input_dir):
+    if dataset == "baselines":
+        continue
+    if args.playlists is not None and dataset not in args.playlists:
+        continue
     # This assumes the data for each dataset can fit in memory, which is reasonable for now. We could optimize this later if needed.
     # Dataset: 1A, 1B...
-    if args.playlist is not None and dataset != args.playlist:
-        continue
     truth_labels = []
     global_features = []
     data = []
@@ -87,44 +90,46 @@ for dataset in os.listdir(args.input_dir):
         "val_idx": val_idx,
         "test_idx": test_idx
     }
-    # Save the files split in this way to <DATASET>/<train/val/test>/0.pb
-    Path(os.path.join(args.output_dir, dataset, "train")).mkdir(parents=True, exist_ok=True)
-    Path(os.path.join(args.output_dir, dataset, "val")).mkdir(parents=True, exist_ok=True)
-    Path(os.path.join(args.output_dir, dataset, "test")).mkdir(parents=True, exist_ok=True)
-    #if len(data) > 0 and isinstance(data[0], torch.Tensor) and data[0].is_nested:
-    # Nested tensors: flatten all nested components into a single list
-    # This may not be the best way to do it...
-    print("Concatenating data")
-    flattened_data = []
-    event_idx_offset = 0
-    for nested_tensor in data:
-        print(f"Nested tensor: {nested_tensor.shape}")
-        flattened_data += list(nested_tensor.unbind())
-    #data = torch.nested.nested_tensor(flattened_data, layout=torch.jagged)
-    print("Splitting data...")
-    # assert that the indices dont overlap
-    assert len(set(train_idx.tolist() + val_idx.tolist() + test_idx.tolist())) == len(train_idx.tolist() + val_idx.tolist() + test_idx.tolist()), "Indices overlap"
-    train = {
-        "data": torch.nested.nested_tensor(select_from_list(flattened_data, train_idx.tolist()), layout=torch.jagged), # only now convert back to nested tensor
-        "truth_labels": truth_labels[train_idx.tolist()],
-        "global_features": global_features[train_idx.tolist()]
-    }
-    val = {
-        "data": torch.nested.nested_tensor(select_from_list(flattened_data, val_idx.tolist()), layout=torch.jagged),
-        "truth_labels": truth_labels[val_idx.tolist()],
-        "global_features": global_features[val_idx.tolist()]
-    }
-    test = {
-        "data": torch.nested.nested_tensor(select_from_list(flattened_data, test_idx.tolist()), layout=torch.jagged),
-        "truth_labels": truth_labels[test_idx.tolist()],
-        "global_features": global_features[test_idx.tolist()]
-    }
-    
-    torch.save(train, os.path.join(args.output_dir, dataset, "train", "0.pb"))
-    torch.save(val, os.path.join(args.output_dir, dataset, "val", "0.pb"))
-    torch.save(test, os.path.join(args.output_dir, dataset, "test", "0.pb"))
-    
-    print(f"✓ {dataset} split and written to {args.output_dir}")
+    if not args.only_save_result:
+        # Don't toggle this if --only-save-result is set to True!
+        # Save the files split in this way to <DATASET>/<train/val/test>/0.pb
+        Path(os.path.join(args.output_dir, dataset, "train")).mkdir(parents=True, exist_ok=True)
+        Path(os.path.join(args.output_dir, dataset, "val")).mkdir(parents=True, exist_ok=True)
+        Path(os.path.join(args.output_dir, dataset, "test")).mkdir(parents=True, exist_ok=True)
+        #if len(data) > 0 and isinstance(data[0], torch.Tensor) and data[0].is_nested:
+        # Nested tensors: flatten all nested components into a single list
+        # This may not be the best way to do it...
+        print("Concatenating data")
+        flattened_data = []
+        event_idx_offset = 0
+        for nested_tensor in data:
+            print(f"Nested tensor: {nested_tensor.shape}")
+            flattened_data += list(nested_tensor.unbind())
+        #data = torch.nested.nested_tensor(flattened_data, layout=torch.jagged)
+        print("Splitting data...")
+        # assert that the indices dont overlap
+        assert len(set(train_idx.tolist() + val_idx.tolist() + test_idx.tolist())) == len(train_idx.tolist() + val_idx.tolist() + test_idx.tolist()), "Indices overlap"
+        train = {
+            "data": torch.nested.nested_tensor(select_from_list(flattened_data, train_idx.tolist()), layout=torch.jagged), # only now convert back to nested tensor
+            "truth_labels": truth_labels[train_idx.tolist()],
+            "global_features": global_features[train_idx.tolist()]
+        }
+        val = {
+            "data": torch.nested.nested_tensor(select_from_list(flattened_data, val_idx.tolist()), layout=torch.jagged),
+            "truth_labels": truth_labels[val_idx.tolist()],
+            "global_features": global_features[val_idx.tolist()]
+        }
+        test = {
+            "data": torch.nested.nested_tensor(select_from_list(flattened_data, test_idx.tolist()), layout=torch.jagged),
+            "truth_labels": truth_labels[test_idx.tolist()],
+            "global_features": global_features[test_idx.tolist()]
+        }
+        
+        torch.save(train, os.path.join(args.output_dir, dataset, "train", "0.pb"))
+        torch.save(val, os.path.join(args.output_dir, dataset, "val", "0.pb"))
+        torch.save(test, os.path.join(args.output_dir, dataset, "test", "0.pb"))
+        
+        print(f"✓ {dataset} split and written to {args.output_dir}")
 
 # Save the result to the output directory
 with open(os.path.join(args.output_dir, "result.pkl"), "wb") as f:
