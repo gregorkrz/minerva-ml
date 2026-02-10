@@ -5,7 +5,7 @@ This script evaluates a trained ViT model on particle physics data using the HEP
 It supports both regression and classification tasks with wandb logging and metric computation.
 
 Example usage:
-    python -m src.scripts.eval --checkpoint TrainRegression_20260210_022444 --batch_size 1024 --dataset_name minerva_1A
+python -m src.scripts.eval --checkpoint debug_no_attn_20260209_205332 --batch_size 1024 --dataset_name minerva_1A
 """
 
 import argparse
@@ -139,10 +139,9 @@ def evaluate(model, dataloader, device, args_dict, use_amp=False):
     all_targets = []
     all_losses = []
     all_cond = []
-    
+
     for batch in tqdm(dataloader, desc=f"Evaluating", leave=True):
         inputs = prepare_batch(batch, device, use_cond, use_pid, coord_dim, pid_idx)
-        
         with autocast(enabled=use_amp):
             # Forward pass
             features = model(
@@ -172,13 +171,15 @@ def evaluate(model, dataloader, device, args_dict, use_amp=False):
         
         all_targets.append(inputs["y"].cpu().numpy())
         all_cond.append(batch["cond"].cpu().numpy())
-    
+        # Each 10th step, print 1st 10 predictions and targets
+        
     # Concatenate all predictions and targets
     all_preds = np.concatenate(all_preds)
     all_targets = np.concatenate(all_targets)
     all_cond = np.concatenate(all_cond)
     avg_loss = np.mean(all_losses)
-    
+
+
     # Compute metrics
     metrics = {"loss": avg_loss}
     
@@ -325,7 +326,6 @@ def main():
     #    json.dump(results["metrics"], f, indent=2)
     #print(f"Metrics saved to: {results_file}")
     
-
     np.savez(
         output_file,
         prediction=results["predictions"],

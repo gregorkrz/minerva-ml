@@ -216,8 +216,7 @@ if __name__ == "__main__":
                         help="Maximum number of playlists to process simultaneously (default: all)")
     parser.add_argument("--max-workers-per-playlist", type=int, default=1,
                         help="Maximum number of ROOT files to process simultaneously per playlist (default: 4)")
-    parser.add_argument("--playlists", nargs="+", default=None,
-                        help="Specific playlists to process (default: all)")
+    parser.add_argument("--playlists", nargs="+", default=None, help="Specific playlists to process (default: all)")
     parser.add_argument("--use-max-blobs-and-prongs", action="store_true", default=False,
                         help="Use max_blobs and max_prongs to aggregate blobs and prongs into a special token.")
     

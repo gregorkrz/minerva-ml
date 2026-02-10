@@ -4,7 +4,9 @@ Training script for PointGlobalMixedViT on HEP data.
 This script trains a ViT model on particle physics data using the HEPTorchDataset.
 It supports both regression and classification tasks with wandb logging and checkpointing.
 
-python -m src.scripts.train -bs 1024 --mode regression -name debug
+python -m src.scripts.train -bs 1024 --mode regression -name Train_Regression
+python -m src.scripts.train -bs 1024 --mode classifier -cc -name Train_CC 
+
 
 """
 
@@ -56,7 +58,7 @@ def parse_args():
                         help="Index of PID in features")
     
     # Model architecture (defaults from vit.py example)
-    parser.add_argument("--point_cont_dim", type=int, default=2,
+    parser.add_argument("--point_cont_dim", type=int, default=4,
                         help="Dimension of continuous point features")
     parser.add_argument("--coord_dim", type=int, default=2,
                         help="Dimension of coordinates")
@@ -86,6 +88,14 @@ def parse_args():
                         help="Gradient clipping value")
     parser.add_argument("--use_amp", action="store_true", default=True,
                         help="Use automatic mixed precision")
+    parser.add_argument("--max_samples_per_epoch", type=int, default=None,
+                        help="Maximum number of samples to use per epoch")
+    parser.add_argument("--single_batch_overfit", action="store_true",
+                        help="Debug mode: repeatedly train on one fixed batch to verify model can overfit")
+    parser.add_argument("--single_batch_steps", type=int, default=500,
+                        help="Number of optimizer steps in single-batch overfit mode")
+    parser.add_argument("--single_batch_eval_interval", type=int, default=100,
+                        help="How often to log overfit-batch eval metrics in single-batch mode")
     
     # Logging and evaluation
     parser.add_argument("--log_interval", type=int, default=1000,
@@ -94,6 +104,8 @@ def parse_args():
                         help="Run evaluation every N steps")
     parser.add_argument("--save_interval", type=int, default=10000,
                         help="Save checkpoint every N steps")
+    parser.add_argument("--debug_regression_collapse", action="store_true",
+                        help="Log per-batch regression variance and constant-baseline diagnostics")
     parser.add_argument("--wandb_project", type=str, default="minerva-models",
                         help="Wandb project name")
     parser.add_argument("--run_name", "-name", type=str, required=True,
@@ -191,9 +203,9 @@ def prepare_batch(batch, device, use_cond=False, use_pid=False, coord_dim=2, pid
     point_cats = None
     if use_pid:
         point_cats = [X[:, :, pid_idx].long()]
-        point_cont = X[:, :, coord_dim:pid_idx]
+        point_cont = X[:, :, :pid_idx]
     else:
-        point_cont = X[:, :, coord_dim:pid_idx]
+        point_cont = X # use coord dim too as just normal features
 
     # Handle global features
     global_cont = None
@@ -212,11 +224,10 @@ def prepare_batch(batch, device, use_cond=False, use_pid=False, coord_dim=2, pid
     special_token_mask = torch.ones(B, num_special_tokens, device=device, dtype=torch.float32)
     attention_mask = torch.cat([special_token_mask, attention_mask], dim=1)  # [B, num_special + N]
     
-    # Convert to format expected by scaled_dot_product_attention
-    # Mask should be [B, 1, 1, seq_len] where 0=masked (invalid), 1=not masked (valid)
-    # But SDPA expects: positions with True are NOT allowed to attend (i.e., masked out)
-    # So we need to invert: 1 (valid) -> False (not masked), 0 (invalid) -> True (masked)
-    attention_mask = (attention_mask == 0).unsqueeze(1).unsqueeze(2)  # [B, 1, 1, seq_len]
+    # Convert to boolean key padding mask for scaled_dot_product_attention.
+    # For boolean SDPA masks, True means this key position is allowed to attend.
+    # Our dataset mask uses 1=valid, 0=padding, so keep valid tokens as True.
+    attention_mask = (attention_mask > 0).unsqueeze(1).unsqueeze(2)  # [B, 1, 1, seq_len]
     
     return {
         "point_cont": point_cont,
@@ -227,7 +238,6 @@ def prepare_batch(batch, device, use_cond=False, use_pid=False, coord_dim=2, pid
         "attn_mask": attention_mask,
         "y": y,
     }
-
 
 @torch.no_grad()
 def evaluate(model, dataloader, device, args, class_weights, use_amp=False):
@@ -244,7 +254,7 @@ def evaluate(model, dataloader, device, args, class_weights, use_amp=False):
         criterion = nn.CrossEntropyLoss(weight=class_weights)
     
     for batch in tqdm(dataloader, desc="Evaluating", leave=False):
-        inputs = prepare_batch(batch, device, args.use_cond, args.use_pid, args.coord_dim)
+        inputs = prepare_batch(batch, device, args.use_cond, args.use_pid, args.coord_dim, args.pid_idx)
         
         with autocast(enabled=use_amp):
             # Forward pass
@@ -256,7 +266,7 @@ def evaluate(model, dataloader, device, args, class_weights, use_amp=False):
                 global_cats=inputs["global_cats"],
                 attn_mask=inputs["attn_mask"],
             )
-            
+
             logits = model.head(features)
             
             # Compute loss
@@ -422,43 +432,48 @@ def train(args):
     
     step = start_step
     train_losses = []
+    debug_pred_stds = []
+    debug_target_stds = []
+    debug_model_mses = []
+    debug_baseline_mses = []
     best_val_loss = float('inf')
-    
-   
     
     print(f"Steps per epoch: {steps_per_epoch}")
     print(f"Training for {args.epochs} epochs")
     
-    for epoch in range(args.epochs):
-        # Epoch progress bar
-        epoch_pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}", leave=True)
-        
-        for batch in epoch_pbar:
-            # Prepare inputs
-            inputs = prepare_batch(batch, device, args.use_cond, args.use_pid, args.coord_dim)
-            
-            # Forward pass
+    if args.single_batch_overfit:
+        print("Running single-batch overfit debug mode.")
+        fixed_batch = next(iter(train_loader))
+        fixed_inputs = prepare_batch(fixed_batch, device, args.use_cond, args.use_pid, args.coord_dim, args.pid_idx)
+        overfit_pbar = tqdm(range(args.single_batch_steps), desc="Single-batch overfit", leave=True)
+
+        for _ in overfit_pbar:
             optimizer.zero_grad()
-            
+
             with autocast(enabled=args.use_amp):
                 features = model(
-                    point_cont=inputs["point_cont"],
-                    point_cats=inputs["point_cats"],
-                    pos=inputs["pos"],
-                    global_cont=inputs["global_cont"],
-                    global_cats=inputs["global_cats"],
-                    attn_mask=inputs["attn_mask"],
+                    point_cont=fixed_inputs["point_cont"],
+                    point_cats=fixed_inputs["point_cats"],
+                    pos=fixed_inputs["pos"],
+                    global_cont=fixed_inputs["global_cont"],
+                    global_cats=fixed_inputs["global_cats"],
+                    attn_mask=fixed_inputs["attn_mask"],
                 )
-                
                 logits = model.head(features)
-                
-                # Compute loss
                 if args.mode == "regression":
-                    loss = criterion(logits.squeeze(-1), inputs["y"])
+                    loss = criterion(logits.squeeze(-1), fixed_inputs["y"])
                 else:
-                    loss = criterion(logits, inputs["y"])
-            
-            # Backward pass
+                    loss = criterion(logits, fixed_inputs["y"])
+
+            if args.mode == "regression" and args.debug_regression_collapse:
+                with torch.no_grad():
+                    preds = logits.squeeze(-1).detach()
+                    targets = fixed_inputs["y"].detach()
+                    debug_pred_stds.append(preds.std(unbiased=False).item())
+                    debug_target_stds.append(targets.std(unbiased=False).item())
+                    debug_model_mses.append(torch.mean((preds - targets) ** 2).item())
+                    debug_baseline_mses.append(torch.mean((targets - targets.mean()) ** 2).item())
+
             if scaler is not None:
                 scaler.scale(loss).backward()
                 scaler.unscale_(optimizer)
@@ -469,53 +484,179 @@ def train(args):
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
                 optimizer.step()
-            
+
             scheduler.step()
-            
-            # Track loss
-            train_losses.append(loss.item())
             step += 1
-            
-            # Update progress bar with current metrics
+            train_losses.append(loss.item())
             current_lr = scheduler.get_last_lr()[0]
-            epoch_pbar.set_postfix({
+
+            overfit_pbar.set_postfix({
                 "loss": f"{loss.item():.4f}",
                 "lr": f"{current_lr:.2e}",
                 "step": step
             })
-            
-            # Log training loss
+
             if step % args.log_interval == 0:
-                avg_train_loss = np.mean(train_losses)
-                
                 log_dict = {
-                    "train_loss": avg_train_loss,
+                    "train_loss": float(np.mean(train_losses)),
                     "learning_rate": current_lr,
                     "step": step,
-                    "epoch": epoch,
+                    "epoch": 0,
+                    "debug/single_batch_mode": 1,
                 }
-                
+                if args.mode == "regression" and args.debug_regression_collapse and len(debug_pred_stds) > 0:
+                    log_dict.update({
+                        "debug/pred_std": float(np.mean(debug_pred_stds)),
+                        "debug/target_std": float(np.mean(debug_target_stds)),
+                        "debug/model_mse": float(np.mean(debug_model_mses)),
+                        "debug/baseline_mse": float(np.mean(debug_baseline_mses)),
+                    })
                 if not args.no_wandb:
                     wandb.log(log_dict, step=step)
-                
                 train_losses = []
-            
-            # Evaluation
-            if step % args.eval_interval == 0:
-                epoch_pbar.write(f"\nRunning evaluation at step {step}...")
-                eval_metrics = evaluate(model, val_loader, device, args, class_weights, args.use_amp)
-                
-                epoch_pbar.write(f"Eval loss: {eval_metrics['eval_loss']:.4f}")
-                # save as best_model.pt if val loss is lower
-                if eval_metrics['eval_loss'] < best_val_loss:
-                    best_val_loss = eval_metrics['eval_loss']
-                    save_checkpoint(model, optimizer, scheduler, scaler, step, args, best_val_loss,
-                                    filename="best_model.pt")
-                    epoch_pbar.write(f"New best model saved! Val loss: {best_val_loss:.4f}")
-                
+                debug_pred_stds = []
+                debug_target_stds = []
+                debug_model_mses = []
+                debug_baseline_mses = []
+
+            if step % args.single_batch_eval_interval == 0:
+                with torch.no_grad():
+                    model.eval()
+                    with autocast(enabled=args.use_amp):
+                        eval_features = model(
+                            point_cont=fixed_inputs["point_cont"],
+                            point_cats=fixed_inputs["point_cats"],
+                            pos=fixed_inputs["pos"],
+                            global_cont=fixed_inputs["global_cont"],
+                            global_cats=fixed_inputs["global_cats"],
+                            attn_mask=fixed_inputs["attn_mask"],
+                        )
+                        eval_logits = model.head(eval_features)
+                        if args.mode == "regression":
+                            eval_loss = criterion(eval_logits.squeeze(-1), fixed_inputs["y"]).item()
+                        else:
+                            eval_loss = criterion(eval_logits, fixed_inputs["y"]).item()
+                    model.train()
+
+                overfit_log = {"debug/single_batch_eval_loss": eval_loss}
+                if args.mode == "classifier":
+                    with torch.no_grad():
+                        pred_labels = torch.argmax(eval_logits, dim=1)
+                        acc = (pred_labels == fixed_inputs["y"]).float().mean().item()
+                    overfit_log["debug/single_batch_accuracy"] = acc
                 if not args.no_wandb:
-                    wandb.log(eval_metrics, step=step)
-                    wandb.log({"best_val_loss": best_val_loss}, step=step)
+                    wandb.log(overfit_log, step=step)
+                overfit_pbar.write(f"Single-batch eval @ step {step}: loss={eval_loss:.6f}")
+    else:
+        for epoch in range(args.epochs):
+            # Epoch progress bar
+            epoch_pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}", leave=True)
+            
+            for batch in epoch_pbar:
+                # Prepare inputs
+                inputs = prepare_batch(batch, device, args.use_cond, args.use_pid, args.coord_dim, args.pid_idx)
+                
+                # Forward pass
+                optimizer.zero_grad()
+                
+                with autocast(enabled=args.use_amp):
+                    features = model(
+                        point_cont=inputs["point_cont"],
+                        point_cats=inputs["point_cats"],
+                        pos=inputs["pos"],
+                        global_cont=inputs["global_cont"],
+                        global_cats=inputs["global_cats"],
+                        attn_mask=inputs["attn_mask"],
+                    )
+                    
+                    logits = model.head(features)
+
+                    # Compute loss
+                    if args.mode == "regression":
+                        loss = criterion(logits.squeeze(-1), inputs["y"])
+                    else:
+                        loss = criterion(logits, inputs["y"])
+
+                # Optional diagnostics for regression collapse (predicting close to batch mean).
+                if args.mode == "regression" and args.debug_regression_collapse:
+                    with torch.no_grad():
+                        preds = logits.squeeze(-1).detach()
+                        targets = inputs["y"].detach()
+                        debug_pred_stds.append(preds.std(unbiased=False).item())
+                        debug_target_stds.append(targets.std(unbiased=False).item())
+                        debug_model_mses.append(torch.mean((preds - targets) ** 2).item())
+                        debug_baseline_mses.append(torch.mean((targets - targets.mean()) ** 2).item())
+                
+                # Backward pass
+                if scaler is not None:
+                    scaler.scale(loss).backward()
+                    scaler.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
+                    optimizer.step()
+                
+                scheduler.step()
+                
+                # Track loss
+                train_losses.append(loss.item())
+                step += 1
+                
+                # Update progress bar with current metrics
+                current_lr = scheduler.get_last_lr()[0]
+                epoch_pbar.set_postfix({
+                    "loss": f"{loss.item():.4f}",
+                    "lr": f"{current_lr:.2e}",
+                    "step": step
+                })
+                
+                # Log training loss
+                if step % args.log_interval == 0:
+                    avg_train_loss = np.mean(train_losses)
+                    
+                    log_dict = {
+                        "train_loss": avg_train_loss,
+                        "learning_rate": current_lr,
+                        "step": step,
+                        "epoch": epoch,
+                    }
+
+                    if args.mode == "regression" and args.debug_regression_collapse and len(debug_pred_stds) > 0:
+                        log_dict.update({
+                            "debug/pred_std": float(np.mean(debug_pred_stds)),
+                            "debug/target_std": float(np.mean(debug_target_stds)),
+                            "debug/model_mse": float(np.mean(debug_model_mses)),
+                            "debug/baseline_mse": float(np.mean(debug_baseline_mses)),
+                        })
+                    
+                    if not args.no_wandb:
+                        wandb.log(log_dict, step=step)
+                    
+                    train_losses = []
+                    debug_pred_stds = []
+                    debug_target_stds = []
+                    debug_model_mses = []
+                    debug_baseline_mses = []
+                
+                # Evaluation
+                if step % args.eval_interval == 0:
+                    epoch_pbar.write(f"\nRunning evaluation at step {step}...")
+                    eval_metrics = evaluate(model, val_loader, device, args, class_weights, args.use_amp)
+                    
+                    epoch_pbar.write(f"Eval loss: {eval_metrics['eval_loss']:.4f}")
+                    # save as best_model.pt if val loss is lower
+                    if eval_metrics['eval_loss'] < best_val_loss:
+                        best_val_loss = eval_metrics['eval_loss']
+                        save_checkpoint(model, optimizer, scheduler, scaler, step, args, best_val_loss,
+                                        filename="best_model.pt")
+                        epoch_pbar.write(f"New best model saved! Val loss: {best_val_loss:.4f}")
+                    
+                    if not args.no_wandb:
+                        wandb.log(eval_metrics, step=step)
+                        wandb.log({"best_val_loss": best_val_loss}, step=step)
         
     # Final evaluation
     print("\nRunning final evaluation...")
