@@ -4,7 +4,7 @@ Training script for PointGlobalMixedViT on HEP data.
 This script trains a ViT model on particle physics data using the HEPTorchDataset.
 It supports both regression and classification tasks with wandb logging and checkpointing.
 
-python -m src.scripts.train -bs 10 --mode regression -name debug
+python -m src.scripts.train -bs 1024 --mode regression -name debug
 
 """
 
