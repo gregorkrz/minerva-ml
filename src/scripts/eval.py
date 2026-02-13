@@ -5,7 +5,15 @@ This script evaluates a trained ViT model on particle physics data using the HEP
 It supports both regression and classification tasks with wandb logging and metric computation.
 
 Example usage:
-python -m src.scripts.eval --checkpoint debug_no_attn_20260209_205332 --batch_size 1024 --dataset_name minerva_1A
+python -m src.scripts.eval --checkpoint Train_Regression_SmallModel_20260210_003728 --batch_size 1024 --dataset_name minerva_1A
+python -m src.scripts.eval --checkpoint Train_Regression_20260210_003302 --batch_size 1024 --dataset_name minerva_1A
+Train_CC_SmallModel_20260210_004255
+Train_CC_20260210_003828
+
+python -m src.scripts.eval --checkpoint Train_CC_SmallModel_20260210_004255 --batch_size 1024 --dataset_name minerva_1A
+python -m src.scripts.eval --checkpoint Train_CC_20260210_003828 --batch_size 1024 --dataset_name minerva_1A
+
+
 """
 
 import argparse
@@ -167,7 +175,8 @@ def evaluate(model, dataloader, device, args_dict, use_amp=False):
         if mode == "regression":
             all_preds.append(logits.squeeze(-1).cpu().numpy())
         else:
-            all_preds.append(torch.argmax(logits, dim=1).cpu().numpy())
+            #all_preds.append(torch.argmax(logits, dim=1).cpu().numpy())# append the raw logits!
+            all_preds.append(logits.cpu().numpy())
         
         all_targets.append(inputs["y"].cpu().numpy())
         all_cond.append(batch["cond"].cpu().numpy())
@@ -206,10 +215,12 @@ def evaluate(model, dataloader, device, args_dict, use_amp=False):
         print(f"{'='*60}\n")
         
     else:
-        # Classification metrics
-        metrics["accuracy"] = accuracy_score(all_targets, all_preds)
+        # Classification metrics are computed from class predictions (argmax of logits),
+        # while preserving raw logits in all_preds for downstream analysis/saving.
+        all_pred_labels = np.argmax(all_preds, axis=1)
+        metrics["accuracy"] = accuracy_score(all_targets, all_pred_labels)
         precision, recall, f1, support = precision_recall_fscore_support(
-            all_targets, all_preds, average='weighted', zero_division=0
+            all_targets, all_pred_labels, average='weighted', zero_division=0
         )
         metrics["precision"] = precision
         metrics["recall"] = recall
@@ -217,12 +228,10 @@ def evaluate(model, dataloader, device, args_dict, use_amp=False):
         
         # Per-class metrics
         precision_per_class, recall_per_class, f1_per_class, support_per_class = precision_recall_fscore_support(
-            all_targets, all_preds, average=None, zero_division=0
+            all_targets, all_pred_labels, average=None, zero_division=0
         )
-        
         # Confusion matrix
-        cm = confusion_matrix(all_targets, all_preds)
-        
+        cm = confusion_matrix(all_targets, all_pred_labels)
         print(f"\n{'='*60}")
         print(f"Classification Metrics:")
         print(f"{'='*60}")

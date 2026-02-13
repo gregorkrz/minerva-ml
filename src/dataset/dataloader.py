@@ -61,7 +61,6 @@ def get_class_counts(class_idx, label_idx_to_class_idx, files_truth_labels, trut
     class_counts = np.zeros(n_class)
     for file_idx in range(len(files_truth_labels)):
         labels = files_truth_labels[file_idx][:, truth_labels_idx] # labels contain 1's and 2's, rewrite them into 0's and 1's based on class_idx indices of 1 and 2 in there
-        # 'rewrite' labels in a way 
         labels = np.array([label_idx_to_class_idx[int(label.item())] for label in labels])
         class_counts += np.bincount(labels, minlength=n_class)
     return class_counts
@@ -81,8 +80,9 @@ class HEPTorchDataset(Dataset):
         max_particles=150,
         classes=None,
         regress_log=False,
-        classification_event_type=False, #  if True, it will classify the event type (1, 2, 3, 4, 7, 8)
-        classification_current=False # if True, it will classify the event current (1, 2)
+        classification_event_type=False, # If True, it will classify the event type (1, 2, 3, 4, 7, 8)
+        classification_current=False, # If True, it will classify the event current (1, 2)
+        classification_cc_1pi=False # If True, it will classify the event type [0, 1, 2]: 0=other, 1=CC pi+, 2=CC pi-
     ):
         """
         Args:
@@ -112,6 +112,7 @@ class HEPTorchDataset(Dataset):
         self.max_particles = max_particles
         self.classification_event_type = classification_event_type
         self.classification_current = classification_current
+        self.classification_cc_1pi = classification_cc_1pi
         if classification_event_type:
             self.class_idx = np.array([1, 2, 3, 4, 8]) # 5 classes for the classification task; TODO: make more flexible
             self.class_idx_map = {1: 0, 2: 1, 3: 2, 4: 3, 8: 4}
@@ -121,7 +122,12 @@ class HEPTorchDataset(Dataset):
         elif classification_current:
             self.class_idx = np.array([1, 2])
             self.class_idx_map = {1: 0, 2: 1}
-            self.class_counts = get_class_counts(self.class_idx, self.class_idx_map, self.files_truth_labels, -1)
+            self.class_counts = get_class_counts(self.class_idx, self.class_idx_map, self.files_truth_labels, 3)
+            self.class_weights = 1 / (self.class_counts / np.sum(self.class_counts))
+        elif classification_cc_1pi:
+            self.class_idx = np.array([0, 1, 2])
+            self.class_idx_map = {0: 0, 1: 1, 2: 2}
+            self.class_counts = get_class_counts(self.class_idx, self.class_idx_map, self.files_truth_labels, 4)
             self.class_weights = 1 / (self.class_counts / np.sum(self.class_counts))
         elif mode == "classification":
             raise ValueError("Invalid classification task")
@@ -149,15 +155,15 @@ class HEPTorchDataset(Dataset):
             valid_attention_mask = torch.cat([valid_attention_mask, torch.zeros(n_padding)], dim=0)
         else:
             raise ValueError("Data has more particles than max_particles")
-        
         sample = {}
-
         # Handle labels
         if self.mode == "classifier":
             if self.classification_event_type:
                 i = 1
             elif self.classification_current:
-                i = -1
+                i = 3
+            elif self.classification_cc_1pi:
+                i = 4
             else:
                 raise ValueError("Invalid classification task")
             label = self.files_truth_labels[file_idx][sample_idx, i]
@@ -206,6 +212,7 @@ def load_data(
     max_particles=33,
     classification_event_type=False,
     classification_current=False,
+    classification_cc_1pi=False,
 ):
     supported_datasets = ["minerva_1A", "minerva_1B", "minerva_1C", "minerva_1D", "minerva_1E", "minerva_1F",
     "minerva_1G", "minerva_1L", "minerva_1M", "minerva_1N", "minerva_1O", "minerva_1P"]
@@ -231,6 +238,7 @@ def load_data(
             max_particles=max_particles,
             classification_event_type=classification_event_type,
             classification_current=classification_current,
+            classification_cc_1pi=classification_cc_1pi,
         )
         loader = DataLoader(
             data,

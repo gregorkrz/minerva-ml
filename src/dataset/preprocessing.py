@@ -341,7 +341,7 @@ def get_event_repr_nested_tensor(muons, photons, blobs, prongs, global_features,
             n_to_keep = min(len(event_features), max_objects)
             event_features = event_features[event_features_idx_energy[:n_to_keep]]
         else:
-            assert event_features.shape[0] <= max_prongs + max_blobs + 2 + 1
+            assert event_features.shape[0] <= max_prongs + max_blobs + 2 + 1, f"Event features length {event_features.shape[0]} > max_prongs + max_blobs + 2 + 1 {max_prongs + max_blobs + 2 + 1}"
         data_nested.append(event_features)
     data_nested = torch.nested.nested_tensor(data_nested, layout=torch.jagged)
     torch.save({"data": data_nested, "truth_labels": truth_labels, "global_features": global_features}, output_file)
@@ -555,7 +555,34 @@ def get_global_features(master_ana_dev):
     return global_features
 
 
-def get_event_labels(master_ana_dev):
+def get_cc_pi_labels(mc_current, mc_part):
+    # Labels: 0=other, 1=CC pi+, 2=CC pi-
+    # Returns also the four-vectors of the MC pi+ or pi-
+    cc_events = np.where(mc_current == 1)[0]
+    other_mesons_piplus = [-211, 111, 311, -311, 321, -321]
+    other_mesons_piminus = [211, 111, 311, -311, 321, -321]
+    labels = np.zeros(len(mc_current), dtype=int)
+    pi_four_vectors = np.zeros((len(mc_current), 4))
+    
+    for i in range(len(cc_events)):
+        event_PDG = mc_part.data[mc_part.bounds[cc_events[i]]:mc_part.bounds[cc_events[i]+1]][:, 4].astype(int)
+        meson_filter = np.isin(event_PDG, other_mesons_piplus)
+        pion_idx = -1
+        if np.sum(event_PDG == 211) == 1 and np.sum(meson_filter) == 0:
+            labels[cc_events[i]] = 1
+            pion_idx = np.where(event_PDG == 211)[0][0]
+        meson_filter_piminus = np.isin(event_PDG, other_mesons_piminus)
+        if np.sum(event_PDG == -211) == 1 and np.sum(meson_filter_piminus) == 0:
+            labels[cc_events[i]] = 2
+            pion_idx = np.where(event_PDG == -211)[0][0]
+        else:
+            labels[cc_events[i]] = 0
+        if pion_idx != -1:
+            pi_four_vectors[cc_events[i], :] = mc_part.data[mc_part.bounds[cc_events[i]]:mc_part.bounds[cc_events[i]+1]][pion_idx, :4]
+    return labels, pi_four_vectors
+
+
+def get_event_labels(master_ana_dev, mc_part):
     incoming_E = master_ana_dev["mc_incomingE"].array().to_numpy()
     event_type = master_ana_dev["mc_intType"].array().to_numpy()
     current_type = master_ana_dev["mc_current"].array().to_numpy()
@@ -563,7 +590,12 @@ def get_event_labels(master_ana_dev):
     bad_muons = (muon_reco_energy < 0) | (np.isnan(muon_reco_energy))
     E_nu_true_over_reco = incoming_E / muon_reco_energy # learning a correction factor to the muon reco energy
     E_nu_true_over_reco[bad_muons] = -1
-    return np.stack([incoming_E, event_type, E_nu_true_over_reco, current_type], axis=1)
+    labels, pi_four_vectors = get_cc_pi_labels(current_type, mc_part)
+    scalar_labels = np.stack(
+        [incoming_E, event_type, E_nu_true_over_reco, current_type, labels],
+        axis=1,
+    )
+    return np.concatenate([scalar_labels, pi_four_vectors], axis=1)
 
 
 def get_event_collections(master_ana_dev):

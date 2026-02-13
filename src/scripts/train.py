@@ -7,6 +7,15 @@ It supports both regression and classification tasks with wandb logging and chec
 python -m src.scripts.train -bs 1024 --mode regression -name Train_Regression
 python -m src.scripts.train -bs 1024 --mode classifier -cc -name Train_CC 
 
+python -m src.scripts.train -bs 1024 --mode regression -name Train_Regression_SmallModel --d_model 64 --depth 3 --n_heads 4 --dropout 0.0 --attn_dropout 0.0
+python -m src.scripts.train -bs 1024 --mode classifier -cc -name Train_CC_SmallModel --d_model 32 --depth 3 --n_heads 4 --dropout 0.0 --attn_dropout 0.0
+
+
+python -m src.scripts.train -bs 1024 --mode classifier --classification_cc_1pi -name Train_CC1pi --d_model 128 --depth 4 --n_heads 4 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260210_CCpi_labels_split
+
+
+python -m src.scripts.train -bs 1024 --mode classifier --classification_cc_1pi -name Train_CC1pi --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260210_CCpi_labels_split
+
 
 """
 
@@ -50,6 +59,8 @@ def parse_args():
                         help="Classify event type (requires mode=classifier)")
     parser.add_argument("--classification_current", "-cc", action="store_true",
                         help="Classify event current (requires mode=classifier)")
+    parser.add_argument("--classification_cc_1pi", "-cc1pi", action="store_true",
+                        help="Classify CC 1pi (requires mode=classifier)")
     parser.add_argument("--use_cond", default=True, type=bool,
                         help="Use global/conditional features")
     parser.add_argument("--use_pid", type=bool, default=True,
@@ -151,6 +162,8 @@ def create_model(args, num_classes=None):
             num_classes = 5  # event types: 1, 2, 3, 4, 8 -> 5 classes
         elif args.classification_current:
             num_classes = 2  # current: 1, 2 -> 2 classes
+        elif args.classification_cc_1pi:
+            num_classes = 3  # CC 1pi: 0, 1, 2 -> 3 classes
         else:
             raise ValueError("Must specify classification_event_type or classification_current")
     
@@ -357,6 +370,7 @@ def train(args):
         max_particles=args.max_particles,
         classification_event_type=args.classification_event_type,
         classification_current=args.classification_current,
+        classification_cc_1pi=args.classification_cc_1pi,
     )
     
     val_loader, _ = load_data(
@@ -374,6 +388,7 @@ def train(args):
         max_particles=args.max_particles,
         classification_event_type=args.classification_event_type,
         classification_current=args.classification_current,
+        classification_cc_1pi=args.classification_cc_1pi,
     )
     
     print(f"Train samples: {len(train_loader.dataset)}")

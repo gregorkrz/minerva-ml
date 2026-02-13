@@ -18,12 +18,12 @@ parser.add_argument("--val-ratio", type=float, required=False, default=0.1)
 parser.add_argument("--test-ratio", type=float, required=False, default=0.1)
 parser.add_argument("--seed", type=int, required=False, default=42)
 parser.add_argument("--only-save-result", action="store_true", required=False, default=False)
-# If set to true, only save the result.pkl file and don't save the train, val, test files.
+# If set to True, only save the result.pkl file and don't save the train, val, test files.
 
 args = parser.parse_args()
 
 def filter_weird_events(truth_labels):
-    # Only keep events where the interaction type is [1, 2, 3, 4, 8] (the other events are weird)
+    # Only keep events where the interaction type is [1, 2, 3, 4, 8] (the other events are weird).
     allowed_event_types = torch.tensor([1, 2, 3, 4, 8])
     passing_idx = torch.where(torch.isin(truth_labels.int(), allowed_event_types))[0]
     return passing_idx

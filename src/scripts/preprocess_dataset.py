@@ -51,7 +51,8 @@ def process_single_root_file(playlist, root_file, dataset_path, output_dir, use_
             prongs = get_dense(prong_keys, master_ana_dev, filter_prongs=True)
             muons = remove_overflows(muons)
             global_features = get_global_features(master_ana_dev)
-            truth_labels = get_event_labels(master_ana_dev)
+            mc_part = get_dense(mc_part_keys, master_ana_dev)
+            truth_labels = get_event_labels(master_ana_dev, mc_part)
             max_blobs = 20 if use_max_blobs_and_prongs else -1
             max_prongs = 10 if use_max_blobs_and_prongs else -1 # Max. number of tokens per event is then 20(blobs)+10(prongs)+2(photons)+1(muons)=33
             n_events_written = get_event_repr_nested_tensor(
