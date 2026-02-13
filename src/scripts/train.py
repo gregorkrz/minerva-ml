@@ -17,6 +17,9 @@ python -m src.scripts.train -bs 1024 --mode classifier --classification_cc_1pi -
 python -m src.scripts.train -bs 1024 --mode classifier --classification_cc_1pi -name Train_CC1pi --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260210_CCpi_labels_split
 
 
+# Binary classification: has event > 1 charged pion produced?
+python -m src.scripts.train -bs 2048 --mode classifier -npi -name Train_MultiPi --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260213_split --num_workers 2
+
 """
 
 import argparse
@@ -31,7 +34,7 @@ import wandb
 from tqdm import tqdm
 import numpy as np
 
-from src.dataset.dataloader import load_data
+from src.dataset.dataloader import load_data, Task
 from src.models.vit import PointGlobalMixedViT, PointGlobalMixedViTConfig
 
 
@@ -61,6 +64,8 @@ def parse_args():
                         help="Classify event current (requires mode=classifier)")
     parser.add_argument("--classification_cc_1pi", "-cc1pi", action="store_true",
                         help="Classify CC 1pi (requires mode=classifier)")
+    parser.add_argument("--classification_n_pions", "-npi", action="store_true",
+                        help="Classify number of pions (requires mode=classifier)")
     parser.add_argument("--use_cond", default=True, type=bool,
                         help="Use global/conditional features")
     parser.add_argument("--use_pid", type=bool, default=True,
@@ -153,19 +158,41 @@ def get_lr_schedule(optimizer, warmup_steps, max_steps):
     
     return optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
-
-def create_model(args, num_classes=None):
-    """Create PointGlobalMixedViT model."""
-    # Determine number of output classes for classification
-    if args.mode == "classifier":
+def create_task(args):
+    if args.mode == "regression":
+        class_label_idx = None
+        return Task(type="regression")
+    elif args.mode == "classifier":
         if args.classification_event_type:
-            num_classes = 5  # event types: 1, 2, 3, 4, 8 -> 5 classes
+            class_label_idx = 1
+            class_idx = [1, 2, 3, 4, 8]
+            class_idx_map = {1: 0, 2: 1, 3: 2, 4: 3, 8: 4}
         elif args.classification_current:
-            num_classes = 2  # current: 1, 2 -> 2 classes
+            class_label_idx = 3
+            class_idx = [1, 2]
+            class_idx_map = {1: 0, 2: 1}
         elif args.classification_cc_1pi:
-            num_classes = 3  # CC 1pi: 0, 1, 2 -> 3 classes
-        else:
-            raise ValueError("Must specify classification_event_type or classification_current")
+            class_label_idx = 4
+            class_idx = [0, 1, 2]
+            class_idx_map = {0: 0, 1: 1, 2: 2}
+        elif args.classification_n_pions:
+            class_label_idx = 7
+            class_idx = [0, 1]
+            class_idx_map = {0: 0, 1: 1}
+        return Task(type="classifier", classification_event_type=args.classification_event_type, 
+            classification_current=args.classification_current, classification_cc_1pi=args.classification_cc_1pi,
+            classification_n_pions=args.classification_n_pions, class_idx=class_idx, class_idx_map=class_idx_map, class_label_idx=class_label_idx)
+    else:
+        raise ValueError("Invalid mode")
+
+def create_model(args, task: Task):
+    """Create PointGlobalMixedViT model."""
+    if task.type == "classifier":
+        num_classes = len(task.class_idx)
+    elif task.type == "regression":
+        num_classes = 1
+    else:
+        raise ValueError("Invalid task type")
     
     # Point categorical features (PID if used)
     point_cat_num_classes = [8] if args.use_pid else []
@@ -356,21 +383,22 @@ def train(args):
     
     # Create dataloaders
     print("Creating dataloaders...")
+    task = create_task(args)
     train_loader, class_weights = load_data(
         dataset_name=args.dataset_name,
         path=args.data_path,
         batch=args.batch_size,
         dataset_type="train",
-        mode=args.mode,
+        task=task,
         use_cond=args.use_cond,
         use_pid=args.use_pid,
         pid_idx=args.pid_idx,
         distributed=False,
         shuffle=True,
         max_particles=args.max_particles,
-        classification_event_type=args.classification_event_type,
-        classification_current=args.classification_current,
-        classification_cc_1pi=args.classification_cc_1pi,
+        num_workers=args.num_workers,
+        rank=0,
+        size=1,
     )
     
     val_loader, _ = load_data(
@@ -378,17 +406,16 @@ def train(args):
         path=args.data_path,
         batch=args.batch_size,
         dataset_type="val",
-        mode=args.mode,
+        task=task,
         use_cond=args.use_cond,
         use_pid=args.use_pid,
         pid_idx=args.pid_idx,
         num_workers=args.num_workers,
-        distributed=False,
+        rank=0,
+        size=1,
+        distributed=True,
         shuffle=False,
         max_particles=args.max_particles,
-        classification_event_type=args.classification_event_type,
-        classification_current=args.classification_current,
-        classification_cc_1pi=args.classification_cc_1pi,
     )
     
     print(f"Train samples: {len(train_loader.dataset)}")
@@ -396,23 +423,18 @@ def train(args):
     
     # Create model
     print("Creating model...")
-    model = create_model(args)
+    model = create_model(args, task)
     model = model.to(device)
     
     # Count parameters
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Model parameters: {n_params:,}")
-    
+    task.class_weights = class_weights
     # Setup loss function
-    if args.mode == "regression":
+    if task.type == "regression":
         criterion = nn.MSELoss()
     else:
-        if class_weights is not None:
-            # for classification tasks
-            class_weights = torch.tensor(class_weights, dtype=torch.float32).to(device)
-            criterion = nn.CrossEntropyLoss(weight=class_weights)
-        else:
-            criterion = nn.CrossEntropyLoss()
+        criterion = nn.CrossEntropyLoss(weight=torch.tensor(task.class_weights, device=device, dtype=torch.float32))
     # Calculate number of epochs needed to reach max_steps
     
     steps_per_epoch = len(train_loader)
@@ -659,7 +681,7 @@ def train(args):
                 # Evaluation
                 if step % args.eval_interval == 0:
                     epoch_pbar.write(f"\nRunning evaluation at step {step}...")
-                    eval_metrics = evaluate(model, val_loader, device, args, class_weights, args.use_amp)
+                    eval_metrics = evaluate(model, val_loader, device, args, torch.tensor(task.class_weights, device=device, dtype=torch.float32), args.use_amp)
                     
                     epoch_pbar.write(f"Eval loss: {eval_metrics['eval_loss']:.4f}")
                     # save as best_model.pt if val loss is lower
@@ -672,10 +694,9 @@ def train(args):
                     if not args.no_wandb:
                         wandb.log(eval_metrics, step=step)
                         wandb.log({"best_val_loss": best_val_loss}, step=step)
-        
     # Final evaluation
     print("\nRunning final evaluation...")
-    eval_metrics = evaluate(model, val_loader, device, args, class_weights, args.use_amp)
+    eval_metrics = evaluate(model, val_loader, device, args, torch.tensor(task.class_weights, device=device, dtype=torch.float32), args.use_amp)
     print(f"Final eval loss: {eval_metrics['eval_loss']:.4f}")
     
     if not args.no_wandb:

@@ -9,8 +9,21 @@ from urllib.parse import urljoin
 import numpy as np
 from pathlib import Path
 import torch._dynamo
+from dataclasses import dataclass, field
 
-
+@dataclass
+class Task:
+    type: str = field(default="regression") # "regression" or "classifier"
+    regress_log: bool = field(default=True) # If True, it will apply log transformation to the regression target
+    classification_event_type: bool = field(default=False) # If True, it will classify the event type (1, 2, 3, 4, 7, 8)
+    classification_current: bool = field(default=False) # If True, it will classify the event current (1, 2)
+    classification_cc_1pi: bool = field(default=False) # If True, it will classify the event type [0, 1, 2]: 0=other, 1=CC pi+, 2=CC pi-
+    classification_n_pions: bool = field(default=False) # If True, it will classify whether the event is multi-pion or not (>1 pion produced)
+    class_idx: list[int] = field(default=None) # List of class indices for the classification task # e.g. [1, 2, 3] means 3 classes: 1, 2, 3
+    class_idx_map: dict[int, int] = field(default=None) # Map of class indices to class labels
+    class_label_idx: int = field(default=None) # Index of the label in the truth_labels tensor for the classification task
+    class_weights: torch.Tensor = field(default=None) # Weights for the classification task
+    
 def collate_point_cloud(batch):
     """
     Collate function for point clouds and labels with truncation performed per batch.
@@ -75,14 +88,9 @@ class HEPTorchDataset(Dataset):
         use_pid=True,
         use_add=False,
         num_add=4,
-        mode="",
         nevts=-1,
         max_particles=150,
-        classes=None,
-        regress_log=False,
-        classification_event_type=False, # If True, it will classify the event type (1, 2, 3, 4, 7, 8)
-        classification_current=False, # If True, it will classify the event current (1, 2)
-        classification_cc_1pi=False # If True, it will classify the event type [0, 1, 2]: 0=other, 1=CC pi+, 2=CC pi-
+        task: Task = Task(),
     ):
         """
         Args:
@@ -97,7 +105,6 @@ class HEPTorchDataset(Dataset):
         self.pid_idx = pid_idx
         self.use_pid = use_pid
         self.folder = folder
-        self.regress_log = regress_log
         self.file_paths = sorted(list([os.path.join(folder, file) for file in os.listdir(folder) if file.endswith('.pb')]))
         self.files = [torch.load(file, weights_only=True, mmap=True) for file in self.file_paths]
         self.files_n_events = np.array([len(file["data"].offsets())-1 for file in self.files]) # -1 because the last offset is the total number of events
@@ -107,30 +114,16 @@ class HEPTorchDataset(Dataset):
         # truth_labels and global_features are regular tensors, not nested
         self.files_truth_labels = [file["truth_labels"] for file in self.files]
         self.files_global_features = [file["global_features"] for file in self.files]
-        self.mode = mode
         self.nevts = int(nevts)
         self.max_particles = max_particles
-        self.classification_event_type = classification_event_type
-        self.classification_current = classification_current
-        self.classification_cc_1pi = classification_cc_1pi
-        if classification_event_type:
-            self.class_idx = np.array([1, 2, 3, 4, 8]) # 5 classes for the classification task; TODO: make more flexible
-            self.class_idx_map = {1: 0, 2: 1, 3: 2, 4: 3, 8: 4}
-            # Estimate the class weights
-            self.class_counts = get_class_counts(self.class_idx, self.class_idx_map, self.files_truth_labels, 1)
+        self.task = task
+        if self.task.type == "classifier":
+            self.class_counts = get_class_counts(self.task.class_idx, self.task.class_idx_map, self.files_truth_labels, self.task.class_label_idx)
             self.class_weights = 1 / (self.class_counts / np.sum(self.class_counts))
-        elif classification_current:
-            self.class_idx = np.array([1, 2])
-            self.class_idx_map = {1: 0, 2: 1}
-            self.class_counts = get_class_counts(self.class_idx, self.class_idx_map, self.files_truth_labels, 3)
-            self.class_weights = 1 / (self.class_counts / np.sum(self.class_counts))
-        elif classification_cc_1pi:
-            self.class_idx = np.array([0, 1, 2])
-            self.class_idx_map = {0: 0, 1: 1, 2: 2}
-            self.class_counts = get_class_counts(self.class_idx, self.class_idx_map, self.files_truth_labels, 4)
-            self.class_weights = 1 / (self.class_counts / np.sum(self.class_counts))
-        elif mode == "classification":
-            raise ValueError("Invalid classification task")
+        elif self.task.type == "regression":
+            self.regress_log = self.task.regress_log
+        else:
+            raise ValueError("Invalid task type")
 
     def __len__(self):
         if self.nevts > 0:
@@ -157,26 +150,18 @@ class HEPTorchDataset(Dataset):
             raise ValueError("Data has more particles than max_particles")
         sample = {}
         # Handle labels
-        if self.mode == "classifier":
-            if self.classification_event_type:
-                i = 1
-            elif self.classification_current:
-                i = 3
-            elif self.classification_cc_1pi:
-                i = 4
-            else:
-                raise ValueError("Invalid classification task")
+        if self.task.type == "classifier":
+            i = self.task.class_label_idx
+            
             label = self.files_truth_labels[file_idx][sample_idx, i]
             label_int = int(label.item()) if torch.is_tensor(label) else int(label)
-            sample["y"] = torch.tensor(self.class_idx_map[label_int], dtype=torch.long)
-        elif self.mode == "regression":
-            label = torch.log(self.files_truth_labels[file_idx][sample_idx, 0] / 1000.0 + 1e-6) # regression target: Enu in GeV (TODO: change to a better quantity to regress)
+            sample["y"] = torch.tensor(self.task.class_idx_map[label_int], dtype=torch.long)
+        elif self.task.type == "regression":
+            label = torch.log(self.files_truth_labels[file_idx][sample_idx, 0] / 1000.0 + 1e-6) if self.task.regress_log else self.files_truth_labels[file_idx][sample_idx, 0] / 1000.0
             label_val = label.item() if torch.is_tensor(label) else label
             sample["y"] = torch.tensor(label_val, dtype=torch.float32)
         else:
-            # Default: return first truth label
-            label = self.files_truth_labels[file_idx][sample_idx, 0]
-            sample["y"] = label.clone().detach().float() if torch.is_tensor(label) else torch.tensor(label, dtype=torch.float32)
+            raise ValueError("Invalid task type")
         
         if self.use_cond: # Use global features
             cond = self.files_global_features[file_idx][sample_idx]
@@ -205,14 +190,10 @@ def load_data(
     rank=0,
     size=1,
     clip_inputs=False,
-    mode="",
     shuffle=True,
     nevts=-1,
-    regress_log=False,
     max_particles=33,
-    classification_event_type=False,
-    classification_current=False,
-    classification_cc_1pi=False,
+    task: Task = Task(),
 ):
     supported_datasets = ["minerva_1A", "minerva_1B", "minerva_1C", "minerva_1D", "minerva_1E", "minerva_1F",
     "minerva_1G", "minerva_1L", "minerva_1M", "minerva_1N", "minerva_1O", "minerva_1P"]
@@ -220,11 +201,9 @@ def load_data(
         raise ValueError(
             f"Dataset '{dataset_name}' not supported. Choose from {supported_datasets}."
         )
-
     if dataset_name in supported_datasets:
         dataset_playlist = dataset_name.split("_")[1]
         dataset_path = Path(path) / dataset_playlist / dataset_type
-    
         data = HEPTorchDataset(
             folder=str(dataset_path),
             use_cond=use_cond,
@@ -232,13 +211,9 @@ def load_data(
             pid_idx=pid_idx,
             use_add=use_add,
             num_add=num_add,
-            mode=mode,
             nevts=nevts,
-            regress_log=regress_log,
             max_particles=max_particles,
-            classification_event_type=classification_event_type,
-            classification_current=classification_current,
-            classification_cc_1pi=classification_cc_1pi,
+            task=task,
         )
         loader = DataLoader(
             data,
@@ -250,6 +225,9 @@ def load_data(
             drop_last=False,
             collate_fn=collate_point_cloud,
         )
-        return loader, data.class_weights if hasattr(data, "class_weights") else None
+        if task.type == "classifier":
+            return loader, data.class_weights
+        else:
+            return loader, None
     else:
         raise ValueError(f"Dataset '{dataset_name}' not supported. Choose from {supported_datasets}.")
