@@ -597,6 +597,45 @@ def get_cc_pi_labels(mc_current, mc_part):
             pi_four_vectors[cc_events[i], :] = mc_part.data[mc_part.bounds[cc_events[i]]:mc_part.bounds[cc_events[i]+1]][pion_idx, :4]
     return labels, pi_four_vectors
 
+pdg_masses = {
+    2212: 938.272,   # proton
+    -2212: 938.272,  # anti-proton
+    211: 139.570,    # pi+
+    -211: 139.570,   # pi-
+    321: 493.677,    # K+
+    -321: 493.677,   # K-
+    2112: 939.565,   # neutron (will be excluded)
+    13: 105.658,     # mu-
+    -13: 105.658,    # mu+
+    111: 134.9766,   # pi0
+    311: 497.6,      # K0
+    -311: 497.6,     # K0
+    11: 0.511,       # e-
+    -11: 0.511,      # e+
+    22: 0,
+    130: 493.677,
+    -2112: 939.565,
+}
+
+# Particles to exclude: muons (±13), neutrons (2112), neutrinos (12, 14, 16, -12, -14, -16)
+#excluded_pdgs = {13, -13, 2112, 12, -12, 14, -14, 16, -16, 3122, -3122, 3222, -3222, 3112, -3112, -2112, 3212, -3212}
+pdg_kinetic_energy = {2212, 211, -211, 2112, -2112}
+pdg_total_energy = {22, 11, -11, 111, -111}
+
+
+def get_E_available_true(mc_part):
+    E_available_true = np.zeros(len(mc_part.n))
+    for i in range(len(mc_part.n)):
+        event_PDG = mc_part.data[mc_part.bounds[i]:mc_part.bounds[i+1]][:, 4].astype(int)
+        event_E = mc_part.data[mc_part.bounds[i]:mc_part.bounds[i+1]][:, 3]
+        mask_kinetic_energy = np.array([pid in pdg_kinetic_energy for pid in event_PDG])
+        mask_total_energy = np.array([pid in pdg_total_energy for pid in event_PDG])
+        T = event_E[mask_kinetic_energy] - np.array([pdg_masses[int(pdg)] for pdg in event_PDG[mask_kinetic_energy]])
+        E_other_particles = event_E[mask_total_energy]
+        E_available_true[i] = np.sum(T) + np.sum(E_other_particles)
+    E_available_true[E_available_true < 0] = 0
+    return E_available_true
+
 
 def get_event_labels(master_ana_dev, mc_part):
     incoming_E = master_ana_dev["mc_incomingE"].array().to_numpy()
@@ -608,8 +647,9 @@ def get_event_labels(master_ana_dev, mc_part):
     E_nu_true_over_reco[bad_muons] = -1
     labels, pi_four_vectors = get_cc_pi_labels(current_type, mc_part)
     n_pi_plus, n_pi_minus, is_multi_pion = get_n_pions_label(current_type, mc_part)
+    e_avail_true = get_E_available_true(mc_part)
     scalar_labels = np.stack(
-        [incoming_E, event_type, E_nu_true_over_reco, current_type, labels, n_pi_plus, n_pi_minus, is_multi_pion],
+        [incoming_E, event_type, E_nu_true_over_reco, current_type, labels, n_pi_plus, n_pi_minus, is_multi_pion, e_avail_true],
         axis=1,
     )
     return np.concatenate([scalar_labels, pi_four_vectors], axis=1)

@@ -16,7 +16,6 @@ python -m src.scripts.train -bs 1024 --mode classifier --classification_cc_1pi -
 
 python -m src.scripts.train -bs 1024 --mode classifier --classification_cc_1pi -name Train_CC1pi --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260210_CCpi_labels_split
 
-
 # Binary classification: has event > 1 charged pion produced?
 python -m src.scripts.train -bs 2048 --mode classifier -npi -name Train_MultiPi --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260213_split --num_workers 2
 
