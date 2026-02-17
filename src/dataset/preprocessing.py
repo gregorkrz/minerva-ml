@@ -46,8 +46,8 @@ def get_dense(keys, master_ana_dev_frame, filter_prongs=False):
 
 def get_photons(master_ana_dev_frame):
     # slightly special treatment for gamma1 and gamma2
-    gamma1_keys = ["gamma1_px", "gamma1_py", "gamma1_pz", "gamma1_E"]
-    gamma2_keys = ["gamma2_px", "gamma2_py", "gamma2_pz", "gamma2_E"]
+    gamma1_keys = ["gamma1_px", "gamma1_py", "gamma1_pz", "gamma1_E", "gamma1_time", "gamma1_dEdx"]
+    gamma2_keys = ["gamma2_px", "gamma2_py", "gamma2_pz", "gamma2_E", "gamma2_time", "gamma2_dEdx"]
     
     # Get gamma1 and gamma2 arrays
     gamma_arrays_1 = [master_ana_dev_frame[key].array() for key in gamma1_keys]
@@ -69,26 +69,29 @@ def get_photons(master_ana_dev_frame):
     
     # Build photon data in event order
     photon_four_vectors = np.zeros((sum(n_per_event), 4), dtype=np.float32)
+    photon_dEdx_and_timing = np.zeros((sum(n_per_event), 2), dtype=np.float32)
     current_idx = 0
     current_idx_gamma1 = 0
     current_idx_gamma2 = 0
     for i in range(len(n_per_event)):
-        photon_four_vectors[current_idx:current_idx+n_gamma1_per_event[i], :] = gamma_arrays_1[current_idx_gamma1:current_idx_gamma1+n_gamma1_per_event[i]]
+        photon_four_vectors[current_idx:current_idx+n_gamma1_per_event[i], :] = gamma_arrays_1[current_idx_gamma1:current_idx_gamma1+n_gamma1_per_event[i], :4]
+        photon_dEdx_and_timing[current_idx:current_idx+n_gamma1_per_event[i], :] = gamma_arrays_1[current_idx_gamma1:current_idx_gamma1+n_gamma1_per_event[i], -2:]
         current_idx += n_gamma1_per_event[i]
         # the line below fails, print debugging info - indices, ...
-        photon_four_vectors[current_idx:current_idx+n_gamma2_per_event[i], :] = gamma_arrays_2[current_idx_gamma2:current_idx_gamma2+n_gamma2_per_event[i]]
+        photon_four_vectors[current_idx:current_idx+n_gamma2_per_event[i], :] = gamma_arrays_2[current_idx_gamma2:current_idx_gamma2+n_gamma2_per_event[i], :4]
+        photon_dEdx_and_timing[current_idx:current_idx+n_gamma2_per_event[i], :] = gamma_arrays_2[current_idx_gamma2:current_idx_gamma2+n_gamma2_per_event[i], -2:]
         current_idx_gamma1 += n_gamma1_per_event[i]
         current_idx_gamma2 += n_gamma2_per_event[i]
         current_idx += n_gamma2_per_event[i]
     # Create event boundaries
     event_boundaries = np.zeros(len(n_per_event) + 1, dtype=np.int32)
     event_boundaries[1:] = np.cumsum(n_per_event)
-    photon_four_vectors[np.isnan(photon_four_vectors)] = 0
-    return DenseCollection(bounds=event_boundaries, data=photon_four_vectors, n=n_per_event, keys=gamma1_keys, column_widths=[1, 1, 1, 1])
+    return DenseCollection(bounds=event_boundaries, data=np.concatenate([photon_four_vectors, photon_dEdx_and_timing], axis=1), n=n_per_event, keys=gamma1_keys, column_widths=[1, 1, 1, 1, 1, 1])
+
 
 def get_muons(master_ana_dev_frame, only_keep_minos_matched=True):
     # Slightly special treatment for muons
-    muon_keys = ["muon_corrected_p", "muon_theta", "muon_phi", "muon_thetaX", "muon_thetaY", "muon_fuzz_energy", "muon_iso_blobs_energy", "MasterAnaDev_muon_E", "MasterAnaDev_muon_Px", "MasterAnaDev_muon_Py", "MasterAnaDev_muon_Pz"]
+    muon_keys = ["muon_corrected_p", "muon_theta", "muon_phi", "muon_thetaX", "muon_thetaY", "muon_fuzz_energy", "muon_iso_blobs_energy", "MasterAnaDev_muon_E", "MasterAnaDev_muon_Px", "MasterAnaDev_muon_Py", "MasterAnaDev_muon_Pz", "muon_trackVertexTime"]
     # filter out cases where muon_corrected_p[:, 0] == -999 and muon_corrected_p[:, 1]] == -999
     muon_arrays = [master_ana_dev_frame[key].array() for key in muon_keys]
     if only_keep_minos_matched:
@@ -102,7 +105,7 @@ def get_muons(master_ana_dev_frame, only_keep_minos_matched=True):
     n_muon_per_event = mask.to_numpy().astype(np.int32)
     # now put the muon_arrays in a dense matrix + make an index tensor where i and i+1 elements point to event boundaries of ith event
     muon_matrix = np.zeros((len(muon_arrays[0]), len(muon_keys)+3), dtype=np.float32)
-    column_widths = [4, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+    column_widths = [4, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
     start_idx = 0
     for i, arr in enumerate(muon_arrays):
         if column_widths[i] == 1:
@@ -112,8 +115,9 @@ def get_muons(master_ana_dev_frame, only_keep_minos_matched=True):
         start_idx += column_widths[i]
     muon_event_boundaries = np.zeros(len(n_muon_per_event) + 1, dtype=np.int32)
     muon_event_boundaries[1:] = np.cumsum(n_muon_per_event)
-    # Use: mc_part_event_boundaries and mc_part_matrix
+    # set nans to 0
     muon_matrix[np.isnan(muon_matrix)] = 0
+    # Use: mc_part_event_boundaries and mc_part_matrix
     return DenseCollection(bounds=muon_event_boundaries, data=muon_matrix, n=n_muon_per_event, keys=muon_keys, column_widths=column_widths)
 
 def remove_overflows(coll: DenseCollection):
@@ -193,7 +197,7 @@ def convert_four_momentum(four_momentum): # convert [px, py, pz, E] to eta, phi,
     return features
 
 
-def aggregate_low_energy_blobs_from_four_momentum(blob_four_momentum, blob_pid, n_keep=20, aggregate_pid=7):
+def aggregate_low_energy_blobs_from_four_momentum(blob_four_momentum, blob_pid, blob_additonal_info, n_keep=20, aggregate_pid=7):
     """
     Takes the N highest-energy blobs and aggregates the rest into a single composite blob.
     This version works with four-momentum directly (before convert_four_momentum transformation).
@@ -203,6 +207,7 @@ def aggregate_low_energy_blobs_from_four_momentum(blob_four_momentum, blob_pid, 
         blob_pid: array of shape (n_blobs,) with PID values
         n_keep: number of highest-energy blobs to keep individually
         aggregate_pid: PID to assign to the aggregated blob (default: 7)
+        blob_additonal_info: array of shape (n_blobs, 5) with [dE/dx, x, y, z, t]. Will be averaged over the aggregated blobs.
     
     Returns:
         aggregated_four_momentum: array of shape (min(n_keep+1, n_blobs), 4)
@@ -212,29 +217,35 @@ def aggregate_low_energy_blobs_from_four_momentum(blob_four_momentum, blob_pid, 
     
     # If we have fewer blobs than n_keep, return as-is
     if n_blobs <= n_keep:
-        return blob_four_momentum, blob_pid
+        return blob_four_momentum, blob_pid, blob_additonal_info
     
     # Sort by energy (column 3 is E)
     energy_idx = blob_four_momentum[:, 3].argsort()[::-1]  # Descending order
     sorted_four_momentum = blob_four_momentum[energy_idx]
     sorted_pid = blob_pid[energy_idx]
-    
+    sorted_additional_info = blob_additonal_info[energy_idx]
     # Keep top N
     if len(sorted_four_momentum) <= n_keep:
         # return max. n_keep blobs
-        return sorted_four_momentum, sorted_pid
+        return sorted_four_momentum, sorted_pid, sorted_additional_info
     # Otherwise, keep n_keep-1 blobs and aggregate the rest
     high_energy_four_momentum = sorted_four_momentum[:n_keep-1]
     high_energy_pid = sorted_pid[:n_keep-1]
+    high_energy_additional_info = sorted_additional_info[:n_keep-1]
     low_energy_four_momentum = sorted_four_momentum[n_keep-1:]
-    # sum the low-energy four-momenta
+    low_energy_additional_info = sorted_additional_info[n_keep-1:]
+    # Sum the low-energy four-momenta
     aggregated_four_momentum = np.sum(low_energy_four_momentum, axis=0, keepdims=True)
+    aggregated_additional_info = np.mean(low_energy_additional_info, axis=0, keepdims=True)
     aggregated_pid = np.array([aggregate_pid], dtype=blob_pid.dtype)
-    return np.vstack([high_energy_four_momentum, aggregated_four_momentum]), np.concatenate([high_energy_pid, aggregated_pid])
+    return np.vstack([high_energy_four_momentum, aggregated_four_momentum]), np.concatenate([high_energy_pid, aggregated_pid]), np.concatenate([high_energy_additional_info, aggregated_additional_info])
 
+
+def preprocess_coords(coord):
+    return coord / 10000.0
 
 def get_event_repr_nested_tensor(muons, photons, blobs, prongs, global_features, truth_labels, output_file, max_objects=150,
-        max_blobs=-1, max_prongs=-1):
+                                 max_blobs=-1, max_prongs=-1):
     """
     Convert event data to a nested tensor format.
     
@@ -256,6 +267,22 @@ def get_event_repr_nested_tensor(muons, photons, blobs, prongs, global_features,
 
     """
     muon_four_momentum = muons.data[:, :4]
+
+    muon_time = preprocess_coords(muons.data[:, -1])
+    photon_time = preprocess_coords(photons.data[:, -2])
+    blob_time = preprocess_coords(blobs.data[:, 3])
+    blob_coords = preprocess_coords(blobs.data[:, :3])
+    prong_time = preprocess_coords(prongs.data[:, 3])
+    prong_coords = preprocess_coords(prongs.data[:, :3])
+    photon_dedx = photons.data[:, -1]
+    prong_dedx = prongs.data[:, -1]
+    # now put this in additional features of each category. they should have shape of [n_particles, 5]. Put zeros for muon dedx, blob dedx, and muon and photon coords.
+    # [dE/dx, x, y, z, t]
+    muon_additional_info = np.concatenate([np.zeros((len(muon_time), 4)), muon_time[:, np.newaxis]], axis=1)
+    photon_additional_info = np.concatenate([photon_dedx[:, np.newaxis], np.zeros((len(photon_time), 3)), photon_time[:, np.newaxis]], axis=1)
+    blob_additional_info = np.concatenate([np.zeros((len(blob_time), 1)), blob_coords, blob_time[:, np.newaxis]], axis=1)
+    prong_additional_info = np.concatenate([prong_dedx[:, np.newaxis], prong_coords, prong_time[:, np.newaxis]], axis=1)
+
     photon_four_momentum = photons.data[:, :4]
     blob_four_momentum = blobs.data[:, [0, 1, 2, 5]].copy() # really this is [x, y, z, E]
     # Adjust blob x, y, z such that we assume a massless particle originating from the origin
@@ -264,7 +291,7 @@ def get_event_repr_nested_tensor(muons, photons, blobs, prongs, global_features,
     blob_norm = np.where(blob_norm > 1e-6, blob_norm, 1.0)  # Avoid division by zero
     blob_four_momentum[:, 0:3] = (blob_four_momentum[:, 0:3] / blob_norm) * blob_four_momentum[:, 3:4]
     prong_four_momentum = prongs.data[:, 4:8]
-    prong_PID = prongs.data[:, -1]
+    prong_PID = prongs.data[:, -2]
     # Our PID hardcoded:
     # muon = 0, photon = 1, blob = 2 (no PID), prong PIDs: 3=3, 8=4, 13=5, aggregated_blob = 6, aggregated_prong = 7,
     # Convert prong_pid according to the above mapping - for now, hardcoded
@@ -281,13 +308,11 @@ def get_event_repr_nested_tensor(muons, photons, blobs, prongs, global_features,
     muon_pid = np.zeros(len(muon_four_momentum), dtype=np.int32)
     photon_pid = np.ones(len(photon_four_momentum), dtype=np.int32)
     blob_pid = np.ones(len(blob_four_momentum), dtype=np.int32) * 2 # Not real PID!
-    
     # Convert muon, photon, and prong features at once (more efficient)
     # Note: We'll handle blob features per-event to enable aggregation
     muon_features = np.concatenate([convert_four_momentum(muon_four_momentum), muon_pid[:, np.newaxis]], axis=1)
     photon_features = np.concatenate([convert_four_momentum(photon_four_momentum), photon_pid[:, np.newaxis]], axis=1)
     #prong_features = np.concatenate([convert_four_momentum(prong_four_momentum), prong_pid[:, np.newaxis]], axis=1)
-
     # Get number of events
     N_events = len(muons.n)
     assert N_events == len(photons.n) == len(blobs.n) == len(prongs.n)
@@ -295,6 +320,7 @@ def get_event_repr_nested_tensor(muons, photons, blobs, prongs, global_features,
     
     file_exists = os.path.exists(output_file)
     data_nested = []
+    data_nested_pos_and_timing = [] # Additional info: [<dE/dx>, x, y, z, t] (or zeros where not applicable)
 
     if file_exists:
         raise ValueError(f"File {output_file} already exists")
@@ -302,38 +328,47 @@ def get_event_repr_nested_tensor(muons, photons, blobs, prongs, global_features,
         if event_idx % 1000 == 0:
             print(f"Processed events {event_idx} to {event_idx+1000} / {N_events}")
         muon_features_event = muon_features[muons.bounds[event_idx]:muons.bounds[event_idx+1]]
+        muon_additional_info_event = muon_additional_info[muons.bounds[event_idx]:muons.bounds[event_idx+1]]
         photon_features_event = photon_features[photons.bounds[event_idx]:photons.bounds[event_idx+1]]
+        photon_additional_info_event = photon_additional_info[photons.bounds[event_idx]:photons.bounds[event_idx+1]]
         #prong_features_event = prong_features[prongs.bounds[event_idx]:prongs.bounds[event_idx+1]]
         prong_four_momentum_event = prong_four_momentum[prongs.bounds[event_idx]:prongs.bounds[event_idx+1]]
         prong_pid_event = prong_pid[prongs.bounds[event_idx]:prongs.bounds[event_idx+1]]
+        prong_additional_info_event = prong_additional_info[prongs.bounds[event_idx]:prongs.bounds[event_idx+1]]
         # Handle blobs with aggregation
         blob_four_momentum_event = blob_four_momentum[blobs.bounds[event_idx]:blobs.bounds[event_idx+1]]
         blob_pid_event = blob_pid[blobs.bounds[event_idx]:blobs.bounds[event_idx+1]]
+        blob_additional_info_event = blob_additional_info[blobs.bounds[event_idx]:blobs.bounds[event_idx+1]]
         if max_blobs > 0:
             # Aggregate low-energy blobs (keep top 20, combine rest with PID=6)
-            four_momentum_blob, pid_blob = aggregate_low_energy_blobs_from_four_momentum(
+            four_momentum_blob, pid_blob, additional_info_blob = aggregate_low_energy_blobs_from_four_momentum(
                 blob_four_momentum_event,
                 blob_pid_event,
+                blob_additional_info_event,
                 n_keep=max_blobs,
                 aggregate_pid=6
             )
             blob_features_event = np.concatenate([convert_four_momentum(four_momentum_blob), pid_blob[:, np.newaxis]], axis=1)
+            blob_additional_info_event = additional_info_blob
             assert blob_features_event.shape[0] <= max_blobs
         else:
             blob_features_event = np.concatenate([convert_four_momentum(blob_four_momentum_event), blob_pid_event[:, np.newaxis]], axis=1)
-        # similar for prongs
+        # Similarly for prongs
         if max_prongs > 0:
-            four_momentum_prong, pid_prong = aggregate_low_energy_blobs_from_four_momentum(
+            four_momentum_prong, pid_prong, additional_info_prong = aggregate_low_energy_blobs_from_four_momentum(
                 prong_four_momentum_event,
                 prong_pid_event,
+                prong_additional_info_event,
                 n_keep=max_prongs,
                 aggregate_pid=7
             )
             prong_features_event = np.concatenate([convert_four_momentum(four_momentum_prong), pid_prong[:, np.newaxis]], axis=1)
+            prong_additional_info_event = additional_info_prong
             assert prong_features_event.shape[0] <= max_prongs, f"Prong features length {prong_features_event.shape[0]} > max_prongs {max_prongs}"
         else:
             prong_features_event = np.concatenate([convert_four_momentum(prong_four_momentum_event), prong_pid_event[:, np.newaxis]], axis=1)
         event_features = np.concatenate([muon_features_event, photon_features_event, blob_features_event, prong_features_event], axis=0)
+        event_additional_info = np.concatenate([muon_additional_info_event, photon_additional_info_event, blob_additional_info_event, prong_additional_info_event], axis=0)
         if len(event_features) > max_objects and max_blobs == -1 and max_prongs == -1:
             # Sort by energy (descending)
             event_features_idx_energy = event_features[:, 3].argsort()[::-1]
@@ -343,8 +378,12 @@ def get_event_repr_nested_tensor(muons, photons, blobs, prongs, global_features,
         else:
             assert event_features.shape[0] <= max_prongs + max_blobs + 2 + 1, f"Event features length {event_features.shape[0]} > max_prongs + max_blobs + 2 + 1 {max_prongs + max_blobs + 2 + 1}"
         data_nested.append(event_features)
+        data_nested_pos_and_timing.append(event_additional_info)
+        # assert that shapes are consistent (event_features.shape[0] == event_additional_info.shape[0])
+        assert event_features.shape[0] == event_additional_info.shape[0], f"Event features length {event_features.shape[0]} != event_additional_info length {event_additional_info.shape[0]}"
     data_nested = torch.nested.nested_tensor(data_nested, layout=torch.jagged)
-    torch.save({"data": data_nested, "truth_labels": truth_labels, "global_features": global_features}, output_file)
+    data_nested_pos_and_timing = torch.nested.nested_tensor(data_nested_pos_and_timing, layout=torch.jagged)
+    torch.save({"data": data_nested, "data_additional_info": data_nested_pos_and_timing, "truth_labels": truth_labels, "global_features": global_features}, output_file)
     print(f"✓ Nested tensor data written to {output_file} (total events: {N_events})")
     return N_events
 
@@ -556,6 +595,7 @@ def get_global_features(master_ana_dev):
 
 
 def get_n_pions_label(mc_current, mc_part):
+    # CC n Pi label
     n_pi_plus = []
     n_pi_minus = []
     is_multi_pion = np.zeros(len(mc_current), dtype=bool)
@@ -563,7 +603,7 @@ def get_n_pions_label(mc_current, mc_part):
         event_PDG = mc_part.data[mc_part.bounds[i]:mc_part.bounds[i+1]][:, 4].astype(int)
         n_pi_plus_event = np.sum(event_PDG == 211)
         n_pi_minus_event = np.sum(event_PDG == -211)
-        is_multi_pion[i] = (n_pi_plus_event > 1) or (n_pi_minus_event > 1)
+        is_multi_pion[i] = (n_pi_plus_event > 1) or (n_pi_minus_event > 1) # Wrong label, don't use it!
         n_pi_plus.append(n_pi_plus_event)
         n_pi_minus.append(n_pi_minus_event)
     n_pi_plus = np.array(n_pi_plus)
@@ -617,11 +657,8 @@ pdg_masses = {
     -2112: 939.565,
 }
 
-# Particles to exclude: muons (±13), neutrons (2112), neutrinos (12, 14, 16, -12, -14, -16)
-#excluded_pdgs = {13, -13, 2112, 12, -12, 14, -14, 16, -16, 3122, -3122, 3222, -3222, 3112, -3112, -2112, 3212, -3212}
-pdg_kinetic_energy = {2212, 211, -211, 2112, -2112}
-pdg_total_energy = {22, 11, -11, 111, -111}
-
+pdg_kinetic_energy = {2212, -2212}
+pdg_total_energy = {22, 11, -11, 111, -111, 13, -13, 211, -211, 321, -321}
 
 def get_E_available_true(mc_part):
     E_available_true = np.zeros(len(mc_part.n))
@@ -636,8 +673,10 @@ def get_E_available_true(mc_part):
     E_available_true[E_available_true < 0] = 0
     return E_available_true
 
-
 def get_event_labels(master_ana_dev, mc_part):
+    '''
+    Gets ground truth labels for the event.
+    '''
     incoming_E = master_ana_dev["mc_incomingE"].array().to_numpy()
     event_type = master_ana_dev["mc_intType"].array().to_numpy()
     current_type = master_ana_dev["mc_current"].array().to_numpy()
@@ -655,12 +694,20 @@ def get_event_labels(master_ana_dev, mc_part):
     return np.concatenate([scalar_labels, pi_four_vectors], axis=1)
 
 
+def preprocess_dEdX(dedx):
+    dedx = np.where(dedx == -999, 0, dedx)
+    dedx = np.where(dedx == np.inf, 100, dedx)
+    dedx = np.where(dedx == -np.inf, 100, dedx)
+    dedx = np.where(dedx > 100, 100, dedx)
+    return np.log(dedx+1e-1)
+
 def get_event_collections(master_ana_dev):
     mc_part_keys = ["mc_FSPartPx", "mc_FSPartPy", "mc_FSPartPz", "mc_FSPartE", "mc_FSPartPDG"]
-    prong_keys = ["prong_part_pos", "prong_part_E", "prong_part_score", "prong_part_mass", "prong_part_charge", "prong_part_pid"]
+    prong_keys = ["prong_part_pos", "prong_part_E", "prong_part_score", "prong_part_mass", "prong_part_charge", "prong_part_pid", "prong_part_dEdXMean"]
     blob_keys = ["MasterAnaDev_BlobX", "MasterAnaDev_BlobY", "MasterAnaDev_BlobZ", "MasterAnaDev_BlobT", "MasterAnaDev_BlobTPos", "MasterAnaDev_BlobTotalE"]
     mc_part = get_dense(mc_part_keys, master_ana_dev)
     prong = get_dense(prong_keys, master_ana_dev)
+    prong.data[:, -1] = preprocess_dEdX(prong.data[:, -1])
     blob = get_dense(blob_keys, master_ana_dev)
     muons = get_muons(master_ana_dev)
     photons = get_photons(master_ana_dev)

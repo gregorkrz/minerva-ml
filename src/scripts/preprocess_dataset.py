@@ -7,7 +7,7 @@ import uproot
 import awkward as ak
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from src.dataset.resolution_tools import find_narrowest_interval
-from src.dataset.preprocessing import get_event_repr_nested_tensor, get_muons, get_photons, get_dense, remove_overflows, get_global_features, get_event_labels
+from src.dataset.preprocessing import get_event_repr_nested_tensor, get_muons, get_photons, get_dense, remove_overflows, get_global_features, get_event_labels, preprocess_dEdX
 import argparse
 import time
 import traceback
@@ -19,7 +19,7 @@ for playlist in ["1A", "1B", "1C", "1D", "1E", "1F", "1G", "1L", "1M", "1N", "1O
 MAX_OBJECTS = 100
 
 mc_part_keys = ["mc_FSPartPx", "mc_FSPartPy", "mc_FSPartPz", "mc_FSPartE", "mc_FSPartPDG"]
-prong_keys = ["prong_part_pos", "prong_part_E", "prong_part_score", "prong_part_mass", "prong_part_charge", "prong_part_pid"]
+prong_keys = ["prong_part_pos", "prong_part_E", "prong_part_score", "prong_part_mass", "prong_part_charge", "prong_part_pid", "prong_dEdXMean"]
 blob_keys = ["MasterAnaDev_BlobX", "MasterAnaDev_BlobY", "MasterAnaDev_BlobZ", "MasterAnaDev_BlobT", "MasterAnaDev_BlobTPos", "MasterAnaDev_BlobTotalE"]
 
 
@@ -49,6 +49,8 @@ def process_single_root_file(playlist, root_file, dataset_path, output_dir, use_
             photons = get_photons(master_ana_dev)
             blobs = get_dense(blob_keys, master_ana_dev)
             prongs = get_dense(prong_keys, master_ana_dev, filter_prongs=True)
+            prongs.data[:, -1] = preprocess_dEdX(prongs.data[:, -1])
+            photons.data[:, -1] = preprocess_dEdX(photons.data[:, -1])
             muons = remove_overflows(muons)
             global_features = get_global_features(master_ana_dev)
             mc_part = get_dense(mc_part_keys, master_ana_dev)

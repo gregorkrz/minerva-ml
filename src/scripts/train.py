@@ -19,10 +19,19 @@ python -m src.scripts.train -bs 1024 --mode classifier --classification_cc_1pi -
 # Binary classification: has event > 1 charged pion produced?
 python -m src.scripts.train -bs 2048 --mode classifier -npi -name Train_MultiPi --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260213_split --num_workers 2
 
+####### E available regression #######
+python -m src.scripts.train -bs 2048 --mode regression  -E-available -name Train_Regress_E_available2 --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260213v2_split --num_workers 2 --eval_interval 5000
+######################################
+
+
+### Classification 1 or N Pi +- according to signal definition in Eberly et al. 2015 #######
+python -m src.scripts.train -bs 2048 --mode classifier -npi2 -name Train_CC1orNPi --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260213_split --num_workers 2
+
 """
 
 import argparse
 import os
+import time
 from pathlib import Path
 from datetime import datetime
 import torch
@@ -65,6 +74,10 @@ def parse_args():
                         help="Classify CC 1pi (requires mode=classifier)")
     parser.add_argument("--classification_n_pions", "-npi", action="store_true",
                         help="Classify number of pions (requires mode=classifier)")
+    parser.add_argument("--classification_CC1orNPi", "-npi2", action="store_true",
+                        help="Classify CC 1pi or n pions, according to signal definition inEberly et al. 2015 (requires mode=classifier)")
+    parser.add_argument("--regress-E-available", "-E-available", action="store_true",
+                        help="Regress available energy of the event (requires mode=regression)")
     parser.add_argument("--use_cond", default=True, type=bool,
                         help="Use global/conditional features")
     parser.add_argument("--use_pid", type=bool, default=True,
@@ -160,8 +173,13 @@ def get_lr_schedule(optimizer, warmup_steps, max_steps):
 def create_task(args):
     if args.mode == "regression":
         class_label_idx = None
-        return Task(type="regression")
+        class_idx = None
+        if args.regress_E_available:
+            class_label_idx = 8
+        return Task(type="regression", regress_E_available=args.regress_E_available, class_label_idx=class_label_idx)
     elif args.mode == "classifier":
+        if "classification_n_pions" not in args.__dict__:
+            args.classification_n_pions = False
         if args.classification_event_type:
             class_label_idx = 1
             class_idx = [1, 2, 3, 4, 8]
@@ -178,9 +196,14 @@ def create_task(args):
             class_label_idx = 7
             class_idx = [0, 1]
             class_idx_map = {0: 0, 1: 1}
+        elif args.classification_CC1orNPi:
+            class_label_idx = -1
+            class_idx = [0, 1, 2, 3]
+            class_idx_map = {0: 0, 1: 1, 2: 2, 3: 3}
         return Task(type="classifier", classification_event_type=args.classification_event_type, 
             classification_current=args.classification_current, classification_cc_1pi=args.classification_cc_1pi,
-            classification_n_pions=args.classification_n_pions, class_idx=class_idx, class_idx_map=class_idx_map, class_label_idx=class_label_idx)
+            classification_n_pions=args.classification_n_pions, class_idx=class_idx, class_idx_map=class_idx_map, class_label_idx=class_label_idx,
+            classification_CC1orNPi=args.classification_CC1orNPi)
     else:
         raise ValueError("Invalid mode")
 
@@ -291,10 +314,8 @@ def evaluate(model, dataloader, device, args, class_weights, use_amp=False):
         criterion = nn.MSELoss()
     else:
         criterion = nn.CrossEntropyLoss(weight=class_weights)
-    
     for batch in tqdm(dataloader, desc="Evaluating", leave=False):
         inputs = prepare_batch(batch, device, args.use_cond, args.use_pid, args.coord_dim, args.pid_idx)
-        
         with autocast(enabled=use_amp):
             # Forward pass
             features = model(
@@ -305,21 +326,18 @@ def evaluate(model, dataloader, device, args, class_weights, use_amp=False):
                 global_cats=inputs["global_cats"],
                 attn_mask=inputs["attn_mask"],
             )
-
             logits = model.head(features)
-            
             # Compute loss
             if args.mode == "regression":
                 loss = criterion(logits.squeeze(-1), inputs["y"])
             else:
                 loss = criterion(logits, inputs["y"])
-        
+
         total_loss += loss.item() * inputs["y"].size(0)
         total_samples += inputs["y"].size(0)
     
     avg_loss = total_loss / total_samples
     model.train()
-    
     return {"eval_loss": avg_loss}
 
 
@@ -333,7 +351,7 @@ def save_checkpoint(model, optimizer, scheduler, scaler, step, args, best_val_lo
         "scaler_state_dict": scaler.state_dict() if scaler is not None else None,
         "step": step,
         "args": vars(args),
-        "best_val_loss": best_val_loss,
+        "best_val_loss": best_val_loss
     }
     save_path = os.path.join(args.output_dir, filename)
     torch.save(checkpoint, save_path)
@@ -412,7 +430,7 @@ def train(args):
         num_workers=args.num_workers,
         rank=0,
         size=1,
-        distributed=True,
+        distributed=False,
         shuffle=False,
         max_particles=args.max_particles,
     )
@@ -468,6 +486,8 @@ def train(args):
     
     step = start_step
     train_losses = []
+    data_fetch_times = []
+    backprop_times = []
     debug_pred_stds = []
     debug_target_stds = []
     debug_model_mses = []
@@ -498,6 +518,8 @@ def train(args):
                 logits = model.head(features)
                 if args.mode == "regression":
                     loss = criterion(logits.squeeze(-1), fixed_inputs["y"])
+                    # every 100 steps, print few examples of y pred and y true
+                    
                 else:
                     loss = criterion(logits, fixed_inputs["y"])
 
@@ -587,8 +609,12 @@ def train(args):
         for epoch in range(args.epochs):
             # Epoch progress bar
             epoch_pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}", leave=True)
+            iter_end_time = time.perf_counter()
             
             for batch in epoch_pbar:
+                # Time spent waiting for the dataloader to produce the next batch.
+                data_fetch_times.append(time.perf_counter() - iter_end_time)
+
                 # Prepare inputs
                 inputs = prepare_batch(batch, device, args.use_cond, args.use_pid, args.coord_dim, args.pid_idx)
                 
@@ -610,6 +636,8 @@ def train(args):
                     # Compute loss
                     if args.mode == "regression":
                         loss = criterion(logits.squeeze(-1), inputs["y"])
+                        # if step % 50 == 0:
+                        #     print(f"Step {step}: y pred: {logits.squeeze(-1).detach().cpu().numpy()[:5]}, y true: {inputs['y'].detach().cpu().numpy()[:5]}")
                     else:
                         loss = criterion(logits, inputs["y"])
 
@@ -624,6 +652,7 @@ def train(args):
                         debug_baseline_mses.append(torch.mean((targets - targets.mean()) ** 2).item())
                 
                 # Backward pass
+                backprop_start_time = time.perf_counter()
                 if scaler is not None:
                     scaler.scale(loss).backward()
                     scaler.unscale_(optimizer)
@@ -634,6 +663,7 @@ def train(args):
                     loss.backward()
                     torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
                     optimizer.step()
+                backprop_times.append(time.perf_counter() - backprop_start_time)
                 
                 scheduler.step()
                 
@@ -652,9 +682,10 @@ def train(args):
                 # Log training loss
                 if step % args.log_interval == 0:
                     avg_train_loss = np.mean(train_losses)
-                    
                     log_dict = {
                         "train_loss": avg_train_loss,
+                        "data_fetch_time_s": float(np.mean(data_fetch_times)),
+                        "backprop_time_s": float(np.mean(backprop_times)),
                         "learning_rate": current_lr,
                         "step": step,
                         "epoch": epoch,
@@ -672,15 +703,18 @@ def train(args):
                         wandb.log(log_dict, step=step)
                     
                     train_losses = []
+                    data_fetch_times = []
+                    backprop_times = []
                     debug_pred_stds = []
                     debug_target_stds = []
                     debug_model_mses = []
                     debug_baseline_mses = []
+                iter_end_time = time.perf_counter()
                 
                 # Evaluation
-                if step % args.eval_interval == 0:
+                if step % args.eval_interval == 0 or step == 1:
                     epoch_pbar.write(f"\nRunning evaluation at step {step}...")
-                    eval_metrics = evaluate(model, val_loader, device, args, torch.tensor(task.class_weights, device=device, dtype=torch.float32), args.use_amp)
+                    eval_metrics = evaluate(model, val_loader, device, args, torch.tensor(task.class_weights, device=device, dtype=torch.float32) if task.type == "classifier" else None, args.use_amp)
                     
                     epoch_pbar.write(f"Eval loss: {eval_metrics['eval_loss']:.4f}")
                     # save as best_model.pt if val loss is lower
@@ -695,16 +729,11 @@ def train(args):
                         wandb.log({"best_val_loss": best_val_loss}, step=step)
     # Final evaluation
     print("\nRunning final evaluation...")
-    eval_metrics = evaluate(model, val_loader, device, args, torch.tensor(task.class_weights, device=device, dtype=torch.float32), args.use_amp)
+    eval_metrics = evaluate(model, val_loader, device, args, torch.tensor(task.class_weights, device=device, dtype=torch.float32) if task.type == "classifier" else None, args.use_amp)
     print(f"Final eval loss: {eval_metrics['eval_loss']:.4f}")
     
     if not args.no_wandb:
-        wandb.log(eval_metrics, step=step)
-    
-    # Save final checkpoint
-    #save_checkpoint(model, optimizer, scheduler, scaler, step, args, best_val_loss,
-    #                filename="checkpoint_final.pt")
-    
+        wandb.log(eval_metrics, step=step)  
     print("Training complete!")
     
     if not args.no_wandb:

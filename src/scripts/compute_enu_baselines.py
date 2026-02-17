@@ -288,17 +288,17 @@ def main():
             output_npz = os.path.join(args.output_dir, f"{playlist}_enu_baselines.npz")
             np.savez(output_npz, **results)
             
-            print(f"✓ [{playlist}] Saved to {output_file} and {output_npz}")
+            print(f"✓ [{playlist}] Saved to {output_npz}")
         
         print("=" * 80)
     
     # Save combined results
-    combined_output = os.path.join(args.output_dir, "all_playlists_enu_baselines.pkl")
-    with open(combined_output, 'wb') as f:
-        pickle.dump(all_playlist_results, f)
+    #combined_output = os.path.join(args.output_dir, "all_playlists_enu_baselines.pkl")
+    #with open(combined_output, 'wb') as f:
+    #    pickle.dump(all_playlist_results, f)
     
     print(f"\n✓ All results saved to {args.output_dir}")
-    print(f"✓ Combined results saved to {combined_output}")
+    #print(f"✓ Combined results saved to {combined_output}")
     
     # Print summary
     print("\n" + "=" * 80)

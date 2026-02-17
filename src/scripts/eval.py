@@ -13,7 +13,20 @@ Train_CC_20260210_003828
 python -m src.scripts.eval --checkpoint Train_CC_SmallModel_20260210_004255 --batch_size 1024 --dataset_name minerva_1A
 python -m src.scripts.eval --checkpoint Train_CC_20260210_003828 --batch_size 1024 --dataset_name minerva_1A
 
+python -m src.scripts.eval --checkpoint Train_MultiPi_20260213s_122832 --batch_size 1024 --dataset_name minerva_1A
+python -m src.scripts.eval --checkpoint Train_MultiPi_20260213_122831 --batch_size 1024 --dataset_name minerva_1A
+python -m src.scripts.eval --checkpoint Train_MultiPi_20260213_122827 --batch_size 1024 --dataset_name minerva_1A
+python -m src.scripts.eval --checkpoint Train_MultiPi_20260213_122825 --batch_size 1024 --dataset_name minerva_1A
 
+
+python -m src.scripts.eval --checkpoint Train_CC1pi_20260210_190400 --batch_size 1024 --dataset_name minerva_1A
+python -m src.scripts.eval --checkpoint Train_CC1pi_20260210_190406 --batch_size 1024 --dataset_name minerva_1A
+python -m src.scripts.eval --checkpoint Train_CC1pi_20260210_190413 --batch_size 1024 --dataset_name minerva_1A
+python -m src.scripts.eval --checkpoint Train_CC1pi_20260210_190428 --batch_size 1024 --dataset_name minerva_1A
+
+
+# eval /global/cfs/cdirs/m3246/gregork/checkpoints/Train_Regress_E_available2_20260214_232056/
+python -m src.scripts.eval --checkpoint Train_Regress_E_available2_20260214_232056 --batch_size 1024 --dataset_name minerva_1A
 """
 
 import argparse
@@ -31,34 +44,9 @@ from sklearn.metrics import accuracy_score, precision_recall_fscore_support, con
 
 from src.dataset.dataloader import load_data
 from src.models.vit import PointGlobalMixedViT, PointGlobalMixedViTConfig
-from src.scripts.train import set_seed, prepare_batch
+from src.scripts.train import set_seed, prepare_batch, create_task
+from types import SimpleNamespace
 
-def parse_args():
-    parser = argparse.ArgumentParser(description="Evaluate PointGlobalMixedViT on HEP data")    
-    # Model checkpoint
-    parser.add_argument("--checkpoint", type=str, required=True,
-                        help="Path to model checkpoint")
-    parser.add_argument("--base_dir", type=str, default="/global/cfs/cdirs/m3246/gregork/checkpoints")
-    # Data arguments
-    parser.add_argument("--dataset_name", type=str, default="minerva_1A",
-                        help="Dataset name (e.g., minerva_1A). If None, will use from checkpoint.")
-    parser.add_argument("--data_path", type=str, default="/global/cfs/cdirs/m3246/gregork/Minerva/20260201_all_max_blobs_and_prongs_split_fix_anomalies")
-    parser.add_argument("--dataset_type", type=str, default="test",
-                        choices=["train", "val", "test"],
-                        help="Dataset split to evaluate on")
-    parser.add_argument("--batch_size", type=int, default=1024,
-                        help="Batch size for evaluation")
-    parser.add_argument("--num_workers", type=int, default=0,
-                        help="Number of dataloader workers")
-    parser.add_argument("--max_particles", type=int, default=None,
-                        help="Maximum number of particles per event. If None, will use from checkpoint.")    
-    # Evaluation settings
-    parser.add_argument("--use_amp", action="store_true", default=True,
-                        help="Use automatic mixed precision")
-
-    args = parser.parse_args()
-    args.checkpoint = os.path.join(args.base_dir, args.checkpoint, "best_model.pt")
-    return args
 
 
 def create_model_from_checkpoint(checkpoint_path, device):
@@ -72,14 +60,18 @@ def create_model_from_checkpoint(checkpoint_path, device):
         raise ValueError("Checkpoint does not contain training arguments. Cannot reconstruct model.")
     
     args_dict = checkpoint["args"]
+
+    args_attrs = SimpleNamespace(**args_dict)
     
     # Determine number of output classes for classification
     num_classes = None
-    if args_dict.get("mode") == "classifier":
-        if args_dict.get("classification_event_type"):
-            num_classes = 5
-        elif args_dict.get("classification_current"):
-            num_classes = 2
+    task = create_task(args_attrs)
+    if task.type == "classifier":
+        num_classes = len(task.class_idx)
+    elif task.type == "regression":
+        num_classes = 1
+    else:
+        raise ValueError("Invalid task type")
     
     # Reconstruct model config
     point_cat_num_classes = [8] if args_dict.get("use_pid", True) else []
@@ -106,7 +98,7 @@ def create_model_from_checkpoint(checkpoint_path, device):
     model = PointGlobalMixedViT(cfg)
     
     # Add output head
-    if args_dict.get("mode") == "regression":
+    if task.type == "regression":
         model.head = nn.Linear(args_dict.get("d_model", 128), 1)
     else:
         model.head = nn.Linear(args_dict.get("d_model", 128), num_classes)
@@ -121,7 +113,7 @@ def create_model_from_checkpoint(checkpoint_path, device):
     if "best_val_loss" in checkpoint:
         print(f"Best validation loss: {checkpoint['best_val_loss']:.4f}")
     
-    return model, args_dict
+    return model, args_dict, task
 
 
 
@@ -263,6 +255,32 @@ def evaluate(model, dataloader, device, args_dict, use_amp=False):
     }
     
     return results
+def parse_args():
+    parser = argparse.ArgumentParser(description="Evaluate PointGlobalMixedViT on HEP data")    
+    # Model checkpoint
+    parser.add_argument("--checkpoint", type=str, required=True,
+                        help="Path to model checkpoint")
+    parser.add_argument("--base_dir", type=str, default="/global/cfs/cdirs/m3246/gregork/checkpoints")
+    # Data arguments
+    parser.add_argument("--dataset_name", type=str, default="minerva_1A",
+                        help="Dataset name (e.g., minerva_1A). If None, will use from checkpoint.")
+    #parser.add_argument("--data_path", type=str, default="/global/cfs/cdirs/m3246/gregork/Minerva/20260201_all_max_blobs_and_prongs_split_fix_anomalies")
+    parser.add_argument("--dataset_type", type=str, default="test",
+                        choices=["train", "val", "test"],
+                        help="Dataset split to evaluate on")
+    parser.add_argument("--batch_size", type=int, default=1024,
+                        help="Batch size for evaluation")
+    parser.add_argument("--num_workers", type=int, default=0,
+                        help="Number of dataloader workers")
+    parser.add_argument("--max_particles", type=int, default=None,
+                        help="Maximum number of particles per event. If None, will use from checkpoint.")    
+    # Evaluation settings
+    parser.add_argument("--use_amp", action="store_true", default=True,
+                        help="Use automatic mixed precision")
+
+    args = parser.parse_args()
+    args.checkpoint = os.path.join(args.base_dir, args.checkpoint, "best_model.pt")
+    return args
 
 
 def main():
@@ -277,11 +295,11 @@ def main():
     
     # Load model from checkpoint
 
-    model, args_dict = create_model_from_checkpoint(args.checkpoint, device)
+    model, args_dict, task = create_model_from_checkpoint(args.checkpoint, device)
     
     # Use checkpoint args if not provided
     dataset_name = args.dataset_name or args_dict.get("dataset_name", "minerva_1A")
-    data_path = args.data_path or args_dict.get("data_path")
+    data_path = args_dict.get("data_path")
     max_particles = args.max_particles or args_dict.get("max_particles", 33)
     
     if data_path is None:
@@ -297,7 +315,6 @@ def main():
         path=data_path,
         batch=args.batch_size,
         dataset_type=args.dataset_type,
-        mode=args_dict.get("mode", "regression"),
         use_cond=args_dict.get("use_cond", False),
         use_pid=args_dict.get("use_pid", True),
         pid_idx=args_dict.get("pid_idx", 4),
@@ -305,8 +322,7 @@ def main():
         distributed=False,
         shuffle=False,
         max_particles=max_particles,
-        classification_event_type=args_dict.get("classification_event_type", False),
-        classification_current=args_dict.get("classification_current", False),
+        task=task,
     )
     
     print(f"Number of samples: {len(dataloader.dataset)}")

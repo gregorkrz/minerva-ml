@@ -19,10 +19,12 @@ class Task:
     classification_current: bool = field(default=False) # If True, it will classify the event current (1, 2)
     classification_cc_1pi: bool = field(default=False) # If True, it will classify the event type [0, 1, 2]: 0=other, 1=CC pi+, 2=CC pi-
     classification_n_pions: bool = field(default=False) # If True, it will classify whether the event is multi-pion or not (>1 pion produced)
+    classification_CC1orNPi: bool = field(default=False) # If True, it will classify CC 1pi or n pions, according to signal definition in Eberly et al. 2015
     class_idx: list[int] = field(default=None) # List of class indices for the classification task # e.g. [1, 2, 3] means 3 classes: 1, 2, 3
     class_idx_map: dict[int, int] = field(default=None) # Map of class indices to class labels
     class_label_idx: int = field(default=None) # Index of the label in the truth_labels tensor for the classification task
     class_weights: torch.Tensor = field(default=None) # Weights for the classification task
+    regress_E_available: bool = field(default=False) # If True, it will regress the available energy of the event
     
 def collate_point_cloud(batch):
     """
@@ -68,7 +70,6 @@ def collate_point_cloud(batch):
             result[field] = None
     return result
 
-
 def get_class_counts(class_idx, label_idx_to_class_idx, files_truth_labels, truth_labels_idx):
     n_class = len(class_idx)
     class_counts = np.zeros(n_class)
@@ -78,6 +79,20 @@ def get_class_counts(class_idx, label_idx_to_class_idx, files_truth_labels, trut
         class_counts += np.bincount(labels, minlength=n_class)
     return class_counts
 
+def get_CC1orNPi_labels(file_truth_labels):
+    # Generate labels for CC 1pi or n pions, according to signal definition in Eberly et al. 2015, on the fly
+    is_cc = file_truth_labels[:, 3] == 1
+    n_pi_plus = file_truth_labels[:, 5]
+    n_pi_minus = file_truth_labels[:, 6]
+    labels = torch.zeros(len(file_truth_labels), dtype=torch.long)
+    one_pi_plus = n_pi_plus == 1
+    one_pi_minus = n_pi_minus == 1
+    multi_pions = (n_pi_plus + n_pi_minus) > 1
+    labels[is_cc & one_pi_plus & ~one_pi_minus] = 0 # CC 1pi+
+    labels[is_cc & one_pi_minus & ~one_pi_plus] = 1 # CC 1pi-
+    labels[is_cc & multi_pions] = 2 # CC N Pi +-
+    labels[~is_cc] = 3 # OTHER
+    return labels
 
 class HEPTorchDataset(Dataset):
     def __init__(
@@ -106,13 +121,16 @@ class HEPTorchDataset(Dataset):
         self.use_pid = use_pid
         self.folder = folder
         self.file_paths = sorted(list([os.path.join(folder, file) for file in os.listdir(folder) if file.endswith('.pb')]))
-        self.files = [torch.load(file, weights_only=True, mmap=True) for file in self.file_paths]
+        self.files = [torch.load(file, weights_only=True, mmap=False) for file in self.file_paths]
         self.files_n_events = np.array([len(file["data"].offsets())-1 for file in self.files]) # -1 because the last offset is the total number of events
         self.files_n_events_sum = np.cumsum(self.files_n_events)
         self.files_values = [file["data"].values() for file in self.files]
         self.files_offsets = [file["data"].offsets() for file in self.files]
         # truth_labels and global_features are regular tensors, not nested
         self.files_truth_labels = [file["truth_labels"] for file in self.files]
+        # add a column with CC1orNPi labels
+        if task.classification_CC1orNPi:
+            self.files_truth_labels = [np.concatenate([file_truth_labels, get_CC1orNPi_labels(file_truth_labels).reshape(-1, 1)], axis=1) for file_truth_labels in self.files_truth_labels]
         self.files_global_features = [file["global_features"] for file in self.files]
         self.nevts = int(nevts)
         self.max_particles = max_particles
@@ -122,6 +140,7 @@ class HEPTorchDataset(Dataset):
             self.class_weights = 1 / (self.class_counts / np.sum(self.class_counts))
         elif self.task.type == "regression":
             self.regress_log = self.task.regress_log
+            print("Regressing log!")
         else:
             raise ValueError("Invalid task type")
 
@@ -152,12 +171,14 @@ class HEPTorchDataset(Dataset):
         # Handle labels
         if self.task.type == "classifier":
             i = self.task.class_label_idx
-            
             label = self.files_truth_labels[file_idx][sample_idx, i]
             label_int = int(label.item()) if torch.is_tensor(label) else int(label)
             sample["y"] = torch.tensor(self.task.class_idx_map[label_int], dtype=torch.long)
         elif self.task.type == "regression":
-            label = torch.log(self.files_truth_labels[file_idx][sample_idx, 0] / 1000.0 + 1e-6) if self.task.regress_log else self.files_truth_labels[file_idx][sample_idx, 0] / 1000.0
+            regression_label_idx = 0
+            if self.task.regress_E_available:
+                regression_label_idx = self.task.class_label_idx
+            label = torch.log(self.files_truth_labels[file_idx][sample_idx, regression_label_idx] / 1000.0 + 1e-6) if self.task.regress_log else self.files_truth_labels[file_idx][sample_idx, regression_label_idx] / 1000.0
             label_val = label.item() if torch.is_tensor(label) else label
             sample["y"] = torch.tensor(label_val, dtype=torch.float32)
         else:
