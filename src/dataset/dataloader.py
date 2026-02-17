@@ -56,13 +56,13 @@ def collate_point_cloud(batch, max_particles=33):
     batch_X = [_pad_or_truncate(item["X"], max_particles) for item in batch]
     batch_y = [item["y"] for item in batch]
     batch_attention_mask = [_pad_or_truncate(item["attention_mask"], max_particles) for item in batch]
-    batch_additional_info = [_pad_or_truncate(item["data_additional_info"], max_particles) for item in batch]
+    #batch_additional_info = [_pad_or_truncate(item["data_additional_info"], max_particles) for item in batch]
 
     point_clouds = torch.stack(batch_X)  # (B, M, F)
     labels = torch.stack(batch_y)  # (B, num_classes)
     attention_masks = torch.stack(batch_attention_mask)  # (B, M)
-    additional_info = torch.stack(batch_additional_info) # (B, M, 5)
-    result = {"X": point_clouds, "y": labels, "attention_mask": attention_masks, "data_additional_info": additional_info}
+    #additional_info = torch.stack(batch_additional_info) # (B, M, 5)
+    result = {"X": point_clouds, "y": labels, "attention_mask": attention_masks}#, "data_additional_info": additional_info}
 
     # Handle optional fields in a loop to reduce code duplication
     optional_fields = ["cond", "pid", "add_info", "data_pid", "vertex_pid"]
@@ -118,6 +118,7 @@ class HEPTorchDataset(Dataset):
         nevts=-1,
         max_particles=150,
         task: Task = Task(),
+        concat_additional_info=True
     ):
         """
         Args:
@@ -131,6 +132,7 @@ class HEPTorchDataset(Dataset):
         self.num_add = num_add
         self.pid_idx = pid_idx
         self.use_pid = use_pid
+        self.concat_additional_info = concat_additional_info
         self.folder = folder
         self.file_paths = sorted(list([os.path.join(folder, file) for file in os.listdir(folder) if file.endswith('.pb')]))
         print("Loading files into memory")
@@ -154,6 +156,7 @@ class HEPTorchDataset(Dataset):
         if self.task.type == "classifier":
             self.class_counts = get_class_counts(self.task.class_idx, self.task.class_idx_map, self.files_truth_labels, self.task.class_label_idx)
             self.class_weights = 1 / (self.class_counts / np.sum(self.class_counts))
+            print("Class weights", self.class_weights)
         elif self.task.type == "regression":
             self.regress_log = self.task.regress_log
             print("Regressing log!")
@@ -209,9 +212,13 @@ class HEPTorchDataset(Dataset):
         
         if self.use_pid:
             sample["pid"] = data[:, self.pid_idx].int()
-           
-        sample["X"] = data
-        sample["data_additional_info"] = data_additional_info # shape (N, 5)
+        #sample["data_additional_info"] = data_additional_info # shape (N, 5)
+        if self.concat_additional_info: # concate data and data_additional_info into a single tensor
+            sample["X"] = torch.cat([data, data_additional_info], dim=1) # shape (N, F+5)
+        else:
+            sample["X"] = data
+        #else:
+        #    sample["data_additional_info"] = data_additional_info # shape (N, 5)
         sample["attention_mask"] = valid_attention_mask
         return sample
 
@@ -235,6 +242,7 @@ def load_data(
     nevts=-1,
     max_particles=33,
     task: Task = Task(),
+    concat_additional_info=True
 ):
     supported_datasets = ["minerva_1A", "minerva_1B", "minerva_1C", "minerva_1D", "minerva_1E", "minerva_1F",
     "minerva_1G", "minerva_1L", "minerva_1M", "minerva_1N", "minerva_1O", "minerva_1P"]
@@ -255,6 +263,7 @@ def load_data(
             nevts=nevts,
             max_particles=max_particles,
             task=task,
+            concat_additional_info=concat_additional_info
         )
         loader = DataLoader(
             data,
@@ -265,8 +274,8 @@ def load_data(
             num_workers=num_workers,
             drop_last=False,
             collate_fn=lambda x: collate_point_cloud(x, max_particles=max_particles),
-            prefetch_factor=2,
-            persistent_workers=True
+            prefetch_factor=2 if distributed else None,
+            persistent_workers=distributed
         )
         if task.type == "classifier":
             return loader, data.class_weights

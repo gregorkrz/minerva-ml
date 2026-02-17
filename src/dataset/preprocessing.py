@@ -658,20 +658,24 @@ pdg_masses = {
 }
 
 pdg_kinetic_energy = {2212, -2212}
-pdg_total_energy = {22, 11, -11, 111, -111, 13, -13, 211, -211, 321, -321}
+pdg_total_energy_no_muon = {22, 11, -11, 111, -111, 211, -211, 321, -321}
+pdg_muons = {13, -13}
 
-def get_E_available_true(mc_part):
+def get_E_available_true(mc_part, exclude_muons=False):
     E_available_true = np.zeros(len(mc_part.n))
+    E_muon = np.zeros(len(mc_part.n))
     for i in range(len(mc_part.n)):
         event_PDG = mc_part.data[mc_part.bounds[i]:mc_part.bounds[i+1]][:, 4].astype(int)
         event_E = mc_part.data[mc_part.bounds[i]:mc_part.bounds[i+1]][:, 3]
         mask_kinetic_energy = np.array([pid in pdg_kinetic_energy for pid in event_PDG])
-        mask_total_energy = np.array([pid in pdg_total_energy for pid in event_PDG])
+        mask_total_energy = np.array([pid in pdg_total_energy_no_muon for pid in event_PDG])
+        mask_muons = np.array([pid in pdg_muons for pid in event_PDG])
         T = event_E[mask_kinetic_energy] - np.array([pdg_masses[int(pdg)] for pdg in event_PDG[mask_kinetic_energy]])
         E_other_particles = event_E[mask_total_energy]
+        E_muon[i] = np.sum(event_E[mask_muons])
         E_available_true[i] = np.sum(T) + np.sum(E_other_particles)
     E_available_true[E_available_true < 0] = 0
-    return E_available_true
+    return E_available_true, E_muon
 
 def get_event_labels(master_ana_dev, mc_part):
     '''
@@ -686,9 +690,9 @@ def get_event_labels(master_ana_dev, mc_part):
     E_nu_true_over_reco[bad_muons] = -1
     labels, pi_four_vectors = get_cc_pi_labels(current_type, mc_part)
     n_pi_plus, n_pi_minus, is_multi_pion = get_n_pions_label(current_type, mc_part)
-    e_avail_true = get_E_available_true(mc_part)
+    e_avail_true_no_muon, e_muons = get_E_available_true(mc_part)
     scalar_labels = np.stack(
-        [incoming_E, event_type, E_nu_true_over_reco, current_type, labels, n_pi_plus, n_pi_minus, is_multi_pion, e_avail_true],
+        [incoming_E, event_type, E_nu_true_over_reco, current_type, labels, n_pi_plus, n_pi_minus, is_multi_pion, e_avail_true_no_muon+e_muons, e_avail_true_no_muon],
         axis=1,
     )
     return np.concatenate([scalar_labels, pi_four_vectors], axis=1)

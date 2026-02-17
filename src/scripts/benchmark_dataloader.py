@@ -1,7 +1,7 @@
 from src.dataset.dataloader import load_data, HEPTorchDataset, Task
 from time import time
 
-dataloader, class_weights = load_data("minerva_1A", "/global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info_split", batch=2048, dataset_type="train", distributed=True, task=Task(type="regression"), num_workers=50)
+dataloader, class_weights = load_data("minerva_1A", "/global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info_split", batch=2048, dataset_type="train", distributed=True, task=Task(type="regression"), num_workers=50, concat_additional_info=True)
 N_BATCHES = 1000
 start_time = time()
 i = 0

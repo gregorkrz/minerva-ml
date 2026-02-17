@@ -6,7 +6,7 @@ import os
 import uproot
 import awkward as ak
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from src.dataset.resolution_tools import find_narrowest_interval
+#from src.dataset.resolution_tools import find_narrowest_interval
 from src.dataset.preprocessing import get_event_repr_nested_tensor, get_muons, get_photons, get_dense, remove_overflows, get_global_features, get_event_labels, preprocess_dEdX
 import argparse
 import time

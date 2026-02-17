@@ -1,4 +1,4 @@
-from numba import njit
+'''from numba import njit
 
 
 @njit(cache=True)
@@ -28,3 +28,4 @@ def find_narrowest_interval(centers, cumulative_weights, percentage, epsilon, wm
     
     return best_width, best_low, best_high
 
+'''

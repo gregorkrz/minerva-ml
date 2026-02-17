@@ -24,8 +24,17 @@ python -m src.scripts.train -bs 2048 --mode regression  -E-available -name Train
 ######################################
 
 
+
+### 2026 02 16 - trainings with additional info #######
+
 ### Classification 1 or N Pi +- according to signal definition in Eberly et al. 2015 #######
-python -m src.scripts.train -bs 2048 --mode classifier -npi2 -name Train_CC1orNPi --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260213_split --num_workers 2
+python -m src.scripts.train -bs 2048 --mode classifier -npi2 -name Train_CC1orNPi --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info_split --num_workers 10 --eval_interval 1000
+
+### Classification of MC current type ### 
+python -m src.scripts.train -bs 2048 --mode classifier -cc -name Train_CurrentType --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info_split --num_workers 10 --eval_interval 1000
+
+### E available regression ###
+python -m src.scripts.train -bs 2048 --mode regression -E-available -name Train_Regress_E_available3 --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info_split --num_workers 10 --eval_interval 1000
 
 """
 
@@ -82,11 +91,9 @@ def parse_args():
                         help="Use global/conditional features")
     parser.add_argument("--use_pid", type=bool, default=True,
                         help="Use particle ID information")
-    parser.add_argument("--pid_idx", type=int, default=4,
-                        help="Index of PID in features")
-    
+    parser.add_argument("--pid_idx", type=int, default=4, help="Index of PID in features")
     # Model architecture (defaults from vit.py example)
-    parser.add_argument("--point_cont_dim", type=int, default=4,
+    parser.add_argument("--point_cont_dim", type=int, default=9,
                         help="Dimension of continuous point features")
     parser.add_argument("--coord_dim", type=int, default=2,
                         help="Dimension of coordinates")
@@ -265,7 +272,9 @@ def prepare_batch(batch, device, use_cond=False, use_pid=False, coord_dim=2, pid
     point_cats = None
     if use_pid:
         point_cats = [X[:, :, pid_idx].long()]
-        point_cont = X[:, :, :pid_idx]
+        # concat up to pid idx and after pid idx
+        #point_cont = X[:, :, :pid_idx]
+        point_cont = torch.cat([X[:, :, :pid_idx], X[:, :, pid_idx+1:]], dim=2)
     else:
         point_cont = X # use coord dim too as just normal features
 
@@ -410,12 +419,13 @@ def train(args):
         use_cond=args.use_cond,
         use_pid=args.use_pid,
         pid_idx=args.pid_idx,
-        distributed=False,
+        distributed=True,
         shuffle=True,
         max_particles=args.max_particles,
         num_workers=args.num_workers,
         rank=0,
         size=1,
+        concat_additional_info=True,
     )
     
     val_loader, _ = load_data(
@@ -430,9 +440,10 @@ def train(args):
         num_workers=args.num_workers,
         rank=0,
         size=1,
-        distributed=False,
+        distributed=True,
         shuffle=False,
         max_particles=args.max_particles,
+        concat_additional_info=True,
     )
     
     print(f"Train samples: {len(train_loader.dataset)}")

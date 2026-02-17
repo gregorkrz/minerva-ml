@@ -27,6 +27,18 @@ python -m src.scripts.eval --checkpoint Train_CC1pi_20260210_190428 --batch_size
 
 # eval /global/cfs/cdirs/m3246/gregork/checkpoints/Train_Regress_E_available2_20260214_232056/
 python -m src.scripts.eval --checkpoint Train_Regress_E_available2_20260214_232056 --batch_size 1024 --dataset_name minerva_1A
+
+
+python -m src.scripts.eval --checkpoint Train_Regress_E_available3_20260217_073551 --batch_size 1024 --dataset_name minerva_1A
+python -m src.scripts.eval --checkpoint Train_Regress_E_available3_20260217_072850 --batch_size 1024 --dataset_name minerva_1A
+
+python -m src.scripts.eval --checkpoint Train_CurrentType_20260217_073440 --batch_size 1024 --dataset_name minerva_1A
+python -m src.scripts.eval --checkpoint Train_CurrentType_20260217_072847 --batch_size 1024 --dataset_name minerva_1A
+
+python -m src.scripts.eval --checkpoint Train_CC1orNPi_20260217_073415 --batch_size 1024 --dataset_name minerva_1A
+python -m src.scripts.eval --checkpoint Train_CC1orNPi_20260217_072842 --batch_size 1024 --dataset_name minerva_1A
+
+
 """
 
 import argparse
