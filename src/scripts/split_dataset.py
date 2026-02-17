@@ -42,14 +42,17 @@ for dataset in os.listdir(args.input_dir):
     truth_labels = []
     global_features = []
     data = []
+    additional_info = []
     filenames = sorted(os.listdir(os.path.join(args.input_dir, dataset)))
     for file in filenames:
         if file.endswith(".pb"): # There's 'data', 'truth_labels', 'global_features' keys in the file; add it to the list
             print(f"Processing file: {file}")
             f = torch.load(os.path.join(args.input_dir, dataset, file), weights_only=False)
+            print(f.keys())
             data.append(f["data"])
             truth_labels.append(f["truth_labels"])
             global_features.append(f["global_features"])
+            additional_info.append(f["data_additional_info"])
     # Concatenate the different chunks
     # For nested tensors, we need to flatten the list first
     print("Concatenating truth_labels")
@@ -101,10 +104,13 @@ for dataset in os.listdir(args.input_dir):
         # This may not be the best way to do it...
         print("Concatenating data")
         flattened_data = []
+        flattened_additional_info = []
         event_idx_offset = 0
         for nested_tensor in data:
             print(f"Nested tensor: {nested_tensor.shape}")
             flattened_data += list(nested_tensor.unbind())
+        for nested_tensor in additional_info:
+            flattened_additional_info += list(nested_tensor.unbind())
         #data = torch.nested.nested_tensor(flattened_data, layout=torch.jagged)
         print("Splitting data...")
         # assert that the indices dont overlap
@@ -112,17 +118,20 @@ for dataset in os.listdir(args.input_dir):
         train = {
             "data": torch.nested.nested_tensor(select_from_list(flattened_data, train_idx.tolist()), layout=torch.jagged), # only now convert back to nested tensor
             "truth_labels": truth_labels[train_idx.tolist()],
-            "global_features": global_features[train_idx.tolist()]
+            "global_features": global_features[train_idx.tolist()],
+            "data_additional_info": torch.nested.nested_tensor(select_from_list(flattened_additional_info, train_idx.tolist()), layout=torch.jagged)
         }
         val = {
             "data": torch.nested.nested_tensor(select_from_list(flattened_data, val_idx.tolist()), layout=torch.jagged),
             "truth_labels": truth_labels[val_idx.tolist()],
-            "global_features": global_features[val_idx.tolist()]
+            "global_features": global_features[val_idx.tolist()],
+            "data_additional_info": torch.nested.nested_tensor(select_from_list(flattened_additional_info, val_idx.tolist()), layout=torch.jagged)
         }
         test = {
             "data": torch.nested.nested_tensor(select_from_list(flattened_data, test_idx.tolist()), layout=torch.jagged),
             "truth_labels": truth_labels[test_idx.tolist()],
-            "global_features": global_features[test_idx.tolist()]
+            "global_features": global_features[test_idx.tolist()],
+            "data_additional_info": torch.nested.nested_tensor(select_from_list(flattened_additional_info, test_idx.tolist()), layout=torch.jagged)
         }
         
         torch.save(train, os.path.join(args.output_dir, dataset, "train", "0.pb"))

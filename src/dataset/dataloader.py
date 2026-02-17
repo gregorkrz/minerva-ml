@@ -26,7 +26,7 @@ class Task:
     class_weights: torch.Tensor = field(default=None) # Weights for the classification task
     regress_E_available: bool = field(default=False) # If True, it will regress the available energy of the event
     
-def collate_point_cloud(batch):
+def collate_point_cloud(batch, max_particles=33):
     """
     Collate function for point clouds and labels with truncation performed per batch.
 
@@ -44,27 +44,39 @@ def collate_point_cloud(batch):
             - "y": (B, num_classes)
             - "cond", "pid", "add_info" (optional, shape (B, M, ...))
     """
-    batch_X = [item["X"] for item in batch]
-    batch_y = [item["y"] for item in batch]
-    batch_attention_mask = [item["attention_mask"] for item in batch]
+    def _pad_or_truncate(tensor, target_len):
+        if tensor.shape[0] == target_len:
+            return tensor
+        if tensor.shape[0] > target_len:
+            return tensor[:target_len]
+        pad_shape = (target_len - tensor.shape[0],) + tuple(tensor.shape[1:])
+        padding = tensor.new_zeros(pad_shape)
+        return torch.cat([tensor, padding], dim=0)
 
-    # Stack once to avoid repeated slicing
-    point_clouds = torch.stack(batch_X)  # (B, N, F)
+    batch_X = [_pad_or_truncate(item["X"], max_particles) for item in batch]
+    batch_y = [item["y"] for item in batch]
+    batch_attention_mask = [_pad_or_truncate(item["attention_mask"], max_particles) for item in batch]
+    batch_additional_info = [_pad_or_truncate(item["data_additional_info"], max_particles) for item in batch]
+
+    point_clouds = torch.stack(batch_X)  # (B, M, F)
     labels = torch.stack(batch_y)  # (B, num_classes)
-    attention_masks = torch.stack(batch_attention_mask)  # (B, N)
-    max_particles = point_clouds.shape[1]
-    truncated_X = point_clouds[:, :max_particles, :].contiguous()  # (B, M, F)
-    truncated_attention_mask = attention_masks[:, :max_particles].contiguous()  # (B, M)
-    result = {"X": truncated_X, "y": labels, "attention_mask": truncated_attention_mask}
+    attention_masks = torch.stack(batch_attention_mask)  # (B, M)
+    additional_info = torch.stack(batch_additional_info) # (B, M, 5)
+    result = {"X": point_clouds, "y": labels, "attention_mask": attention_masks, "data_additional_info": additional_info}
 
     # Handle optional fields in a loop to reduce code duplication
     optional_fields = ["cond", "pid", "add_info", "data_pid", "vertex_pid"]
     for field in optional_fields:
-        if all(field in item for item in batch):
-            stacked = torch.stack([item[field] for item in batch])
-            # Truncate if it's sequence-like (i.e., has 2 or more dims)
-            if stacked.dim() >= 2 and stacked.shape[1] >= max_particles:
-                stacked = stacked[:, :max_particles].contiguous()
+        if all(field in item and item[field] is not None for item in batch):
+            values = [item[field] for item in batch]
+            # Pad per-particle optional tensors to max_particles before stacking.
+            is_particle_aligned = all(
+                torch.is_tensor(v) and v.dim() >= 1 and v.shape[0] == batch[i]["X"].shape[0]
+                for i, v in enumerate(values)
+            )
+            if is_particle_aligned:
+                values = [_pad_or_truncate(v, max_particles) for v in values]
+            stacked = torch.stack(values)
             result[field] = stacked
         else:
             result[field] = None
@@ -121,11 +133,15 @@ class HEPTorchDataset(Dataset):
         self.use_pid = use_pid
         self.folder = folder
         self.file_paths = sorted(list([os.path.join(folder, file) for file in os.listdir(folder) if file.endswith('.pb')]))
+        print("Loading files into memory")
         self.files = [torch.load(file, weights_only=True, mmap=False) for file in self.file_paths]
+        print("Files loaded into memory")
         self.files_n_events = np.array([len(file["data"].offsets())-1 for file in self.files]) # -1 because the last offset is the total number of events
         self.files_n_events_sum = np.cumsum(self.files_n_events)
         self.files_values = [file["data"].values() for file in self.files]
         self.files_offsets = [file["data"].offsets() for file in self.files]
+        self.files_values_additional_info = [file["data_additional_info"].values() for file in self.files]
+        self.files_offsets_additional_info = [file["data_additional_info"].offsets() for file in self.files]
         # truth_labels and global_features are regular tensors, not nested
         self.files_truth_labels = [file["truth_labels"] for file in self.files]
         # add a column with CC1orNPi labels
@@ -158,15 +174,18 @@ class HEPTorchDataset(Dataset):
             sample_idx = idx
         
         data = self.files_values[file_idx][self.files_offsets[file_idx][sample_idx]:self.files_offsets[file_idx][sample_idx+1]]
+        data_additional_info = self.files_values_additional_info[file_idx][self.files_offsets_additional_info[file_idx][sample_idx]:self.files_offsets_additional_info[file_idx][sample_idx+1]]
+        valid_attention_mask = torch.ones(data.shape[0], dtype=data.dtype)
         
         # pad up to max_particles
-        if data.shape[0] <= self.max_particles:
-            valid_attention_mask = torch.ones(data.shape[0])
-            n_padding = self.max_particles - data.shape[0]
-            data = torch.cat([data, torch.zeros(n_padding, data.shape[1])], dim=0)
-            valid_attention_mask = torch.cat([valid_attention_mask, torch.zeros(n_padding)], dim=0)
-        else:
-            raise ValueError("Data has more particles than max_particles")
+        #if data.shape[0] <= self.max_particles:
+        #    valid_attention_mask = torch.ones(data.shape[0])
+        #    n_padding = self.max_particles - data.shape[0]
+        #    data = torch.cat([data, torch.zeros(n_padding, data.shape[1])], dim=0)
+        #    data_additional_info = torch.cat([data_additional_info, torch.zeros(n_padding, data_additional_info.shape[1])], dim=0)
+        #    valid_attention_mask = torch.cat([valid_attention_mask, torch.zeros(n_padding)], dim=0)
+        #else:
+        #    raise ValueError("Data has more particles than max_particles")
         sample = {}
         # Handle labels
         if self.task.type == "classifier":
@@ -192,6 +211,7 @@ class HEPTorchDataset(Dataset):
             sample["pid"] = data[:, self.pid_idx].int()
            
         sample["X"] = data
+        sample["data_additional_info"] = data_additional_info # shape (N, 5)
         sample["attention_mask"] = valid_attention_mask
         return sample
 
@@ -244,7 +264,9 @@ def load_data(
             sampler=None,
             num_workers=num_workers,
             drop_last=False,
-            collate_fn=collate_point_cloud,
+            collate_fn=lambda x: collate_point_cloud(x, max_particles=max_particles),
+            prefetch_factor=2,
+            persistent_workers=True
         )
         if task.type == "classifier":
             return loader, data.class_weights
