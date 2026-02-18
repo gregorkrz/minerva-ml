@@ -36,7 +36,11 @@ python -m src.scripts.eval --checkpoint Train_CurrentType_20260217_073440 --batc
 python -m src.scripts.eval --checkpoint Train_CurrentType_20260217_072847 --batch_size 1024 --dataset_name minerva_1A
 
 python -m src.scripts.eval --checkpoint Train_CC1orNPi_20260217_073415 --batch_size 1024 --dataset_name minerva_1A
-python -m src.scripts.eval --checkpoint Train_CC1orNPi_20260217_072842 --batch_size 1024 --dataset_name minerva_1A
+python -m src.scripts.eval --checkpoint Train_CC1orNPi_20260217_072842 --batch_size 1024 --dataset_name minerva_1Až
+
+
+python -m src.scripts.eval --checkpoint Train_Regress_E_available3_no_muon_20260218_000924 --batch_size 1024 --dataset_name minerva_1A
+
 
 
 """

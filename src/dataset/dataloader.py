@@ -25,6 +25,7 @@ class Task:
     class_label_idx: int = field(default=None) # Index of the label in the truth_labels tensor for the classification task
     class_weights: torch.Tensor = field(default=None) # Weights for the classification task
     regress_E_available: bool = field(default=False) # If True, it will regress the available energy of the event
+    regress_E_available_no_muon: bool = field(default=False) # If True, it will regress the available energy of the event, without the muon energy
     
 def collate_point_cloud(batch, max_particles=33):
     """
@@ -198,7 +199,7 @@ class HEPTorchDataset(Dataset):
             sample["y"] = torch.tensor(self.task.class_idx_map[label_int], dtype=torch.long)
         elif self.task.type == "regression":
             regression_label_idx = 0
-            if self.task.regress_E_available:
+            if self.task.regress_E_available or self.task.regress_E_available_no_muon:
                 regression_label_idx = self.task.class_label_idx
             label = torch.log(self.files_truth_labels[file_idx][sample_idx, regression_label_idx] / 1000.0 + 1e-6) if self.task.regress_log else self.files_truth_labels[file_idx][sample_idx, regression_label_idx] / 1000.0
             label_val = label.item() if torch.is_tensor(label) else label

@@ -5,6 +5,21 @@ import shutil
 import datetime
 from src.jobs.slurm_template import SLURM_TEMPLATE_GPU
 
+"""
+
+python -m src.jobs.train -name E_avail --regress-E-available -nw 5
+python -m src.jobs.train -name E_avail_no_muon --regress-E-available-no-muon -nw 5
+python -m src.jobs.train -name current_type --class-current-type -nw 5
+python -m src.jobs.train -name pions --class-pions -nw 5 -p
+
+
+python -m src.jobs.train -name E_avail --regress-E-available -nw 5 --use-pretrained pretrain_s
+python -m src.jobs.train -name E_avail_no_muon --regress-E-available-no-muon -nw 5 --use-pretrained pretrain_s
+python -m src.jobs.train -name current_type --class-current-type -nw 5 --use-pretrained pretrain_s
+python -m src.jobs.train -name pions --class-pions -nw 5 --use-pretrained pretrain_s
+
+"""
+
 parser = argparse.ArgumentParser()
 
 parser.add_argument("--dataset", type=str, default="default_Minerva", help="Dataset to use")
@@ -18,19 +33,21 @@ parser.add_argument("--use-pretrained", type=str, default=None) # If turned on, 
 parser.add_argument("--resume-from", type=str, default=None) # If turned on, resume training from this checkpoint.
 parser.add_argument("--run", action="store_true", default=False) # If turned on, run the job immediately.
 parser.add_argument("--max-particles", type=int, default=33)
-parser.add_argument("--print-cmd-only", action="store_true", default=False)
-parser.add_argument("--regress-log", action="store_true", default=False)
-parser.add_argument("--batch-size", "-bs", type=int, default=128)
-parser.add_argument("--num-workers", "-nw", type=int, default=32)
+parser.add_argument("--print-cmd-only", "-print-only", action="store_true", default=False)
+parser.add_argument("--batch-size", "-bs", type=int, default=2048)
+parser.add_argument("--num-workers", "-nw", type=int, default=2)
 # add --class-event-type  and --class-current-type
-parser.add_argument("--class-event-type", action="store_true", default=False)
-parser.add_argument("--class-current-type", action="store_true", default=False)
+parser.add_argument("--class-current-type", "-cc",  action="store_true", default=False)
+parser.add_argument("--class-pions", "-cp",  action="store_true", default=False)
+parser.add_argument("--regress-E-available", "-E-available",  action="store_true", default=False)
+parser.add_argument("--regress-E-available-no-muon", "-E-available-no-muon",  action="store_true", default=False)
+
 args = parser.parse_args()
 
 DATA_DIR = args.data_dir
 
 DATASETS = {
-    "default_Minerva": f"{DATA_DIR}/Minerva/20260129_split_all",
+    "default_Minerva": f"{DATA_DIR}/Minerva/20260216_additional_info1_split",
     "Minerva_v2": f"{DATA_DIR}/Minerva/20260201_all_max_blobs_and_prongs_split_fix_anomalies"
 }
 
@@ -48,32 +65,34 @@ export DATASET_PATH={DATASETS[args.dataset]}
 export CHECKPOINT_DIR={output_dir}
 """
 
-regress_log_flag = ""
-regress_loss_flag = ""
-class_event_type_flag = ""
+regress_log_flag = "  --regression-loss mse "
 class_current_type_flag = ""
+class_pions_flag = ""
+regress_E_available_flag = ""
+regress_E_available_no_muon_flag = ""
 
-if args.regress_log:
-    regress_log_flag = " --regress-log "
-    regress_loss_flag = f" --regression-loss {args.loss} "
-if args.class_event_type and args.class_current_type:
-    assert False, "Cannot use both class-event-type and class-current-type"
-elif args.class_event_type:
-    class_event_type_flag = " --class-event-type --num-classes 5 "
+if args.class_current_type:
+    class_current_type_flag = " --class-current-type "
     mode = "classifier"
-elif args.class_current_type:
-    class_current_type_flag = " --class-current-type --num-classes 2 "
+elif args.class_pions:
+    class_pions_flag = " --class-pions "
     mode = "classifier"
-else:
+elif args.regress_E_available:
+    regress_E_available_flag = " --regress-e-available "
     mode = "regression"
+elif args.regress_E_available_no_muon:
+    regress_E_available_no_muon_flag = " --regress-e-available-no-muon "
+    mode = "regression"
+else:
+    raise ValueError(f"Invalid task")
 
-train_cmd = f"""  -m omnilearned.cli train \
+train_cmd = f""" -m omnilearned.cli train \
   --output_dir $CHECKPOINT_DIR \
   --save-tag {job_name} \
   --dataset minerva_{args.playlist} \
   --path $DATASET_PATH \
   --mode {mode} \
-  {regress_loss_flag} \
+  {regress_log_flag} \
   --batch {args.batch_size} \
   --epoch 100 \
   --lr 5e-5 \
@@ -82,7 +101,7 @@ train_cmd = f"""  -m omnilearned.cli train \
   --num-workers {args.num_workers} \
   --use-pid \
   --wandb \
-  --max-particles {args.max_particles} {regress_log_flag} {class_event_type_flag} {class_current_type_flag}"""
+  --max-particles {args.max_particles} {class_current_type_flag} {class_pions_flag} {regress_E_available_flag} {regress_E_available_no_muon_flag}"""
 
 # Handle pretrained checkpoint for fine-tuning
 if args.use_pretrained is not None and args.resume_from is not None:
@@ -128,19 +147,20 @@ elif args.resume_from is not None:
         raise ValueError(f"Resume checkpoint not found: {args.resume_from}")
 
 slurm_file_content = SLURM_TEMPLATE_GPU.format(
-    time="16:00:00",
-    cpus_per_task=15,
+    time="20:00:00",
+    cpus_per_task=32,
     gpus_per_node=1,
     job_name=job_name,
     log_dir=log_output,
     error_dir=log_error,
     env_commands=env_commands,
     commands="srun "  + train_cmd,
-    queue_name="regular"
+    queue_name="shared"
 )
 if args.print_cmd_only:
     print(env_commands)
-    print("torchrun --nproc_per_node=4 " +train_cmd)
+    #print("torchrun --nproc_per_node=4 " +train_cmd)
+    print("python " +train_cmd)
     exit()
 with open(sbatch_file, "w") as f:
     f.write(slurm_file_content)

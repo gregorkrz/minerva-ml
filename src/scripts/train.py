@@ -36,6 +36,10 @@ python -m src.scripts.train -bs 2048 --mode classifier -cc -name Train_CurrentTy
 ### E available regression ###
 python -m src.scripts.train -bs 2048 --mode regression -E-available -name Train_Regress_E_available3 --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info_split --num_workers 10 --eval_interval 1000
 
+
+# E avail regression without muons #
+python -m src.scripts.train -bs 2048 --mode regression -E-available-no-muon -name Train_Regress_E_available3_no_muon --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info1_split --num_workers 10 --eval_interval 1000
+
 """
 
 import argparse
@@ -87,6 +91,8 @@ def parse_args():
                         help="Classify CC 1pi or n pions, according to signal definition inEberly et al. 2015 (requires mode=classifier)")
     parser.add_argument("--regress-E-available", "-E-available", action="store_true",
                         help="Regress available energy of the event (requires mode=regression)")
+    parser.add_argument("--regress-E-available-no-muon", "-E-available-no-muon", action="store_true",
+                        help="Regress available energy of the event, without the muon energy(requires mode=regression)")
     parser.add_argument("--use_cond", default=True, type=bool,
                         help="Use global/conditional features")
     parser.add_argument("--use_pid", type=bool, default=True,
@@ -183,7 +189,9 @@ def create_task(args):
         class_idx = None
         if args.regress_E_available:
             class_label_idx = 8
-        return Task(type="regression", regress_E_available=args.regress_E_available, class_label_idx=class_label_idx)
+        elif args.regress_E_available_no_muon:
+            class_label_idx = 9
+        return Task(type="regression", regress_E_available=args.regress_E_available, regress_E_available_no_muon=args.regress_E_available_no_muon, class_label_idx=class_label_idx)
     elif args.mode == "classifier":
         if "classification_n_pions" not in args.__dict__:
             args.classification_n_pions = False

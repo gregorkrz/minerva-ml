@@ -50,7 +50,7 @@ with uproot.open(args.input_file) as file:
                 np.random.shuffle(available_idx)
                 events = available_idx[:args.n_events]
                 for event in events:
-                    print("plotting event ", event, " of ", len(events), " for ", human_readable_current[key], " ", human_readable_intType[int_type_key])
+                    print("Plotting event ", event, " of ", len(events), " for ", human_readable_current[key], " ", human_readable_intType[int_type_key])
                     mc_enu = enu_mc[event]
                     output_dir = Path(os.path.join(args.output_dir, human_readable_current[key], human_readable_intType[int_type_key]))
                     output_dir.mkdir(parents=True, exist_ok=True)

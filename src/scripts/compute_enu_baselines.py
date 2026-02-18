@@ -159,6 +159,8 @@ def compute_enu_baselines(root_file_path):
             'E_mu+E_recoil_CCinc': E_mu_plus_recoil_CCinc,
             'E_muon': E_muon,
             'E_true': E_true,
+            "E_recoil_only": E_recoil,
+            "E_recoil_CCinc_only": E_recoil_CCinc,
         }
 
 
