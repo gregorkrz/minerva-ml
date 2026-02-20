@@ -1,3 +1,11 @@
 .devcontainer
 __pycache__
 wandb
+*.log
+*.npz
+*.h5
+*.wandb
+*.txt
+*.pdf
+*.sh
+notebooks/out/

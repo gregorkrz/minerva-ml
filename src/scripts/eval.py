@@ -195,8 +195,6 @@ def evaluate(model, dataloader, device, args_dict, use_amp=False):
     all_targets = np.concatenate(all_targets)
     all_cond = np.concatenate(all_cond)
     avg_loss = np.mean(all_losses)
-
-
     # Compute metrics
     metrics = {"loss": avg_loss}
     
@@ -269,8 +267,8 @@ def evaluate(model, dataloader, device, args_dict, use_amp=False):
         "targets": all_targets,
         "cond": all_cond
     }
-    
     return results
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Evaluate PointGlobalMixedViT on HEP data")    
     # Model checkpoint
@@ -288,12 +286,10 @@ def parse_args():
                         help="Batch size for evaluation")
     parser.add_argument("--num_workers", type=int, default=0,
                         help="Number of dataloader workers")
-    parser.add_argument("--max_particles", type=int, default=None,
+    parser.add_argument("--max_particles", type=int, default=None, 
                         help="Maximum number of particles per event. If None, will use from checkpoint.")    
     # Evaluation settings
-    parser.add_argument("--use_amp", action="store_true", default=True,
-                        help="Use automatic mixed precision")
-
+    parser.add_argument("--use_amp", action="store_true", default=True, help="Use automatic mixed precision")
     args = parser.parse_args()
     args.checkpoint = os.path.join(args.base_dir, args.checkpoint, "best_model.pt")
     return args

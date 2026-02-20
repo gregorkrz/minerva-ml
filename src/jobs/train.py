@@ -7,14 +7,13 @@ from src.jobs.slurm_template import SLURM_TEMPLATE_GPU
 
 """
 
-python -m src.jobs.train -name E_avail --regress-E-available -nw 5
-python -m src.jobs.train -name E_avail_no_muon --regress-E-available-no-muon -nw 5
+python -m src.jobs.train -name E_avail --regress-E-available -nw 5 -p
+python -m src.jobs.train -name E_avail_no_muon --regress-E-available-no-muon -nw 5 -p
 python -m src.jobs.train -name current_type --class-current-type -nw 5
 python -m src.jobs.train -name pions --class-pions -nw 5 -p
 
-
-python -m src.jobs.train -name E_avail --regress-E-available -nw 5 --use-pretrained pretrain_s
-python -m src.jobs.train -name E_avail_no_muon --regress-E-available-no-muon -nw 5 --use-pretrained pretrain_s
+python -m src.jobs.train -name E_avail --regress-E-available -nw 5 --use-pretrained pretrain_s -p
+python -m src.jobs.train -name E_avail_no_muon --regress-E-available-no-muon -nw 5 --use-pretrained pretrain_s -p
 python -m src.jobs.train -name current_type --class-current-type -nw 5 --use-pretrained pretrain_s
 python -m src.jobs.train -name pions --class-pions -nw 5 --use-pretrained pretrain_s
 
