@@ -14,13 +14,9 @@ E available regression:
 python -m src.jobs.gen_train_cmds_OmniLearned -name E_avail_LogMSE --regress-E-available-no-muon -nw 10  --loss-type mse --log --run
 python -m src.jobs.gen_train_cmds_OmniLearned -name E_avail_LogMSE_PT --regress-E-available-no-muon -nw 10  --loss-type mse --log --use-pretrained pretrain_s --run
 
-
-
 python -m src.jobs.gen_train_cmds_OmniLearned -name E_avail_HuberWeighted_PT_NoLog --regress-E-available-no-muon -nw 10 --use-pretrained pretrain_s --loss-type huber --weighted-loss -p
 python -m src.jobs.gen_train_cmds_OmniLearned -name E_avail_HuberWeighted_NoLog --regress-E-available-no-muon -nw 10  --loss-type huber --weighted-loss -p
-
 --------------------------------
-
 """
 
 parser = argparse.ArgumentParser()
@@ -109,7 +105,7 @@ train_cmd = f""" -m omnilearned.cli train \
   --path $DATASET_PATH \
   --mode {mode} \
   --batch {args.batch_size} \
-  --epoch 1000 \
+  --epoch 100000 \
   --lr 5e-5 \
   --size small \
   --wd 0.1 {dataset_cap_flag} \
@@ -166,7 +162,7 @@ slurm_file_content = SLURM_TEMPLATE_GPU.format(
     log_dir=log_output,
     error_dir=log_error,
     env_commands=env_commands,
-    commands="srun "  + train_cmd,
+    commands="srun python "  + train_cmd,
     queue_name="shared"
 )
 if args.print_cmd_only:
