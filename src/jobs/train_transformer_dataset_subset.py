@@ -7,7 +7,7 @@ base_cmd = "python -m src.scripts.train -bs 2048 --mode regression -E-available-
 
 cmds = []
 
-for data_cap in [500, 1000, 10000]:
+for data_cap in [500, 1000, 10000, 100000]:
     for seed in [42, 43, 44]:
         cmd = base_cmd.format(suffix=f"{data_cap}_Evts_seed_{seed}", data_cap=data_cap, seed=seed)
         cmds.append(cmd)

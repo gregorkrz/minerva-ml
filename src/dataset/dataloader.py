@@ -202,7 +202,7 @@ class HEPTorchDataset(Dataset):
             regression_label_idx = 0
             if self.task.regress_E_available or self.task.regress_E_available_no_muon:
                 regression_label_idx = self.task.class_label_idx
-            label = torch.log(self.files_truth_labels[file_idx][sample_idx, regression_label_idx] / 1000.0 + 1e-6) if self.task.regress_log else self.files_truth_labels[file_idx][sample_idx, regression_label_idx] / 1000.0
+            label = self.files_truth_labels[file_idx][sample_idx, regression_label_idx] / 1000.0
             label_val = label.item() if torch.is_tensor(label) else label
             sample["y"] = torch.tensor(label_val, dtype=torch.float32)
         else:

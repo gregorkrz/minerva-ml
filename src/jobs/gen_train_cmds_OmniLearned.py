@@ -11,11 +11,13 @@ Current tasks:
 
 E available regression:
 
-python -m src.jobs.train -name E_avail_LogMSE --regress-E-available-no-muon -nw 10  --loss-type mse --log -p
-python -m src.jobs.train -name E_avail_LogMSE_PT --regress-E-available-no-muon -nw 10  --loss-type mse --log -p --use-pretrained pretrain_s
+python -m src.jobs.gen_train_cmds_OmniLearned -name E_avail_LogMSE --regress-E-available-no-muon -nw 10  --loss-type mse --log --run
+python -m src.jobs.gen_train_cmds_OmniLearned -name E_avail_LogMSE_PT --regress-E-available-no-muon -nw 10  --loss-type mse --log --use-pretrained pretrain_s --run
 
-python -m src.jobs.train -name E_avail_HuberWeighted_PT_NoLog --regress-E-available-no-muon -nw 10 --use-pretrained pretrain_s --loss-type huber --weighted-loss -p
-python -m src.jobs.train -name E_avail_HuberWeighted_NoLog --regress-E-available-no-muon -nw 10  --loss-type huber --weighted-loss -p
+
+
+python -m src.jobs.gen_train_cmds_OmniLearned -name E_avail_HuberWeighted_PT_NoLog --regress-E-available-no-muon -nw 10 --use-pretrained pretrain_s --loss-type huber --weighted-loss -p
+python -m src.jobs.gen_train_cmds_OmniLearned -name E_avail_HuberWeighted_NoLog --regress-E-available-no-muon -nw 10  --loss-type huber --weighted-loss -p
 
 --------------------------------
 
@@ -45,7 +47,8 @@ parser.add_argument("--class-pions", "-cp",  action="store_true", default=False)
 parser.add_argument("--regress-E-available", "-E-available",  action="store_true", default=False)
 parser.add_argument("--regress-E-available-no-muon", "-E-available-no-muon",  action="store_true", default=False)
 parser.add_argument("--weighted-loss", "-wl", action="store_true", default=False)
-parser.add_argument("--dataset-cap", "-cap", type=int, default=None, help="If set, cap the dataset to this number of training samples.")
+parser.add_argument("--dataset-cap", "-cap", type=int, default=-1, help="If set, cap the dataset to this number of training samples.")
+parser.add_argument("--dataset-cap-seed", "-seed", type=int, default=42, help="If set, use this seed for the dataset cap.")
 
 args = parser.parse_args()
 
@@ -82,8 +85,8 @@ if args.log:
     log_flag = " --regress-log "
 if args.weighted_loss:
     weighted_loss_flag = " --weight-loss "
-if args.dataset_cap is not None:
-    dataset_cap_flag = f" --dataset-cap {args.dataset_cap} "
+if args.dataset_cap is not None and args.dataset_cap > 0:
+    dataset_cap_flag = f" --nevts {args.dataset_cap} --event-sampler-random-state {args.dataset_cap_seed} "
 if args.class_current_type:
     class_current_type_flag = " --class-current-type "
     mode = "classifier"
@@ -156,7 +159,7 @@ elif args.resume_from is not None:
         raise ValueError(f"Resume checkpoint not found: {args.resume_from}")
 
 slurm_file_content = SLURM_TEMPLATE_GPU.format(
-    time="20:00:00",
+    time="10:00:00",
     cpus_per_task=32,
     gpus_per_node=1,
     job_name=job_name,

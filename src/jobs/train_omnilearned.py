@@ -3,30 +3,13 @@ from src.jobs.slurm_template import SLURM_TEMPLATE_GPU
 import os
 from datetime import datetime as dt
 
-cmds = [
-    "",
-    ""
-]
 
-for i, cmd in enumerate(cmds):
-    job_name = f"Tr_{i}_{dt.now().strftime('%Y%m%d_%H%M%S')}"
-    log_dir = f"/global/cfs/cdirs/m3246/gregork/Minerva/logs/OmniLearned/{job_name}.log"
-    error_dir = f"/global/cfs/cdirs/m3246/gregork/Minerva/logs/OmniLearned/{job_name}.error.log"
-    slurm_file = f"/global/cfs/cdirs/m3246/gregork/Minerva/slurm/OmniLearned/{job_name}.slurm"
-    os.makedirs(os.path.dirname(slurm_file), exist_ok=True)
-    os.makedirs(os.path.dirname(log_dir), exist_ok=True)
-    with open(slurm_file, "w") as f:
-        f.write(SLURM_TEMPLATE_GPU.format(
-            queue_name="shared",
-            time="20:00:00",
-            cpus_per_task=32,
-            gpus_per_node=1,
-            job_name=job_name,
-            log_dir=log_dir,
-            error_dir=error_dir,
-            commands="srun " + cmd,
-            env_commands="",
-            ))
-    print(f"Saved slurm file to {slurm_file}")
-    #os.system(f"sbatch {slurm_file}")
+training_cmd_PT = "python -m src.jobs.gen_train_cmds_OmniLearned -name SmallDataset_E_avail_LogMSE_PT_dscap{dscap}_Evts_seed_{dscapseed} --regress-E-available-no-muon -nw 10  --loss-type mse --log --use-pretrained pretrain_s --run --dataset-cap {dscap} --dataset-cap-seed {dscapseed}"
+training_cmd_non_PT = "python -m src.jobs.gen_train_cmds_OmniLearned -name SmallDataset_E_avail_LogMSE_dscap{dscap}_Evts_seed_{dscapseed} --regress-E-available-no-muon -nw 10  --loss-type mse --log --run --dataset-cap {dscap} --dataset-cap-seed {dscapseed}"
 
+for dscap in [500, 1000, 10000, 100000]:
+    for dscapseed in [42]:
+        training_cmd_PT = training_cmd_PT.format(dscap=dscap, dscapseed=dscapseed)
+        training_cmd_non_PT = training_cmd_non_PT.format(dscap=dscap, dscapseed=dscapseed)
+        print(training_cmd_PT)
+        print(training_cmd_non_PT)
