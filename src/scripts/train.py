@@ -4,26 +4,6 @@ Training script for PointGlobalMixedViT on HEP data.
 This script trains a ViT model on particle physics data using the HEPTorchDataset.
 It supports both regression and classification tasks with wandb logging and checkpointing.
 
-python -m src.scripts.train -bs 1024 --mode regression -name Train_Regression
-python -m src.scripts.train -bs 1024 --mode classifier -cc -name Train_CC 
-
-python -m src.scripts.train -bs 1024 --mode regression -name Train_Regression_SmallModel --d_model 64 --depth 3 --n_heads 4 --dropout 0.0 --attn_dropout 0.0
-python -m src.scripts.train -bs 1024 --mode classifier -cc -name Train_CC_SmallModel --d_model 32 --depth 3 --n_heads 4 --dropout 0.0 --attn_dropout 0.0
-
-
-python -m src.scripts.train -bs 1024 --mode classifier --classification_cc_1pi -name Train_CC1pi --d_model 128 --depth 4 --n_heads 4 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260210_CCpi_labels_split
-
-
-python -m src.scripts.train -bs 1024 --mode classifier --classification_cc_1pi -name Train_CC1pi --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260210_CCpi_labels_split
-
-# Binary classification: has event > 1 charged pion produced?
-python -m src.scripts.train -bs 2048 --mode classifier -npi -name Train_MultiPi --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260213_split --num_workers 2
-
-####### E available regression #######
-python -m src.scripts.train -bs 2048 --mode regression  -E-available -name Train_Regress_E_available2 --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260213v2_split --num_workers 2 --eval_interval 5000
-######################################
-
-
 
 ### 2026 02 16 - trainings with additional info #######
 
@@ -33,25 +13,11 @@ python -m src.scripts.train -bs 2048 --mode classifier -npi2 -name Train_CC1orNP
 ### Classification of MC current type ### 
 python -m src.scripts.train -bs 2048 --mode classifier -cc -name Train_CurrentType --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info_split --num_workers 10 --eval_interval 1000
 
-### E available regression ###
-python -m src.scripts.train -bs 2048 --mode regression -E-available -name Train_Regress_E_available3 --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info_split --num_workers 10 --eval_interval 1000
-
-
-# E avail regression without muons #
-python -m src.scripts.train -bs 2048 --mode regression -E-available-no-muon -name Train_Regress_E_available3_no_muon --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info1_split --num_workers 10 --eval_interval 1000
-
-
-# e avail regression no muons, no log
-python -m src.scripts.train -bs 2048 --mode regression -E-available-no-muon -name debug --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info1_split --num_workers 10 --eval_interval 1000
-
-
-python -m src.scripts.train -bs 2048 --mode regression -E-available-no-muon -name Train_Regress_E_available3_no_muon_Linear_HuberLoss_Weighted -wl  --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info1_split --num_workers 10 --eval_interval 1000
-
 
 # Longer training
 
-python -m src.scripts.train -bs 2048 --mode regression -E-available-no-muon -name E_avail_HuberW -wl --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info1_split --num_workers 10 --eval_interval 5000
-python -m src.scripts.train -bs 2048 --mode regression -E-available-no-muon  -log-mse -name E_avail_LogMSE --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info1_split --num_workers 10 --eval_interval 5000
+python -m src.scripts.train -bs 2048 --mode regression -E-available-no-muon -name E_avail_HuberW_1kEvts -wl --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info1_split --num_workers 10 --eval_interval 5000 -cap 1000 
+python -m src.scripts.train -bs 2048 --mode regression -E-available-no-muon  -log-mse -name E_avail_LogMSE_1kEvts --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info1_split --num_workers 10 --eval_interval 5000  -cap 1000
 
 """
 
@@ -88,7 +54,6 @@ def parse_args():
                         help="Number of dataloader workers")
     parser.add_argument("--max_particles", type=int, default=33,
                         help="Maximum number of particles per event")
-    
     # Model arguments
     parser.add_argument("--mode", type=str, default="regression", 
                         choices=["regression", "classifier"],
@@ -138,6 +103,10 @@ def parse_args():
                         help="Learning rate")
     parser.add_argument("--weight_decay", type=float, default=0.01,
                         help="Weight decay")
+    parser.add_argument("--event-cap", "-cap", type=int, default=-1,
+                        help="Maximum number of events to use in the dataset")
+    parser.add_argument("--event-sampler-random-state", "-seed-event-sampler", type=int, default=42,
+                        help="Random seed for event sampler")
     parser.add_argument("--epochs", type=int, default=1000,
                         help="Number of training epochs")
     parser.add_argument("--warmup_steps", type=int, default=1000,
@@ -478,6 +447,8 @@ def train(args):
         rank=0,
         size=1,
         concat_additional_info=True,
+        event_sampler_random_state=args.event_sampler_random_state,
+        nevts=args.event_cap,
     )
     
     val_loader, _ = load_data(

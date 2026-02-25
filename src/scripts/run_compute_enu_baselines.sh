@@ -14,4 +14,3 @@ python -m src.scripts.compute_enu_baselines --input-dir "$INPUT_DIR" --output-di
 #     --output-dir "$OUTPUT_DIR" \
 #     --playlist 1A
 
-

@@ -6,28 +6,18 @@ import datetime
 from src.jobs.slurm_template import SLURM_TEMPLATE_GPU
 
 """
+--------------------------------
+Current tasks:
 
-python -m src.jobs.train -name E_avail --regress-E-available -nw 5 -p
-python -m src.jobs.train -name E_avail_no_muon --regress-E-available-no-muon -nw 5 -p
-python -m src.jobs.train -name current_type --class-current-type -nw 5
-python -m src.jobs.train -name pions --class-pions -nw 5 -p
+E available regression:
 
-python -m src.jobs.train -name E_avail --regress-E-available -nw 5 --use-pretrained pretrain_s -p
-python -m src.jobs.train -name E_avail_no_muon --regress-E-available-no-muon -nw 5 --use-pretrained pretrain_s -p
-python -m src.jobs.train -name current_type --class-current-type -nw 5 --use-pretrained pretrain_s
-python -m src.jobs.train -name pions --class-pions -nw 5 --use-pretrained pretrain_s
-
-
-python -m src.jobs.train -name E_avail_LogMSE_PT_resume1 --regress-E-available-no-muon -nw 10  --loss-type mse --log -p --resume-from /global/cfs/cdirs/m3246/gregork/checkpoints/E_avail_LogMSE_PT_1A_20260224_092712/best_model_E_avail_LogMSE_PT_1A_20260224_092712.pt
-python -m src.jobs.train -name E_avail_LogMSE_resume1 --regress-E-available-no-muon -nw 10  --loss-type mse --log -p --resume-from /global/cfs/cdirs/m3246/gregork/checkpoints/E_avail_LogMSE_1A_20260224_092807/best_model_E_avail_LogMSE_1A_20260224_092807.pt
+python -m src.jobs.train -name E_avail_LogMSE --regress-E-available-no-muon -nw 10  --loss-type mse --log -p
+python -m src.jobs.train -name E_avail_LogMSE_PT --regress-E-available-no-muon -nw 10  --loss-type mse --log -p --use-pretrained pretrain_s
 
 python -m src.jobs.train -name E_avail_HuberWeighted_PT_NoLog --regress-E-available-no-muon -nw 10 --use-pretrained pretrain_s --loss-type huber --weighted-loss -p
 python -m src.jobs.train -name E_avail_HuberWeighted_NoLog --regress-E-available-no-muon -nw 10  --loss-type huber --weighted-loss -p
 
-
-python -m src.jobs.train -name E_avail_HuberWeighted_PT_NoLog_Cont1 --regress-E-available-no-muon -nw 10  --loss-type huber --weighted-loss -p --resume-from  /global/cfs/cdirs/m3246/gregork/checkpoints/E_avail_HuberWeighted_PT_NoLog_1A_20260224_191928/best_model_E_avail_HuberWeighted_PT_NoLog_1A_20260224_191928.pt
-python -m src.jobs.train -name E_avail_HuberWeighted_NoLog_Cont1 --regress-E-available-no-muon -nw 10  --loss-type huber --weighted-loss -p --resume-from  /global/cfs/cdirs/m3246/gregork/checkpoints/E_avail_HuberWeighted_NoLog_1A_20260224_192014/best_model_E_avail_HuberWeighted_NoLog_1A_20260224_192014.pt
-
+--------------------------------
 
 """
 

@@ -1,7 +1,7 @@
 import torch
 import h5py
 from argparse import ArgumentParser
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, Subset
 import requests
 import re
 import os
@@ -244,7 +244,8 @@ def load_data(
     nevts=-1,
     max_particles=33,
     task: Task = Task(),
-    concat_additional_info=True
+    concat_additional_info=True,
+    event_sampler_random_state=42
 ):
     supported_datasets = ["minerva_1A", "minerva_1B", "minerva_1C", "minerva_1D", "minerva_1E", "minerva_1F",
     "minerva_1G", "minerva_1L", "minerva_1M", "minerva_1N", "minerva_1O", "minerva_1P"]
@@ -262,11 +263,16 @@ def load_data(
             pid_idx=pid_idx,
             use_add=use_add,
             num_add=num_add,
-            nevts=nevts,
             max_particles=max_particles,
             task=task,
-            concat_additional_info=concat_additional_info
+            concat_additional_info=concat_additional_info,
+            nevts=-1 # Here, keep the whole dataset, only later we will sample a subset of the data
         )
+        if nevts > 0 and nevts < len(data):
+            print(f"Using a subset of the data: {nevts} events out of {len(data)}")
+            rng = np.random.RandomState(event_sampler_random_state)
+            indices = rng.choice(len(data), size=nevts, replace=False)
+            data = Subset(data, indices)
         loader = DataLoader(
             data,
             batch_size=batch,
