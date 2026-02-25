@@ -53,12 +53,10 @@ def collate_point_cloud(batch, max_particles=33):
         pad_shape = (target_len - tensor.shape[0],) + tuple(tensor.shape[1:])
         padding = tensor.new_zeros(pad_shape)
         return torch.cat([tensor, padding], dim=0)
-
     batch_X = [_pad_or_truncate(item["X"], max_particles) for item in batch]
     batch_y = [item["y"] for item in batch]
     batch_attention_mask = [_pad_or_truncate(item["attention_mask"], max_particles) for item in batch]
     #batch_additional_info = [_pad_or_truncate(item["data_additional_info"], max_particles) for item in batch]
-
     point_clouds = torch.stack(batch_X)  # (B, M, F)
     labels = torch.stack(batch_y)  # (B, num_classes)
     attention_masks = torch.stack(batch_attention_mask)  # (B, M)
@@ -160,7 +158,10 @@ class HEPTorchDataset(Dataset):
             print("Class weights", self.class_weights)
         elif self.task.type == "regression":
             self.regress_log = self.task.regress_log
-            print("Regressing log!")
+            if self.regress_log:
+                print("Regressing log!")
+            else:
+                print("Not regressing log")
         else:
             raise ValueError("Invalid task type")
 

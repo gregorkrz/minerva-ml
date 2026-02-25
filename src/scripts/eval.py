@@ -41,7 +41,15 @@ python -m src.scripts.eval --checkpoint Train_CC1orNPi_20260217_072842 --batch_s
 
 python -m src.scripts.eval --checkpoint Train_Regress_E_available3_no_muon_20260218_000924 --batch_size 1024 --dataset_name minerva_1A
 
+python -m src.scripts.eval --checkpoint Train_Regress_E_available3_no_muon_Linear_20260220_225855 --batch_size 1024 --dataset_name minerva_1A --no_amp
 
+python -m src.scripts.eval --checkpoint Train_Regress_E_available3_no_muon_Linear_HuberLoss_20260221_033035 --batch_size 1024 --dataset_name minerva_1A --no_amp
+python -m src.scripts.eval --checkpoint Train_Regress_E_available3_no_muon_Linear_HuberLoss_Weighted_20260221_033254 --batch_size 1024 --dataset_name minerva_1A --no_amp
+python -m src.scripts.eval --checkpoint debug_20260222_220755 --batch_size 1024 --dataset_name minerva_1A --no_amp
+
+python -m src.scripts.eval --checkpoint Train_Regress_E_available3_no_muon_Linear_HuberLoss_20260221_033035 --batch_size 1024 --dataset_name minerva_1A --no_amp --dataset_type train
+
+python -m src.scripts.eval --checkpoint Train_Regress_E_available3_no_muon_20260218_000722 --batch_size 1024 --dataset_name minerva_1A --no_amp
 
 """
 
@@ -52,7 +60,6 @@ from pathlib import Path
 from datetime import datetime
 import torch
 import torch.nn as nn
-from torch.cuda.amp import autocast
 import wandb
 from tqdm import tqdm
 import numpy as np
@@ -158,7 +165,8 @@ def evaluate(model, dataloader, device, args_dict, use_amp=False):
 
     for batch in tqdm(dataloader, desc=f"Evaluating", leave=True):
         inputs = prepare_batch(batch, device, use_cond, use_pid, coord_dim, pid_idx)
-        with autocast(enabled=use_amp):
+        amp_enabled = bool(use_amp and device.type == "cuda")
+        with torch.amp.autocast(device_type="cuda", enabled=amp_enabled):
             # Forward pass
             features = model(
                 point_cont=inputs["point_cont"],
@@ -289,7 +297,11 @@ def parse_args():
     parser.add_argument("--max_particles", type=int, default=None, 
                         help="Maximum number of particles per event. If None, will use from checkpoint.")    
     # Evaluation settings
-    parser.add_argument("--use_amp", action="store_true", default=True, help="Use automatic mixed precision")
+    parser.add_argument("--use_amp", dest="use_amp", action="store_true",
+                        help="Use automatic mixed precision")
+    parser.add_argument("--no_amp", dest="use_amp", action="store_false",
+                        help="Disable automatic mixed precision")
+    parser.set_defaults(use_amp=True)
     args = parser.parse_args()
     args.checkpoint = os.path.join(args.base_dir, args.checkpoint, "best_model.pt")
     return args
@@ -335,6 +347,7 @@ def main():
         shuffle=False,
         max_particles=max_particles,
         task=task,
+        nevts=-1,
     )
     
     print(f"Number of samples: {len(dataloader.dataset)}")
@@ -343,7 +356,7 @@ def main():
     # Create output directory
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     checkpoint_name = Path(args.checkpoint).stem
-    output_dir = os.path.join(os.path.dirname(args.checkpoint), "test_results")
+    output_dir = os.path.join(os.path.dirname(args.checkpoint), args.dataset_type + "_results")
     output_file = os.path.join(output_dir, f"outputs_{checkpoint_name}_{dataset_name}_0.npz")
     os.makedirs(output_dir, exist_ok=True)
     print(f"\nResults will be saved to: {output_dir}")

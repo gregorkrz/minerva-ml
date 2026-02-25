@@ -13,17 +13,16 @@ import time
 import traceback
 
 DATASETS = {}
-#for playlist in ["1A", "1B", "1C", "1D", "1E", "1F", "1G", "1L", "1M", "1N", "1O", "1P"]:
+
 for playlist in ["1A", "1B", "1C", "1D", "1E", "1F", "1G", "1L", "1M", "1N", "1O", "1P"]:
     DATASETS[playlist] = f"/pscratch/sd/g/gregork/MINERvA/raw_data/MediumEnergy_FHC_StandardMC_Playlist/{playlist}"
-MAX_OBJECTS = 100
 
 mc_part_keys = ["mc_FSPartPx", "mc_FSPartPy", "mc_FSPartPz", "mc_FSPartE", "mc_FSPartPDG"]
 prong_keys = ["prong_part_pos", "prong_part_E", "prong_part_score", "prong_part_mass", "prong_part_charge", "prong_part_pid", "prong_dEdXMean"]
 blob_keys = ["MasterAnaDev_BlobX", "MasterAnaDev_BlobY", "MasterAnaDev_BlobZ", "MasterAnaDev_BlobT", "MasterAnaDev_BlobTPos", "MasterAnaDev_BlobTotalE"]
 
 
-def process_single_root_file(playlist, root_file, dataset_path, output_dir, use_max_blobs_and_prongs=False):
+def process_single_root_file(playlist, root_file, dataset_path, output_dir, use_max_blobs_and_prongs=False, max_objects=150, max_blobs=20, max_prongs=10):
     """
     Process a single ROOT file.
     
@@ -55,14 +54,15 @@ def process_single_root_file(playlist, root_file, dataset_path, output_dir, use_
             global_features = get_global_features(master_ana_dev)
             mc_part = get_dense(mc_part_keys, master_ana_dev)
             truth_labels = get_event_labels(master_ana_dev, mc_part)
-            max_blobs = 20 if use_max_blobs_and_prongs else -1
-            max_prongs = 10 if use_max_blobs_and_prongs else -1 # Max. number of tokens per event is then 20(blobs)+10(prongs)+2(photons)+1(muons)=33
+            max_blobs = args.max_blobs if use_max_blobs_and_prongs else -1
+            max_prongs = args.max_prongs if use_max_blobs_and_prongs else -1 # Max. number of tokens per event is then 20(blobs)+10(prongs)+2(photons)+1(muons)=33
             n_events_written = get_event_repr_nested_tensor(
                 muons, photons, blobs, prongs, 
                 global_features, truth_labels, 
                 output_file=output_file,
                 max_blobs=max_blobs,
                 max_prongs=max_prongs,
+                max_objects=max_objects
             )
         return (True, root_file, n_events_written, None)
     except Exception:
@@ -70,7 +70,7 @@ def process_single_root_file(playlist, root_file, dataset_path, output_dir, use_
         return (False, root_file, 0, error_msg)
 
 
-def process_playlist(playlist, dataset_path, output_dir="/data", max_workers_per_playlist=4, use_max_blobs_and_prongs=False):
+def process_playlist(playlist, dataset_path, output_dir="/data", max_workers_per_playlist=4, use_max_blobs_and_prongs=False, max_objects=150, max_blobs=20, max_prongs=10):
     """
     Process all ROOT files in a playlist in parallel.
     
@@ -80,7 +80,6 @@ def process_playlist(playlist, dataset_path, output_dir="/data", max_workers_per
         output_dir: Output directory for processed files
         max_workers_per_playlist: Maximum number of ROOT files to process simultaneously
         use_max_blobs_and_prongs: Use max_blobs and max_prongs to aggregate blobs and prongs into a special token.
-    
     Returns:
         Tuple of (playlist, num_files_processed, num_files_failed, errors)
     """
@@ -95,7 +94,7 @@ def process_playlist(playlist, dataset_path, output_dir="/data", max_workers_per
     with ThreadPoolExecutor(max_workers=max_workers_per_playlist) as executor:
         # Submit all ROOT files for processing
         future_to_file = {
-            executor.submit(process_single_root_file, playlist, root_file, dataset_path, output_dir, use_max_blobs_and_prongs): root_file
+            executor.submit(process_single_root_file, playlist, root_file, dataset_path, output_dir, use_max_blobs_and_prongs, max_objects): root_file
             for root_file in root_files
         }
         # Collect results as they complete
@@ -130,7 +129,7 @@ def process_playlist(playlist, dataset_path, output_dir="/data", max_workers_per
     return (playlist, num_processed, num_failed, errors)
 
 
-def process_all_playlists_parallel(datasets, output_dir="/data", max_workers=None, max_workers_per_playlist=4, use_max_blobs_and_prongs=False):
+def process_all_playlists_parallel(datasets, output_dir="/data", max_workers=None, max_workers_per_playlist=4, use_max_blobs_and_prongs=False, max_objects=150, max_blobs=20, max_prongs=10):
     """
     Process multiple playlists in parallel (each playlist processes its files in parallel).
     
@@ -159,7 +158,7 @@ def process_all_playlists_parallel(datasets, output_dir="/data", max_workers=Non
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         # Submit all playlists
         future_to_playlist = {
-            executor.submit(process_playlist, playlist, datasets[playlist], output_dir, max_workers_per_playlist, use_max_blobs_and_prongs): playlist
+            executor.submit(process_playlist, playlist, datasets[playlist], output_dir, max_workers_per_playlist, use_max_blobs_and_prongs, max_objects, max_blobs, max_prongs): playlist
             for playlist in playlists
         }
         
@@ -222,7 +221,12 @@ if __name__ == "__main__":
     parser.add_argument("--playlists", nargs="+", default=None, help="Specific playlists to process (default: all)")
     parser.add_argument("--use-max-blobs-and-prongs", action="store_true", default=False,
                         help="Use max_blobs and max_prongs to aggregate blobs and prongs into a special token.")
-    
+    parser.add_argument("--max-blobs", type=int, default=20,
+                        help="Maximum number of blobs to process (default: 20)")
+    parser.add_argument("--max-prongs", type=int, default=10,
+                        help="Maximum number of prongs to process (default: 10)")
+    parser.add_argument("--max-objects", type=int, default=150,
+                        help="Maximum number of objects to process (default: 150) - use this only if use-max-blobs-and-prongs is False")
     args = parser.parse_args()
     
     # Filter datasets if specific playlists requested
@@ -240,7 +244,10 @@ if __name__ == "__main__":
         output_dir=args.output_dir,
         max_workers=args.max_workers,
         max_workers_per_playlist=args.max_workers_per_playlist,
-        use_max_blobs_and_prongs=args.use_max_blobs_and_prongs
+        use_max_blobs_and_prongs=args.use_max_blobs_and_prongs,
+        max_blobs=args.max_blobs,
+        max_prongs=args.max_prongs,
+        max_objects=args.max_objects
     )
     
     total_time = time.time() - start_time

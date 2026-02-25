@@ -375,8 +375,12 @@ def get_event_repr_nested_tensor(muons, photons, blobs, prongs, global_features,
             # Keep only the max_objects per event
             n_to_keep = min(len(event_features), max_objects)
             event_features = event_features[event_features_idx_energy[:n_to_keep]]
+            event_additional_info = event_additional_info[event_features_idx_energy[:n_to_keep]]
         else:
-            assert event_features.shape[0] <= max_prongs + max_blobs + 2 + 1, f"Event features length {event_features.shape[0]} > max_prongs + max_blobs + 2 + 1 {max_prongs + max_blobs + 2 + 1}"
+            if max_blobs > 0 and max_prongs > 0:
+                assert event_features.shape[0] <= max_prongs + max_blobs + 2 + 1, f"Event features length {event_features.shape[0]} > max_prongs + max_blobs + 2 + 1 {max_prongs + max_blobs + 2 + 1}"
+            else:
+                assert event_features.shape[0] <= max_objects, f"Event features length {event_features.shape[0]} > max_objects {max_objects}"
         data_nested.append(event_features)
         data_nested_pos_and_timing.append(event_additional_info)
         # assert that shapes are consistent (event_features.shape[0] == event_additional_info.shape[0])

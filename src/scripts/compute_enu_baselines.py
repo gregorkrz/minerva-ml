@@ -9,6 +9,9 @@ neutrino energy reconstruction methods:
 3. Enu_from_muon+proton (with proton correction)
 4. E_mu+E_recoil
 5. E_mu+E_recoil_CCinc
+6. Reco muon passing the criteria theta<20 degrees and 1.5 < |p| < 20 GeV?
+7. Ground truth q0, total lab-frame energy transfer
+8. Ground truth q3, three momentum transfer
 
 Results are stored as numpy arrays for each playlist.
 
@@ -45,6 +48,33 @@ def get_muon_kinematics(master_ana_dev):
         'pz': muon_pz,
         #"theta": muon_theta_cos,
     }
+
+def get_muon_filter_CC_paper(muon_kinematics):
+    Emu = muon_kinematics['E']
+    px = muon_kinematics['px']
+    py = muon_kinematics['py']
+    pz = muon_kinematics['pz']
+    pmu = np.sqrt(px**2 + py**2 + pz**2)
+
+    muon_theta_cos = pz / pmu
+    
+    # Constants (in MeV)
+    proton_mass = 938.2720813505859
+    muon_mass = 105.6583745
+    
+    is_passing_filter = (muon_theta_cos > np.cos(20 * np.pi / 180)) & \
+                (pmu > 1.5 * 1000) & \
+                (pmu < 20 * 1000)
+    return is_passing_filter
+
+def get_q0(muon_kinematics, mc_incomingE):
+    return mc_incomingE - muon_kinematics['E']
+
+def get_q3(muon_kinematics, mc_incomingE, q0):
+    muon_mass = 105.6583745
+    pmu = np.sqrt(muon_kinematics['px']**2 + muon_kinematics['py']**2 + muon_kinematics['pz']**2)
+    Qsquared = 2 * mc_incomingE * (muon_kinematics['E'] - pmu* muon_kinematics['pz'] / pmu) - muon_mass**2
+    return np.sqrt(Qsquared + q0**2)
 
 
 def compute_ccqe_formula(muon_kinematics):
@@ -149,8 +179,13 @@ def compute_enu_baselines(root_file_path):
         E_mu_plus_recoil_CCinc = E_muon + E_recoil_CCinc
         E_mu_plus_recoil_CCinc[invalid_muon | invalid_E_recoil_CCinc] = -1
 
-        
-        
+        # 6. Reco muon passing the criteria theta<20 degrees and 1.5 < |p| < 20 GeV?
+        muon_filter_CC_paper = get_muon_filter_CC_paper(muon_kinematics)
+
+        # 7. Ground truth q0, total lab-frame energy transfer
+        q0 = get_q0(muon_kinematics, E_true)
+        q3 = get_q3(muon_kinematics, E_true, q0)
+
         return {
             'CCQE_formula': E_nu_from_formula,
             'Enu_from_muon': E_nu_from_df,
@@ -161,6 +196,9 @@ def compute_enu_baselines(root_file_path):
             'E_true': E_true,
             "E_recoil_only": E_recoil,
             "E_recoil_CCinc_only": E_recoil_CCinc,
+            "muon_filter_CC_paper": muon_filter_CC_paper,
+            "q0": q0,
+            "q3": q3,
         }
 
 
@@ -191,7 +229,12 @@ def process_playlist(playlist_path, playlist_name):
         'E_mu+E_recoil': [],
         'E_mu+E_recoil_CCinc': [],
         'E_muon': [],
-        "E_true": []
+        "E_true": [],
+        "E_recoil_only": [],
+        "E_recoil_CCinc_only": [],
+        "muon_filter_CC_paper": [],
+        "q0": [],
+        "q3": [],
     }
     
     # Process each file
@@ -221,7 +264,7 @@ def process_playlist(playlist_path, playlist_name):
     print(f"\n[{playlist_name}] Statistics:")
     print(f"  Total events: {n_events}")
     for key in ['CCQE_formula', 'Enu_from_muon', 'Enu_from_muon+proton', 
-                'E_mu+E_recoil', 'E_mu+E_recoil_CCinc', 'E_true']:
+                'E_mu+E_recoil', 'E_mu+E_recoil_CCinc', 'E_true', 'muon_filter_CC_paper', 'q0', 'q3']:
         valid_events = (concatenated_results[key] > 0).sum()
         print(f"  {key}: {valid_events}/{n_events} valid ({100*valid_events/n_events:.1f}%)")
     
@@ -280,18 +323,14 @@ def main():
         
         if results is not None:
             all_playlist_results[playlist] = results
-            
             # Save results for this playlist
             #output_file = os.path.join(args.output_dir, f"{playlist}_enu_baselines.pkl")
             #with open(output_file, 'wb') as f:
             #    pickle.dump(results, f)
-            
             # Also save as numpy arrays for easier loading
             output_npz = os.path.join(args.output_dir, f"{playlist}_enu_baselines.npz")
             np.savez(output_npz, **results)
-            
             print(f"✓ [{playlist}] Saved to {output_npz}")
-        
         print("=" * 80)
     
     # Save combined results

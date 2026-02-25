@@ -40,6 +40,19 @@ python -m src.scripts.train -bs 2048 --mode regression -E-available -name Train_
 # E avail regression without muons #
 python -m src.scripts.train -bs 2048 --mode regression -E-available-no-muon -name Train_Regress_E_available3_no_muon --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info1_split --num_workers 10 --eval_interval 1000
 
+
+# e avail regression no muons, no log
+python -m src.scripts.train -bs 2048 --mode regression -E-available-no-muon -name debug --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info1_split --num_workers 10 --eval_interval 1000
+
+
+python -m src.scripts.train -bs 2048 --mode regression -E-available-no-muon -name Train_Regress_E_available3_no_muon_Linear_HuberLoss_Weighted -wl  --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info1_split --num_workers 10 --eval_interval 1000
+
+
+# Longer training
+
+python -m src.scripts.train -bs 2048 --mode regression -E-available-no-muon -name E_avail_HuberW -wl --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info1_split --num_workers 10 --eval_interval 5000
+python -m src.scripts.train -bs 2048 --mode regression -E-available-no-muon  -log-mse -name E_avail_LogMSE --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info1_split --num_workers 10 --eval_interval 5000
+
 """
 
 import argparse
@@ -49,6 +62,7 @@ from pathlib import Path
 from datetime import datetime
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 from torch.cuda.amp import GradScaler, autocast
 import wandb
@@ -115,19 +129,22 @@ def parse_args():
                         help="Dropout rate")
     parser.add_argument("--attn_dropout", type=float, default=0.0,
                         help="Attention dropout rate")
-    
+    parser.add_argument("--weighted_regression_loss", "-wl", action="store_true",
+                        help="Use weighted regression loss")
+    parser.add_argument("--log_MSE_loss", "-log-mse", action="store_true",
+                        help="Use log MSE loss")
     # Training arguments
     parser.add_argument("--lr", type=float, default=1e-4,
                         help="Learning rate")
     parser.add_argument("--weight_decay", type=float, default=0.01,
                         help="Weight decay")
-    parser.add_argument("--epochs", type=int, default=100,
+    parser.add_argument("--epochs", type=int, default=1000,
                         help="Number of training epochs")
     parser.add_argument("--warmup_steps", type=int, default=1000,
                         help="Number of warmup steps")
     parser.add_argument("--grad_clip", type=float, default=1.0,
                         help="Gradient clipping value")
-    parser.add_argument("--use_amp", action="store_true", default=True,
+    parser.add_argument("--use_amp", action="store_true", default=False,
                         help="Use automatic mixed precision")
     parser.add_argument("--max_samples_per_epoch", type=int, default=None,
                         help="Maximum number of samples to use per epoch")
@@ -137,7 +154,6 @@ def parse_args():
                         help="Number of optimizer steps in single-batch overfit mode")
     parser.add_argument("--single_batch_eval_interval", type=int, default=100,
                         help="How often to log overfit-batch eval metrics in single-batch mode")
-    
     # Logging and evaluation
     parser.add_argument("--log_interval", type=int, default=1000,
                         help="Log training loss every N steps")
@@ -153,7 +169,6 @@ def parse_args():
                         help="Name for this training run (timestamp will be appended)")
     parser.add_argument("--output_dir", type=str, default="/global/cfs/cdirs/m3246/gregork/checkpoints",
                         help="Base output directory for checkpoints (run_name with timestamp will be appended)")
-    
     # Other
     parser.add_argument("--seed", type=int, default=None,
                         help="Random seed")
@@ -161,7 +176,6 @@ def parse_args():
                         help="Path to checkpoint to resume from")
     parser.add_argument("--no_wandb", action="store_true",
                         help="Disable wandb logging")
-    
     return parser.parse_args()
 
 
@@ -191,7 +205,9 @@ def create_task(args):
             class_label_idx = 8
         elif args.regress_E_available_no_muon:
             class_label_idx = 9
-        return Task(type="regression", regress_E_available=args.regress_E_available, regress_E_available_no_muon=args.regress_E_available_no_muon, class_label_idx=class_label_idx)
+        return Task(type="regression", regress_E_available=args.regress_E_available,
+                    regress_E_available_no_muon=args.regress_E_available_no_muon,
+                    class_label_idx=class_label_idx, regress_log=False)
     elif args.mode == "classifier":
         if "classification_n_pions" not in args.__dict__:
             args.classification_n_pions = False
@@ -318,8 +334,21 @@ def prepare_batch(batch, device, use_cond=False, use_pid=False, coord_dim=2, pid
         "y": y,
     }
 
+def compute_weighted_regression_loss(preds, targets, max_weight=10.0, min_weight=0.1):
+    """Compute per-sample weighted Huber loss with 1/E weights."""
+    targets = targets.to(dtype=preds.dtype)
+    per_sample_loss = F.huber_loss(preds, targets, reduction="none")
+    safe_targets = torch.where(targets > 0, targets, torch.ones_like(targets))
+    weights = torch.where(
+        targets > 0,
+        1.0 / safe_targets,
+        torch.full_like(targets, max_weight),
+    )
+    weights = torch.clamp(weights, max=max_weight, min=min_weight)
+    return (per_sample_loss * weights).mean()
+
 @torch.no_grad()
-def evaluate(model, dataloader, device, args, class_weights, use_amp=False):
+def evaluate(model, dataloader, device, args, class_weights, use_amp=False, step=0):
     """Run evaluation on validation set."""
     model.eval()
     
@@ -328,7 +357,10 @@ def evaluate(model, dataloader, device, args, class_weights, use_amp=False):
     
     # Setup loss function
     if args.mode == "regression":
-        criterion = nn.MSELoss()
+        if args.log_MSE_loss:
+            criterion = make_log_loss(nn.MSELoss(reduction="none"))
+        else:
+            criterion = nn.HuberLoss()
     else:
         criterion = nn.CrossEntropyLoss(weight=class_weights)
     for batch in tqdm(dataloader, desc="Evaluating", leave=False):
@@ -346,7 +378,10 @@ def evaluate(model, dataloader, device, args, class_weights, use_amp=False):
             logits = model.head(features)
             # Compute loss
             if args.mode == "regression":
-                loss = criterion(logits.squeeze(-1), inputs["y"])
+                if args.weighted_regression_loss:
+                    loss = compute_weighted_regression_loss(logits.squeeze(-1), inputs["y"])
+                else:
+                    loss = criterion(logits.squeeze(-1), inputs["y"])
             else:
                 loss = criterion(logits, inputs["y"])
 
@@ -393,6 +428,15 @@ def load_checkpoint(checkpoint_path, model, optimizer=None, scheduler=None, scal
     start_step = checkpoint.get("step", 0)
     print(f"Loaded checkpoint from {checkpoint_path}, resuming from step {start_step}")
     return start_step
+
+# Make a log loss out of a criterion: the loss is criterion(log(pred+eps) - log(target+eps))
+
+def make_log_loss(criterion):
+    eps = 1e-6
+    def loss(pred, target):
+        pred_mask = (pred >= 0).float()
+        return criterion(torch.log(pred_mask*pred+eps), torch.log(target+eps)).mean()
+    return loss
 
 
 def train(args):
@@ -468,11 +512,14 @@ def train(args):
     task.class_weights = class_weights
     # Setup loss function
     if task.type == "regression":
-        criterion = nn.MSELoss()
+        if args.log_MSE_loss:
+            criterion = make_log_loss(nn.MSELoss(reduction="none"))
+        else:
+            criterion = nn.HuberLoss()
     else:
         criterion = nn.CrossEntropyLoss(weight=torch.tensor(task.class_weights, device=device, dtype=torch.float32))
-    # Calculate number of epochs needed to reach max_steps
     
+    # Calculate number of epochs needed to reach max_steps
     steps_per_epoch = len(train_loader)
     max_steps = args.epochs * steps_per_epoch
 
@@ -535,10 +582,12 @@ def train(args):
                     attn_mask=fixed_inputs["attn_mask"],
                 )
                 logits = model.head(features)
-                if args.mode == "regression":
-                    loss = criterion(logits.squeeze(-1), fixed_inputs["y"])
+                if args.mode == "regression": # For the first 5000 steps, use everything, and after that, just ignore the top 1% losses - probably hard to predict events anyway
+                    if args.weighted_regression_loss:
+                        loss = compute_weighted_regression_loss(logits.squeeze(-1), fixed_inputs["y"])
+                    else:
+                        loss = criterion(logits.squeeze(-1), fixed_inputs["y"])
                     # every 100 steps, print few examples of y pred and y true
-                    
                 else:
                     loss = criterion(logits, fixed_inputs["y"])
 
@@ -610,7 +659,11 @@ def train(args):
                         )
                         eval_logits = model.head(eval_features)
                         if args.mode == "regression":
-                            eval_loss = criterion(eval_logits.squeeze(-1), fixed_inputs["y"]).item()
+                            if args.weighted_regression_loss:
+                                eval_loss = compute_weighted_regression_loss(eval_logits.squeeze(-1), fixed_inputs["y"]).item()
+                            else:
+                                eval_loss = criterion(eval_logits.squeeze(-1), fixed_inputs["y"]).item()
+                               
                         else:
                             eval_loss = criterion(eval_logits, fixed_inputs["y"]).item()
                     model.train()
@@ -654,7 +707,11 @@ def train(args):
 
                     # Compute loss
                     if args.mode == "regression":
-                        loss = criterion(logits.squeeze(-1), inputs["y"])
+                        if args.weighted_regression_loss:
+                            loss = compute_weighted_regression_loss(logits.squeeze(-1), inputs["y"])
+                        else:
+                            loss = criterion(logits.squeeze(-1), inputs["y"])
+                           
                         # if step % 50 == 0:
                         #     print(f"Step {step}: y pred: {logits.squeeze(-1).detach().cpu().numpy()[:5]}, y true: {inputs['y'].detach().cpu().numpy()[:5]}")
                     else:
@@ -733,7 +790,7 @@ def train(args):
                 # Evaluation
                 if step % args.eval_interval == 0 or step == 1:
                     epoch_pbar.write(f"\nRunning evaluation at step {step}...")
-                    eval_metrics = evaluate(model, val_loader, device, args, torch.tensor(task.class_weights, device=device, dtype=torch.float32) if task.type == "classifier" else None, args.use_amp)
+                    eval_metrics = evaluate(model, val_loader, device, args, torch.tensor(task.class_weights, device=device, dtype=torch.float32) if task.type == "classifier" else None, args.use_amp, step)
                     
                     epoch_pbar.write(f"Eval loss: {eval_metrics['eval_loss']:.4f}")
                     # save as best_model.pt if val loss is lower
@@ -748,7 +805,7 @@ def train(args):
                         wandb.log({"best_val_loss": best_val_loss}, step=step)
     # Final evaluation
     print("\nRunning final evaluation...")
-    eval_metrics = evaluate(model, val_loader, device, args, torch.tensor(task.class_weights, device=device, dtype=torch.float32) if task.type == "classifier" else None, args.use_amp)
+    eval_metrics = evaluate(model, val_loader, device, args, torch.tensor(task.class_weights, device=device, dtype=torch.float32) if task.type == "classifier" else None, args.use_amp, step)
     print(f"Final eval loss: {eval_metrics['eval_loss']:.4f}")
     
     if not args.no_wandb:

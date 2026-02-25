@@ -17,6 +17,18 @@ python -m src.jobs.train -name E_avail_no_muon --regress-E-available-no-muon -nw
 python -m src.jobs.train -name current_type --class-current-type -nw 5 --use-pretrained pretrain_s
 python -m src.jobs.train -name pions --class-pions -nw 5 --use-pretrained pretrain_s
 
+
+python -m src.jobs.train -name E_avail_LogMSE_PT_resume1 --regress-E-available-no-muon -nw 10  --loss-type mse --log -p --resume-from /global/cfs/cdirs/m3246/gregork/checkpoints/E_avail_LogMSE_PT_1A_20260224_092712/best_model_E_avail_LogMSE_PT_1A_20260224_092712.pt
+python -m src.jobs.train -name E_avail_LogMSE_resume1 --regress-E-available-no-muon -nw 10  --loss-type mse --log -p --resume-from /global/cfs/cdirs/m3246/gregork/checkpoints/E_avail_LogMSE_1A_20260224_092807/best_model_E_avail_LogMSE_1A_20260224_092807.pt
+
+python -m src.jobs.train -name E_avail_HuberWeighted_PT_NoLog --regress-E-available-no-muon -nw 10 --use-pretrained pretrain_s --loss-type huber --weighted-loss -p
+python -m src.jobs.train -name E_avail_HuberWeighted_NoLog --regress-E-available-no-muon -nw 10  --loss-type huber --weighted-loss -p
+
+
+python -m src.jobs.train -name E_avail_HuberWeighted_PT_NoLog_Cont1 --regress-E-available-no-muon -nw 10  --loss-type huber --weighted-loss -p --resume-from  /global/cfs/cdirs/m3246/gregork/checkpoints/E_avail_HuberWeighted_PT_NoLog_1A_20260224_191928/best_model_E_avail_HuberWeighted_PT_NoLog_1A_20260224_191928.pt
+python -m src.jobs.train -name E_avail_HuberWeighted_NoLog_Cont1 --regress-E-available-no-muon -nw 10  --loss-type huber --weighted-loss -p --resume-from  /global/cfs/cdirs/m3246/gregork/checkpoints/E_avail_HuberWeighted_NoLog_1A_20260224_192014/best_model_E_avail_HuberWeighted_NoLog_1A_20260224_192014.pt
+
+
 """
 
 parser = argparse.ArgumentParser()
@@ -35,11 +47,15 @@ parser.add_argument("--max-particles", type=int, default=33)
 parser.add_argument("--print-cmd-only", "-print-only", action="store_true", default=False)
 parser.add_argument("--batch-size", "-bs", type=int, default=2048)
 parser.add_argument("--num-workers", "-nw", type=int, default=2)
+parser.add_argument("--loss-type", "-loss_type", type=str, default="l1")
+parser.add_argument("--log", "-log", action="store_true", default=False)
 # add --class-event-type  and --class-current-type
 parser.add_argument("--class-current-type", "-cc",  action="store_true", default=False)
 parser.add_argument("--class-pions", "-cp",  action="store_true", default=False)
 parser.add_argument("--regress-E-available", "-E-available",  action="store_true", default=False)
 parser.add_argument("--regress-E-available-no-muon", "-E-available-no-muon",  action="store_true", default=False)
+parser.add_argument("--weighted-loss", "-wl", action="store_true", default=False)
+parser.add_argument("--dataset-cap", "-cap", type=int, default=None, help="If set, cap the dataset to this number of training samples.")
 
 args = parser.parse_args()
 
@@ -47,7 +63,8 @@ DATA_DIR = args.data_dir
 
 DATASETS = {
     "default_Minerva": f"{DATA_DIR}/Minerva/20260216_additional_info1_split",
-    "Minerva_v2": f"{DATA_DIR}/Minerva/20260201_all_max_blobs_and_prongs_split_fix_anomalies"
+    "Minerva_v2": f"{DATA_DIR}/Minerva/20260201_all_max_blobs_and_prongs_split_fix_anomalies",
+    "Minerva_150obj": f"{DATA_DIR}/Minerva/20260223_150obj_split"
 }
 
 timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -64,12 +81,19 @@ export DATASET_PATH={DATASETS[args.dataset]}
 export CHECKPOINT_DIR={output_dir}
 """
 
-regress_log_flag = "  --regression-loss mse "
 class_current_type_flag = ""
 class_pions_flag = ""
 regress_E_available_flag = ""
 regress_E_available_no_muon_flag = ""
-
+log_flag = ""
+weighted_loss_flag = ""
+dataset_cap_flag = ""
+if args.log:
+    log_flag = " --regress-log "
+if args.weighted_loss:
+    weighted_loss_flag = " --weight-loss "
+if args.dataset_cap is not None:
+    dataset_cap_flag = f" --dataset-cap {args.dataset_cap} "
 if args.class_current_type:
     class_current_type_flag = " --class-current-type "
     mode = "classifier"
@@ -86,21 +110,20 @@ else:
     raise ValueError(f"Invalid task")
 
 train_cmd = f""" -m omnilearned.cli train \
-  --output_dir $CHECKPOINT_DIR \
+  --output_dir $CHECKPOINT_DIR  {log_flag} \
   --save-tag {job_name} \
   --dataset minerva_{args.playlist} \
   --path $DATASET_PATH \
   --mode {mode} \
-  {regress_log_flag} \
   --batch {args.batch_size} \
-  --epoch 100 \
+  --epoch 1000 \
   --lr 5e-5 \
   --size small \
-  --wd 0.1 \
+  --wd 0.1 {dataset_cap_flag} \
   --num-workers {args.num_workers} \
   --use-pid \
-  --wandb \
-  --max-particles {args.max_particles} {class_current_type_flag} {class_pions_flag} {regress_E_available_flag} {regress_E_available_no_muon_flag}"""
+  --wandb --regression-loss {args.loss_type} \
+  --max-particles {args.max_particles} {weighted_loss_flag} {class_current_type_flag} {class_pions_flag} {regress_E_available_flag} {regress_E_available_no_muon_flag}"""
 
 # Handle pretrained checkpoint for fine-tuning
 if args.use_pretrained is not None and args.resume_from is not None:
@@ -110,20 +133,17 @@ if args.use_pretrained is not None:
     # Check if it's a file path
     if os.path.isfile(args.use_pretrained):
         print(f"Detected pretrained checkpoint as file path: {args.use_pretrained}")
-        
         # Copy the checkpoint to the output directory
         checkpoint_basename = os.path.basename(args.use_pretrained)
         dest_path = os.path.join(output_dir, checkpoint_basename)
         print(f"Copying checkpoint: {args.use_pretrained} -> {dest_path}")
         shutil.copy2(args.use_pretrained, dest_path)
-        
         # Extract the tag from the filename (remove "best_model_" prefix and ".pt" suffix)
         if checkpoint_basename.startswith("best_model_") and checkpoint_basename.endswith(".pt"):
             pretrain_tag = checkpoint_basename[11:-3]  # Remove "best_model_" and ".pt"
         else:
             # If it doesn't follow the expected naming convention, use the basename without extension
             pretrain_tag = os.path.splitext(checkpoint_basename)[0]
-        
         print(f"Using pretrain_tag: {pretrain_tag}")
         train_cmd += f" --pretrain-tag {pretrain_tag} --fine-tune"
     else:
@@ -167,4 +187,3 @@ with open(sbatch_file, "w") as f:
 
 if args.run:
     os.system(f"sbatch {sbatch_file}")
-
