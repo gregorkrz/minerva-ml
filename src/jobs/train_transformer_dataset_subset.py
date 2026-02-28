@@ -6,7 +6,7 @@ from datetime import datetime as dt
 base_cmd = "python -m src.scripts.train -bs 2048 --mode regression -E-available-no-muon -name SmallDataset_E_avail_LogMSE_{suffix} -wl --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info1_split --num_workers 10  -log-mse  --eval_interval 1000 -cap {data_cap} -seed-event-sampler {seed} --epochs 1000000"
 
 cmds = []
-for data_cap in [100000, 500000, 1000000]:
+for data_cap in [2000000, 4000000]:
     for seed in [42, 43, 44]:
         cmd = base_cmd.format(suffix=f"{data_cap}_Evts_seed_{seed}", data_cap=data_cap, seed=seed)
         cmds.append(cmd)

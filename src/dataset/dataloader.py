@@ -102,8 +102,10 @@ def get_CC1orNPi_labels(file_truth_labels):
     labels[is_cc & one_pi_plus & ~one_pi_minus] = 0 # CC 1pi+
     labels[is_cc & one_pi_minus & ~one_pi_plus] = 1 # CC 1pi-
     labels[is_cc & multi_pions] = 2 # CC N Pi +-
-    labels[~is_cc] = 3 # OTHER
-    return labels
+    labels[~is_cc] = 3 # Not CC
+    labels[is_cc & ((n_pi_plus + n_pi_minus) == 0)] = 4 # CC other
+    return labels # labels: 0=CC 1pi+, 1=CC 1pi-, 2=CC N charged pions-, 3=OTHER
+
 
 class HEPTorchDataset(Dataset):
     def __init__(
@@ -177,11 +179,9 @@ class HEPTorchDataset(Dataset):
             sample_idx = idx - self.files_n_events_sum[file_idx - 1]
         else:
             sample_idx = idx
-        
         data = self.files_values[file_idx][self.files_offsets[file_idx][sample_idx]:self.files_offsets[file_idx][sample_idx+1]]
         data_additional_info = self.files_values_additional_info[file_idx][self.files_offsets_additional_info[file_idx][sample_idx]:self.files_offsets_additional_info[file_idx][sample_idx+1]]
         valid_attention_mask = torch.ones(data.shape[0], dtype=data.dtype)
-        
         # pad up to max_particles
         #if data.shape[0] <= self.max_particles:
         #    valid_attention_mask = torch.ones(data.shape[0])

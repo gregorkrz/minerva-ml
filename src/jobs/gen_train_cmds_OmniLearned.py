@@ -16,8 +16,14 @@ python -m src.jobs.gen_train_cmds_OmniLearned -name E_avail_LogMSE_PT --regress-
 
 python -m src.jobs.gen_train_cmds_OmniLearned -name E_avail_HuberWeighted_PT_NoLog --regress-E-available-no-muon -nw 10 --use-pretrained pretrain_s --loss-type huber --weighted-loss -p
 python -m src.jobs.gen_train_cmds_OmniLearned -name E_avail_HuberWeighted_NoLog --regress-E-available-no-muon -nw 10  --loss-type huber --weighted-loss -p
+
+
+Ch. pion classification:
+python -m src.jobs.gen_train_cmds_OmniLearned -name Train_CC1orNPi_Fix260226 -nw 10 --class-pions -p --use-pretrained pretrain_s 
+python -m src.jobs.gen_train_cmds_OmniLearned -name Train_CC1orNPi_Fix260226_PT -nw 10 --class-pions -p
 --------------------------------
 """
+
 
 parser = argparse.ArgumentParser()
 

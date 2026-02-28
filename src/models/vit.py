@@ -260,6 +260,7 @@ class PointGlobalMixedViT(nn.Module):
                 cat_emb_dim=cfg.cat_emb_dim,
                 cont_hidden=cfg.cont_hidden,
                 dropout=cfg.dropout,
+                use_cont_layernorm=False,
             )
             self.evt_bias = nn.Parameter(torch.zeros(1, 1, cfg.d_model))
             nn.init.trunc_normal_(self.evt_bias, std=0.02)
@@ -270,6 +271,15 @@ class PointGlobalMixedViT(nn.Module):
             for _ in range(cfg.depth)
         ])
         self.norm = nn.LayerNorm(cfg.d_model)
+
+        # When an EVT token exists, fuse its final representation with the CLS
+        # token so that global_encoder receives direct gradients from step 1.
+        self._output_dim = cfg.d_model
+        if cfg.use_cls_token and cfg.use_event_token:
+            self._output_dim = 2 * cfg.d_model
+            self.cls_evt_proj = nn.Linear(2 * cfg.d_model, cfg.d_model)
+        else:
+            self.cls_evt_proj = None
 
     def forward(
         self,
@@ -302,7 +312,15 @@ class PointGlobalMixedViT(nn.Module):
             x = blk(x, attn_mask=attn_mask)
         x = self.norm(x)
 
-        return x[:, 0] if self.cls is not None else x
+        if self.cls is None:
+            return x
+
+        cls_out = x[:, 0]
+        
+        if self.cls_evt_proj is not None:
+            evt_out = x[:, 1]
+            cls_out = self.cls_evt_proj(torch.cat([cls_out, evt_out], dim=-1))
+        return cls_out
 
 
 # ---------------- Example ----------------

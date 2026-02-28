@@ -54,8 +54,8 @@ def process_single_root_file(playlist, root_file, dataset_path, output_dir, use_
             global_features = get_global_features(master_ana_dev)
             mc_part = get_dense(mc_part_keys, master_ana_dev)
             truth_labels = get_event_labels(master_ana_dev, mc_part)
-            max_blobs = args.max_blobs if use_max_blobs_and_prongs else -1
-            max_prongs = args.max_prongs if use_max_blobs_and_prongs else -1 # Max. number of tokens per event is then 20(blobs)+10(prongs)+2(photons)+1(muons)=33
+            max_blobs = max_blobs if use_max_blobs_and_prongs else -1
+            max_prongs = max_prongs if use_max_blobs_and_prongs else -1 # Max. number of tokens per event is then 20(blobs)+10(prongs)+2(photons)+1(muons)=33
             n_events_written = get_event_repr_nested_tensor(
                 muons, photons, blobs, prongs, 
                 global_features, truth_labels, 
@@ -94,7 +94,7 @@ def process_playlist(playlist, dataset_path, output_dir="/data", max_workers_per
     with ThreadPoolExecutor(max_workers=max_workers_per_playlist) as executor:
         # Submit all ROOT files for processing
         future_to_file = {
-            executor.submit(process_single_root_file, playlist, root_file, dataset_path, output_dir, use_max_blobs_and_prongs, max_objects): root_file
+            executor.submit(process_single_root_file, playlist, root_file, dataset_path, output_dir, use_max_blobs_and_prongs, max_objects, max_blobs, max_prongs): root_file
             for root_file in root_files
         }
         # Collect results as they complete
@@ -209,8 +209,8 @@ def print_summary(all_results):
     print(f"TOTAL: {total_success}/{total_files} files succeeded, {total_failed} failed")
     print("=" * 80)
 
-
 # python -m src.scripts.preprocess_dataset --output-dir /data/Minerva/20260127_nested --max-workers 1 --max-workers-per-playlist 10 --playlists 1A
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Process MINERvA ROOT files to HDF5 format")
     parser.add_argument("--output-dir", default="/data", help="Output directory for HDF5 files")

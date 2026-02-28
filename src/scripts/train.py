@@ -13,11 +13,13 @@ python -m src.scripts.train -bs 2048 --mode classifier -npi2 -name Train_CC1orNP
 ### Classification of MC current type ### 
 python -m src.scripts.train -bs 2048 --mode classifier -cc -name Train_CurrentType --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info_split --num_workers 10 --eval_interval 1000
 
-
 # Longer training
+python -m src.scripts.train -bs 2048 --mode regression -E-available-no-muon  -log-mse -name Debug_E_avail_LogMSE --lr 5e-4 --optimizer adamw --d_model 128 --depth 4 --n_heads 8 --dropout 0.1 --attn_dropout 0.1 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info1_split --num_workers 5 --eval_interval 1000
+python -m src.scripts.train -bs 2048 --mode regression -E-available-no-muon  -log-mse -name Debug_E_avail_LogMSE_Reprod --lr 5e-4 --optimizer lion --weight_decay 0.3  --d_model 128 --depth 4 --n_heads 8 --dropout 0.1 --attn_dropout 0.1 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info1_split --num_workers 5 --eval_interval 1000
 
-python -m src.scripts.train -bs 2048 --mode regression -E-available-no-muon -name E_avail_HuberW_1kEvts -wl --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info1_split --num_workers 10 --eval_interval 5000 -cap 1000 
-python -m src.scripts.train -bs 2048 --mode regression -E-available-no-muon  -log-mse -name E_avail_LogMSE_1kEvts --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info1_split --num_workers 10 --eval_interval 5000  -cap 1000
+# Pion classification 25. 2. 2026
+
+python -m src.scripts.train -bs 2048 --mode classifier -npi2 -name Debug --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info_split --num_workers 10 --eval_interval 1000
 
 """
 
@@ -31,6 +33,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.cuda.amp import GradScaler, autocast
+from pytorch_optimizer import Lion
 import wandb
 from tqdm import tqdm
 import numpy as np
@@ -101,7 +104,7 @@ def parse_args():
     # Training arguments
     parser.add_argument("--lr", type=float, default=1e-4,
                         help="Learning rate")
-    parser.add_argument("--weight_decay", type=float, default=0.01,
+    parser.add_argument("--weight_decay", "-wd", type=float, default=0.01,
                         help="Weight decay")
     parser.add_argument("--event-cap", "-cap", type=int, default=-1,
                         help="Maximum number of events to use in the dataset")
@@ -145,6 +148,9 @@ def parse_args():
                         help="Path to checkpoint to resume from")
     parser.add_argument("--no_wandb", action="store_true",
                         help="Disable wandb logging")
+    parser.add_argument("--optimizer", type=str, default="adamw",
+                        choices=["adamw", "lion"],
+                        help="Optimizer to use")
     return parser.parse_args()
 
 
@@ -198,8 +204,8 @@ def create_task(args):
             class_idx_map = {0: 0, 1: 1}
         elif args.classification_CC1orNPi:
             class_label_idx = -1
-            class_idx = [0, 1, 2, 3]
-            class_idx_map = {0: 0, 1: 1, 2: 2, 3: 3}
+            class_idx = [0, 1, 2, 3, 4]
+            class_idx_map = {0: 0, 1: 1, 2: 2, 3: 3, 4: 4}
         return Task(type="classifier", classification_event_type=args.classification_event_type, 
             classification_current=args.classification_current, classification_cc_1pi=args.classification_cc_1pi,
             classification_n_pions=args.classification_n_pions, class_idx=class_idx, class_idx_map=class_idx_map, class_label_idx=class_label_idx,
@@ -484,7 +490,7 @@ def train(args):
     # Setup loss function
     if task.type == "regression":
         if args.log_MSE_loss:
-            criterion = make_log_loss(nn.MSELoss(reduction="none"))
+            criterion = 1(nn.MSELoss(reduction="none"))
         else:
             criterion = nn.HuberLoss()
     else:
@@ -495,7 +501,13 @@ def train(args):
     max_steps = args.epochs * steps_per_epoch
 
     # Setup optimizer and scheduler
-    optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    if args.optimizer == "adamw":
+        optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    elif args.optimizer == "lion":
+        optimizer = Lion(model.parameters(), lr=args.lr, weight_decay=args.weight_decay, betas=(0.95, 0.98))
+    else:
+        raise ValueError(f"Invalid optimizer: {args.optimizer}")
+    
     scheduler = get_lr_schedule(optimizer, args.warmup_steps, max_steps=max_steps)
     
     # Setup AMP

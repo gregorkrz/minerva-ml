@@ -51,6 +51,8 @@ python -m src.scripts.eval --checkpoint Train_Regress_E_available3_no_muon_Linea
 
 python -m src.scripts.eval --checkpoint Train_Regress_E_available3_no_muon_20260218_000722 --batch_size 1024 --dataset_name minerva_1A --no_amp
 
+
+python -m src.scripts.eval --checkpoint Train_CC1orNPi_Fix250226_20260225_235334 --batch_size 1024 --dataset_name minerva_1A
 """
 
 import argparse
