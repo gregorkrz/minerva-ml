@@ -17,6 +17,10 @@ python -m src.scripts.train -bs 2048 --mode classifier -cc -name Train_CurrentTy
 python -m src.scripts.train -bs 2048 --mode regression -E-available-no-muon  -log-mse -name Debug_E_avail_LogMSE --lr 5e-4 --optimizer adamw --d_model 128 --depth 4 --n_heads 8 --dropout 0.1 --attn_dropout 0.1 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info1_split --num_workers 5 --eval_interval 1000
 python -m src.scripts.train -bs 2048 --mode regression -E-available-no-muon  -log-mse -name Debug_E_avail_LogMSE_Reprod --lr 5e-4 --optimizer lion --weight_decay 0.3  --d_model 128 --depth 4 --n_heads 8 --dropout 0.1 --attn_dropout 0.1 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info1_split --num_workers 5 --eval_interval 1000
 
+
+# E regression
+python -m src.scripts.train -bs 2048 --mode regression -E-available-no-muon --log1p_loss -name E_avail_no_muon_Log1pMSE --lr 5e-4 --optimizer lion --weight_decay 0.3 --d_model 128 --depth 4 --n_heads 8 --dropout 0.1 --attn_dropout 0.1 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info1_split --num_workers 5 --eval_interval 1000
+
 # Pion classification 25. 2. 2026
 
 python -m src.scripts.train -bs 2048 --mode classifier -npi2 -name Debug --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info_split --num_workers 10 --eval_interval 1000
@@ -141,6 +145,8 @@ def parse_args():
                         help="Name for this training run (timestamp will be appended)")
     parser.add_argument("--output_dir", type=str, default="/global/cfs/cdirs/m3246/gregork/checkpoints",
                         help="Base output directory for checkpoints (run_name with timestamp will be appended)")
+    parser.add_argument("--log1p_loss", action="store_true",
+                        help="Use log1p loss")
     # Other
     parser.add_argument("--seed", type=int, default=None,
                         help="Random seed")
@@ -309,6 +315,14 @@ def prepare_batch(batch, device, use_cond=False, use_pid=False, coord_dim=2, pid
         "y": y,
     }
 
+
+def make_log1p_loss(criterion):
+    # Transform target to log1p(target+1)
+    def loss(pred, target, step=0):
+        target = torch.log1p(target)
+        return criterion(pred, target).mean()
+    return loss
+
 def compute_weighted_regression_loss(preds, targets, max_weight=10.0, min_weight=0.1):
     """Compute per-sample weighted Huber loss with 1/E weights."""
     targets = targets.to(dtype=preds.dtype)
@@ -334,6 +348,8 @@ def evaluate(model, dataloader, device, args, class_weights, use_amp=False, step
     if args.mode == "regression":
         if args.log_MSE_loss:
             criterion = make_log_loss(nn.MSELoss(reduction="none"))
+        elif args.log1p_loss:
+            criterion = make_log1p_loss(nn.HuberLoss(reduction="none"))
         else:
             criterion = nn.HuberLoss()
     else:
@@ -490,7 +506,9 @@ def train(args):
     # Setup loss function
     if task.type == "regression":
         if args.log_MSE_loss:
-            criterion = 1(nn.MSELoss(reduction="none"))
+            criterion = (nn.MSELoss(reduction="none"))
+        elif args.log1p_loss:
+            criterion = make_log1p_loss(nn.HuberLoss(reduction="none"))
         else:
             criterion = nn.HuberLoss()
     else:
@@ -545,44 +563,57 @@ def train(args):
     
     print(f"Steps per epoch: {steps_per_epoch}")
     print(f"Training for {args.epochs} epochs")
-    
-    if args.single_batch_overfit:
-        print("Running single-batch overfit debug mode.")
-        fixed_batch = next(iter(train_loader))
-        fixed_inputs = prepare_batch(fixed_batch, device, args.use_cond, args.use_pid, args.coord_dim, args.pid_idx)
-        overfit_pbar = tqdm(range(args.single_batch_steps), desc="Single-batch overfit", leave=True)
+    for epoch in range(args.epochs):
+        # Epoch progress bar
+        epoch_pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}", leave=True)
+        iter_end_time = time.perf_counter()
+        
+        for batch in epoch_pbar:
+            # Time spent waiting for the dataloader to produce the next batch.
+            data_fetch_times.append(time.perf_counter() - iter_end_time)
 
-        for _ in overfit_pbar:
+            # Prepare inputs
+            inputs = prepare_batch(batch, device, args.use_cond, args.use_pid, args.coord_dim, args.pid_idx)
+            
+            # Forward pass
             optimizer.zero_grad()
-
+            
             with autocast(enabled=args.use_amp):
                 features = model(
-                    point_cont=fixed_inputs["point_cont"],
-                    point_cats=fixed_inputs["point_cats"],
-                    pos=fixed_inputs["pos"],
-                    global_cont=fixed_inputs["global_cont"],
-                    global_cats=fixed_inputs["global_cats"],
-                    attn_mask=fixed_inputs["attn_mask"],
+                    point_cont=inputs["point_cont"],
+                    point_cats=inputs["point_cats"],
+                    pos=inputs["pos"],
+                    global_cont=inputs["global_cont"],
+                    global_cats=inputs["global_cats"],
+                    attn_mask=inputs["attn_mask"],
                 )
+                
                 logits = model.head(features)
-                if args.mode == "regression": # For the first 5000 steps, use everything, and after that, just ignore the top 1% losses - probably hard to predict events anyway
-                    if args.weighted_regression_loss:
-                        loss = compute_weighted_regression_loss(logits.squeeze(-1), fixed_inputs["y"])
-                    else:
-                        loss = criterion(logits.squeeze(-1), fixed_inputs["y"])
-                    # every 100 steps, print few examples of y pred and y true
-                else:
-                    loss = criterion(logits, fixed_inputs["y"])
 
+                # Compute loss
+                if args.mode == "regression":
+                    if args.weighted_regression_loss:
+                        loss = compute_weighted_regression_loss(logits.squeeze(-1), inputs["y"])
+                    else:
+                        loss = criterion(logits.squeeze(-1), inputs["y"])
+                        
+                    # if step % 50 == 0:
+                    #     print(f"Step {step}: y pred: {logits.squeeze(-1).detach().cpu().numpy()[:5]}, y true: {inputs['y'].detach().cpu().numpy()[:5]}")
+                else:
+                    loss = criterion(logits, inputs["y"])
+
+            # Optional diagnostics for regression collapse (predicting close to batch mean).
             if args.mode == "regression" and args.debug_regression_collapse:
                 with torch.no_grad():
                     preds = logits.squeeze(-1).detach()
-                    targets = fixed_inputs["y"].detach()
+                    targets = inputs["y"].detach()
                     debug_pred_stds.append(preds.std(unbiased=False).item())
                     debug_target_stds.append(targets.std(unbiased=False).item())
                     debug_model_mses.append(torch.mean((preds - targets) ** 2).item())
                     debug_baseline_mses.append(torch.mean((targets - targets.mean()) ** 2).item())
-
+            
+            # Backward pass
+            backprop_start_time = time.perf_counter()
             if scaler is not None:
                 scaler.scale(loss).backward()
                 scaler.unscale_(optimizer)
@@ -593,26 +624,34 @@ def train(args):
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
                 optimizer.step()
-
+            backprop_times.append(time.perf_counter() - backprop_start_time)
+            
             scheduler.step()
-            step += 1
+            
+            # Track loss
             train_losses.append(loss.item())
+            step += 1
+            
+            # Update progress bar with current metrics
             current_lr = scheduler.get_last_lr()[0]
-
-            overfit_pbar.set_postfix({
+            epoch_pbar.set_postfix({
                 "loss": f"{loss.item():.4f}",
                 "lr": f"{current_lr:.2e}",
                 "step": step
             })
-
+            
+            # Log training loss
             if step % args.log_interval == 0:
+                avg_train_loss = np.mean(train_losses)
                 log_dict = {
-                    "train_loss": float(np.mean(train_losses)),
+                    "train_loss": avg_train_loss,
+                    "data_fetch_time_s": float(np.mean(data_fetch_times)),
+                    "backprop_time_s": float(np.mean(backprop_times)),
                     "learning_rate": current_lr,
                     "step": step,
-                    "epoch": 0,
-                    "debug/single_batch_mode": 1,
+                    "epoch": epoch,
                 }
+
                 if args.mode == "regression" and args.debug_regression_collapse and len(debug_pred_stds) > 0:
                     log_dict.update({
                         "debug/pred_std": float(np.mean(debug_pred_stds)),
@@ -620,172 +659,35 @@ def train(args):
                         "debug/model_mse": float(np.mean(debug_model_mses)),
                         "debug/baseline_mse": float(np.mean(debug_baseline_mses)),
                     })
+                
                 if not args.no_wandb:
                     wandb.log(log_dict, step=step)
+                
                 train_losses = []
+                data_fetch_times = []
+                backprop_times = []
                 debug_pred_stds = []
                 debug_target_stds = []
                 debug_model_mses = []
                 debug_baseline_mses = []
-
-            if step % args.single_batch_eval_interval == 0:
-                with torch.no_grad():
-                    model.eval()
-                    with autocast(enabled=args.use_amp):
-                        eval_features = model(
-                            point_cont=fixed_inputs["point_cont"],
-                            point_cats=fixed_inputs["point_cats"],
-                            pos=fixed_inputs["pos"],
-                            global_cont=fixed_inputs["global_cont"],
-                            global_cats=fixed_inputs["global_cats"],
-                            attn_mask=fixed_inputs["attn_mask"],
-                        )
-                        eval_logits = model.head(eval_features)
-                        if args.mode == "regression":
-                            if args.weighted_regression_loss:
-                                eval_loss = compute_weighted_regression_loss(eval_logits.squeeze(-1), fixed_inputs["y"]).item()
-                            else:
-                                eval_loss = criterion(eval_logits.squeeze(-1), fixed_inputs["y"]).item()
-                               
-                        else:
-                            eval_loss = criterion(eval_logits, fixed_inputs["y"]).item()
-                    model.train()
-
-                overfit_log = {"debug/single_batch_eval_loss": eval_loss}
-                if args.mode == "classifier":
-                    with torch.no_grad():
-                        pred_labels = torch.argmax(eval_logits, dim=1)
-                        acc = (pred_labels == fixed_inputs["y"]).float().mean().item()
-                    overfit_log["debug/single_batch_accuracy"] = acc
-                if not args.no_wandb:
-                    wandb.log(overfit_log, step=step)
-                overfit_pbar.write(f"Single-batch eval @ step {step}: loss={eval_loss:.6f}")
-    else:
-        for epoch in range(args.epochs):
-            # Epoch progress bar
-            epoch_pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}", leave=True)
             iter_end_time = time.perf_counter()
             
-            for batch in epoch_pbar:
-                # Time spent waiting for the dataloader to produce the next batch.
-                data_fetch_times.append(time.perf_counter() - iter_end_time)
-
-                # Prepare inputs
-                inputs = prepare_batch(batch, device, args.use_cond, args.use_pid, args.coord_dim, args.pid_idx)
+            # Evaluation
+            if step % args.eval_interval == 0 or step == 1:
+                epoch_pbar.write(f"\nRunning evaluation at step {step}...")
+                eval_metrics = evaluate(model, val_loader, device, args, torch.tensor(task.class_weights, device=device, dtype=torch.float32) if task.type == "classifier" else None, args.use_amp, step)
                 
-                # Forward pass
-                optimizer.zero_grad()
+                epoch_pbar.write(f"Eval loss: {eval_metrics['eval_loss']:.4f}")
+                # save as best_model.pt if val loss is lower
+                if eval_metrics['eval_loss'] < best_val_loss:
+                    best_val_loss = eval_metrics['eval_loss']
+                    save_checkpoint(model, optimizer, scheduler, scaler, step, args, best_val_loss,
+                                    filename="best_model.pt")
+                    epoch_pbar.write(f"New best model saved! Val loss: {best_val_loss:.4f}")
                 
-                with autocast(enabled=args.use_amp):
-                    features = model(
-                        point_cont=inputs["point_cont"],
-                        point_cats=inputs["point_cats"],
-                        pos=inputs["pos"],
-                        global_cont=inputs["global_cont"],
-                        global_cats=inputs["global_cats"],
-                        attn_mask=inputs["attn_mask"],
-                    )
-                    
-                    logits = model.head(features)
-
-                    # Compute loss
-                    if args.mode == "regression":
-                        if args.weighted_regression_loss:
-                            loss = compute_weighted_regression_loss(logits.squeeze(-1), inputs["y"])
-                        else:
-                            loss = criterion(logits.squeeze(-1), inputs["y"])
-                           
-                        # if step % 50 == 0:
-                        #     print(f"Step {step}: y pred: {logits.squeeze(-1).detach().cpu().numpy()[:5]}, y true: {inputs['y'].detach().cpu().numpy()[:5]}")
-                    else:
-                        loss = criterion(logits, inputs["y"])
-
-                # Optional diagnostics for regression collapse (predicting close to batch mean).
-                if args.mode == "regression" and args.debug_regression_collapse:
-                    with torch.no_grad():
-                        preds = logits.squeeze(-1).detach()
-                        targets = inputs["y"].detach()
-                        debug_pred_stds.append(preds.std(unbiased=False).item())
-                        debug_target_stds.append(targets.std(unbiased=False).item())
-                        debug_model_mses.append(torch.mean((preds - targets) ** 2).item())
-                        debug_baseline_mses.append(torch.mean((targets - targets.mean()) ** 2).item())
-                
-                # Backward pass
-                backprop_start_time = time.perf_counter()
-                if scaler is not None:
-                    scaler.scale(loss).backward()
-                    scaler.unscale_(optimizer)
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
-                    scaler.step(optimizer)
-                    scaler.update()
-                else:
-                    loss.backward()
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
-                    optimizer.step()
-                backprop_times.append(time.perf_counter() - backprop_start_time)
-                
-                scheduler.step()
-                
-                # Track loss
-                train_losses.append(loss.item())
-                step += 1
-                
-                # Update progress bar with current metrics
-                current_lr = scheduler.get_last_lr()[0]
-                epoch_pbar.set_postfix({
-                    "loss": f"{loss.item():.4f}",
-                    "lr": f"{current_lr:.2e}",
-                    "step": step
-                })
-                
-                # Log training loss
-                if step % args.log_interval == 0:
-                    avg_train_loss = np.mean(train_losses)
-                    log_dict = {
-                        "train_loss": avg_train_loss,
-                        "data_fetch_time_s": float(np.mean(data_fetch_times)),
-                        "backprop_time_s": float(np.mean(backprop_times)),
-                        "learning_rate": current_lr,
-                        "step": step,
-                        "epoch": epoch,
-                    }
-
-                    if args.mode == "regression" and args.debug_regression_collapse and len(debug_pred_stds) > 0:
-                        log_dict.update({
-                            "debug/pred_std": float(np.mean(debug_pred_stds)),
-                            "debug/target_std": float(np.mean(debug_target_stds)),
-                            "debug/model_mse": float(np.mean(debug_model_mses)),
-                            "debug/baseline_mse": float(np.mean(debug_baseline_mses)),
-                        })
-                    
-                    if not args.no_wandb:
-                        wandb.log(log_dict, step=step)
-                    
-                    train_losses = []
-                    data_fetch_times = []
-                    backprop_times = []
-                    debug_pred_stds = []
-                    debug_target_stds = []
-                    debug_model_mses = []
-                    debug_baseline_mses = []
-                iter_end_time = time.perf_counter()
-                
-                # Evaluation
-                if step % args.eval_interval == 0 or step == 1:
-                    epoch_pbar.write(f"\nRunning evaluation at step {step}...")
-                    eval_metrics = evaluate(model, val_loader, device, args, torch.tensor(task.class_weights, device=device, dtype=torch.float32) if task.type == "classifier" else None, args.use_amp, step)
-                    
-                    epoch_pbar.write(f"Eval loss: {eval_metrics['eval_loss']:.4f}")
-                    # save as best_model.pt if val loss is lower
-                    if eval_metrics['eval_loss'] < best_val_loss:
-                        best_val_loss = eval_metrics['eval_loss']
-                        save_checkpoint(model, optimizer, scheduler, scaler, step, args, best_val_loss,
-                                        filename="best_model.pt")
-                        epoch_pbar.write(f"New best model saved! Val loss: {best_val_loss:.4f}")
-                    
-                    if not args.no_wandb:
-                        wandb.log(eval_metrics, step=step)
-                        wandb.log({"best_val_loss": best_val_loss}, step=step)
+                if not args.no_wandb:
+                    wandb.log(eval_metrics, step=step)
+                    wandb.log({"best_val_loss": best_val_loss}, step=step)
     # Final evaluation
     print("\nRunning final evaluation...")
     eval_metrics = evaluate(model, val_loader, device, args, torch.tensor(task.class_weights, device=device, dtype=torch.float32) if task.type == "classifier" else None, args.use_amp, step)

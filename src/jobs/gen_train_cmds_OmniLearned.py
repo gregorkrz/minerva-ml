@@ -10,16 +10,20 @@ from src.jobs.slurm_template import SLURM_TEMPLATE_GPU
 Current tasks:
 
 E available regression:
-
 python -m src.jobs.gen_train_cmds_OmniLearned -name E_avail_LogMSE --regress-E-available-no-muon -nw 10  --loss-type mse --log --run
 python -m src.jobs.gen_train_cmds_OmniLearned -name E_avail_LogMSE_PT --regress-E-available-no-muon -nw 10  --loss-type mse --log --use-pretrained pretrain_s --run
 
 python -m src.jobs.gen_train_cmds_OmniLearned -name E_avail_HuberWeighted_PT_NoLog --regress-E-available-no-muon -nw 10 --use-pretrained pretrain_s --loss-type huber --weighted-loss -p
 python -m src.jobs.gen_train_cmds_OmniLearned -name E_avail_HuberWeighted_NoLog --regress-E-available-no-muon -nw 10  --loss-type huber --weighted-loss -p
 
+python -m src.jobs.gen_train_cmds_OmniLearned -name E_avail_Log1PLoss --regress-E-available-no-muon -nw 10  --loss-type log1p  -p
+python -m src.jobs.gen_train_cmds_OmniLearned -name E_avail_Log1PLoss_PT --regress-E-available-no-muon -nw 10  --loss-type log1p --use-pretrained pretrain_s -p
+
 
 Ch. pion classification:
+
 python -m src.jobs.gen_train_cmds_OmniLearned -name Train_CC1orNPi_Fix260226 -nw 10 --class-pions -p --use-pretrained pretrain_s 
+python -m src.jobs.gen_train_cmds_OmniLearned -name Train_CC1orNPi_Fix260226 -nw 10 --class-pions -p --use-pretrained pretrain_m
 python -m src.jobs.gen_train_cmds_OmniLearned -name Train_CC1orNPi_Fix260226_PT -nw 10 --class-pions -p
 --------------------------------
 """
@@ -114,7 +118,7 @@ train_cmd = f""" -m omnilearned.cli train \
   --epoch 100000 \
   --lr 5e-5 \
   --size small \
-  --wd 0.1 {dataset_cap_flag} \
+  --wd 0.3 {dataset_cap_flag} \
   --num-workers {args.num_workers} \
   --use-pid \
   --wandb --regression-loss {args.loss_type} \

@@ -4,12 +4,19 @@ import os
 from datetime import datetime as dt
 
 
-training_cmd_PT_template = "python -m src.jobs.gen_train_cmds_OmniLearned -name SmallDataset_E_avail_LogMSE_PT_dscap{dscap}_Evts_seed_{dscapseed} --regress-E-available-no-muon -nw 10  --loss-type mse --log --use-pretrained pretrain_s --run --dataset-cap {dscap} --dataset-cap-seed {dscapseed}"
-training_cmd_non_PT_template = "python -m src.jobs.gen_train_cmds_OmniLearned -name SmallDataset_E_avail_LogMSE_dscap{dscap}_Evts_seed_{dscapseed} --regress-E-available-no-muon -nw 10  --loss-type mse --log --run --dataset-cap {dscap} --dataset-cap-seed {dscapseed}"
+training_cmd_PT_template = "python -m src.jobs.gen_train_cmds_OmniLearned -name OmniM_SmallDataset_E_avail_Log1PLoss_PT_dscap{dscap}_Evts_seed_{dscapseed} --regress-E-available-no-muon -nw 10  --loss-type log1p --use-pretrained pretrain_m --run --dataset-cap {dscap} --dataset-cap-seed {dscapseed}"
+#training_cmd_non_PT_template = "python -m src.jobs.gen_train_cmds_OmniLearned -name OmniM_SmallDataset_E_avail_Log1PLoss_dscap{dscap}_Evts_seed_{dscapseed} --regress-E-available-no-muon -nw 10  --loss-type log1p  --run --dataset-cap {dscap} --dataset-cap-seed {dscapseed}"
 
-for dscap in [100000, 500000, 1000000]:
+for dscap in [100000, 500000, 1000000, 2000000]:
     for dscapseed in [42]:
         training_cmd_PT = training_cmd_PT_template.format(dscap=dscap, dscapseed=dscapseed)
-        training_cmd_non_PT = training_cmd_non_PT_template.format(dscap=dscap, dscapseed=dscapseed)
+        #training_cmd_non_PT = training_cmd_non_PT_template.format(dscap=dscap, dscapseed=dscapseed)
         print(training_cmd_PT)
-        print(training_cmd_non_PT)
+        #print(training_cmd_non_PT)
+
+
+
+training_cmd_PT_template = "python -m src.jobs.gen_train_cmds_OmniLearned -name OmniM_SmallDataset_E_avail_Log1PLoss_PT --regress-E-available-no-muon -nw 10  --loss-type log1p --use-pretrained pretrain_m --run "
+#training_cmd_non_PT_template = "python -m src.jobs.gen_train_cmds_OmniLearned -name SmallDataset_E_avail_Log1PLoss --regress-E-available-no-muon -nw 10  --loss-type log1p  --run "
+print(training_cmd_PT_template)
+#print(training_cmd_non_PT_template)

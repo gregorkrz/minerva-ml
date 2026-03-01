@@ -3,13 +3,16 @@ from src.jobs.slurm_template import SLURM_TEMPLATE_GPU
 import os
 from datetime import datetime as dt
 
-base_cmd = "python -m src.scripts.train -bs 2048 --mode regression -E-available-no-muon -name SmallDataset_E_avail_LogMSE_{suffix} -wl --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info1_split --num_workers 10  -log-mse  --eval_interval 1000 -cap {data_cap} -seed-event-sampler {seed} --epochs 1000000"
+base_cmd = "python -m src.scripts.train -bs 2048 --mode regression -E-available-no-muon -name SmallDataset_E_avail_Log1PLoss_{suffix} --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info1_split --num_workers 10  --log1p_loss --eval_interval 1000 -cap {data_cap} -seed-event-sampler {seed} --epochs 1000000"
 
 cmds = []
-for data_cap in [2000000, 4000000]:
+
+for data_cap in [100000, 500000, 1000000, 2000000]:
     for seed in [42, 43, 44]:
         cmd = base_cmd.format(suffix=f"{data_cap}_Evts_seed_{seed}", data_cap=data_cap, seed=seed)
         cmds.append(cmd)
+
+cmds = ["python -m src.scripts.train -bs 2048 --mode regression -E-available-no-muon -name E_avail_Log1PLoss --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info1_split --num_workers 10  --log1p_loss --eval_interval 1000  --epochs 1000000"]
 
 for i, cmd in enumerate(cmds):
     job_name = f"Tr_{i}_{dt.now().strftime('%Y%m%d_%H%M%S')}"
@@ -21,7 +24,7 @@ for i, cmd in enumerate(cmds):
     with open(slurm_file, "w") as f:
         f.write(SLURM_TEMPLATE_GPU.format(
             queue_name="shared",
-            time="07:00:00",
+            time="03:00:00",
             cpus_per_task=32,
             gpus_per_node=1,
             job_name=job_name,

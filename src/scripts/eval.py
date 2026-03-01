@@ -141,7 +141,12 @@ def create_model_from_checkpoint(checkpoint_path, device):
     return model, args_dict, task
 
 
-
+def make_log1p_loss(criterion):
+    # Transform target to log1p(target+1)
+    def loss(pred, target, step=0):
+        target = torch.log1p(target)
+        return criterion(pred, target).mean()
+    return loss
 
 @torch.no_grad()
 def evaluate(model, dataloader, device, args_dict, use_amp=False):
@@ -156,7 +161,11 @@ def evaluate(model, dataloader, device, args_dict, use_amp=False):
     
     # Setup loss function
     if mode == "regression":
-        criterion = nn.MSELoss()
+        if args_dict.get("log1p_loss", False):
+            print("Using log1p loss for eval!")
+            criterion = make_log1p_loss(nn.HuberLoss(reduction="none"))
+        else:
+            criterion = nn.MSELoss()
     else:
         criterion = nn.CrossEntropyLoss()
     
@@ -377,6 +386,10 @@ def main():
     #with open(results_file, "w") as f:
     #    json.dump(results["metrics"], f, indent=2)
     #print(f"Metrics saved to: {results_file}")
+    if args_dict.get("log1p_loss", False):
+        results["predictions"] = np.exp(results["predictions"]) - 1
+        # set neg predictions to 0
+        results["predictions"] = np.maximum(results["predictions"], 0)
     
     np.savez(
         output_file,
