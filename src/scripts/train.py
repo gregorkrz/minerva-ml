@@ -79,8 +79,8 @@ def parse_args():
                         help="Regress available energy of the event (requires mode=regression)")
     parser.add_argument("--regress-E-available-no-muon", "-E-available-no-muon", action="store_true",
                         help="Regress available energy of the event, without the muon energy(requires mode=regression)")
-    parser.add_argument("--use_cond", default=True, type=bool,
-                        help="Use global/conditional features")
+    parser.add_argument("--no_use_cond", action="store_true",
+                        help="Do NOT use global/conditional features")
     parser.add_argument("--use_pid", type=bool, default=True,
                         help="Use particle ID information")
     parser.add_argument("--pid_idx", type=int, default=4, help="Index of PID in features")
@@ -441,7 +441,7 @@ def train(args):
     os.makedirs(args.output_dir, exist_ok=True)
     print(f"Output directory: {args.output_dir}")
     print(f"Run name: {run_name_with_timestamp}")
-    
+    args.use_cond = not args.no_use_cond
     # Set seed
     if args.seed is not None:
         set_seed(args.seed)

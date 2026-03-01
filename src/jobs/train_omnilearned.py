@@ -16,7 +16,12 @@ for dscap in [100000, 500000, 1000000, 2000000]:
 
 
 
-training_cmd_PT_template = "python -m src.jobs.gen_train_cmds_OmniLearned -name OmniM_SmallDataset_E_avail_Log1PLoss_PT --regress-E-available-no-muon -nw 10  --loss-type log1p --use-pretrained pretrain_m --run "
-#training_cmd_non_PT_template = "python -m src.jobs.gen_train_cmds_OmniLearned -name SmallDataset_E_avail_Log1PLoss --regress-E-available-no-muon -nw 10  --loss-type log1p  --run "
+training_cmd_PT_template = "python -m src.jobs.gen_train_cmds_OmniLearned -name FullDataset_E_avail_Log1PLoss_PT --regress-E-available-no-muon -nw 10  --loss-type log1p --use-pretrained pretrain_s --run "
+training_cmd_non_PT_template = "python -m src.jobs.gen_train_cmds_OmniLearned -name FullDataset_E_avail_Log1PLoss --regress-E-available-no-muon -nw 10  --loss-type log1p  --run "
 print(training_cmd_PT_template)
-#print(training_cmd_non_PT_template)
+print(training_cmd_non_PT_template)
+
+
+training_cmd_PT_template1 = "python -m src.jobs.gen_train_cmds_OmniLearned -name OmniM_FullDataset_E_avail_Log1PLoss_PT --regress-E-available-no-muon -nw 10  --loss-type log1p --use-pretrained pretrain_m --run "
+
+print(training_cmd_PT_template1)

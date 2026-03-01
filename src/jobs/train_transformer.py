@@ -5,7 +5,8 @@ from datetime import datetime as dt
 
 cmds = ["python -m src.scripts.train -bs 2048 --mode regression -E-available-no-muon -name E_avail_HuberEWeighted -wl --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info1_split --num_workers 10 --eval_interval 1000",
         "python -m src.scripts.train -bs 2048 --mode regression -E-available-no-muon  -log-mse -name E_avail_LogMSE --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info1_split --num_workers 10 --eval_interval 1000"]
-cmds = ["python -m src.scripts.train -bs 2048 --mode regression -E-available-no-muon  -log-mse -name E_avail_LogMSE_OmniLearnedLearningSettings --lr 5e-4 --optimizer lion --d_model 128 --depth 4 --n_heads 8 --dropout 0.1 --attn_dropout 0.1 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info1_split --num_workers 10 --eval_interval 1000"]
+
+
 for i, cmd in enumerate(cmds):
     job_name = f"Tr_{i}_{dt.now().strftime('%Y%m%d_%H%M%S')}"
     log_dir = f"/global/cfs/cdirs/m3246/gregork/Minerva/logs/transformer/{job_name}.log"

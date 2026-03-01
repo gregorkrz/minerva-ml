@@ -27,6 +27,8 @@ from __future__ import annotations
 import json
 import os
 import pickle
+import re
+from tkinter import NONE
 import warnings
 from pathlib import Path
 from typing import Any
@@ -47,6 +49,7 @@ def load_eval_data(
     baseline_ref: tuple[str, str] | None = None,
     baseline_run: str | None = None,
     verbose: bool = True,
+    transform = None
 ) -> dict[str, Any]:
     """Load evaluation results, configs, baselines and derived arrays.
 
@@ -138,6 +141,13 @@ def load_eval_data(
                     continue
                 E_true_dict[dataset][loss][model] = results[loss][model][dataset]["pid"].flatten()
                 E_pred_dict[dataset][loss][model] = results[loss][model][dataset]["prediction"].flatten()
+                if transform is not None:
+                    print("Transforming the prediction")
+                    E_pred_dict[dataset][loss][model] = transform(E_pred_dict[dataset][loss][model])
+                    print("E pred dict first 10 entries", E_pred_dict[dataset][loss][model][:10])
+                    print("E true dict first 10 entries", E_true_dict[dataset][loss][model][:10])
+                    print("E pred dict min max", np.min(E_pred_dict[dataset][loss][model]), np.max(E_pred_dict[dataset][loss][model]))
+                    print("E true dict min max", np.min(E_true_dict[dataset][loss][model]), np.max(E_true_dict[dataset][loss][model]))
 
     # --- baselines & filters (cell 7) --------------------------------------
     # Resolve where the baseline / filter data lives.  Three strategies:
@@ -267,6 +277,7 @@ def plot_rms_iqr(
     show_q3_histograms: bool = False,
     verbose: bool = True,
     data: dict | None = None,
+    transform = None
 ) -> plt.Figure:
     """Produce the RMS / IQR vs *q3* summary plot.
 
@@ -304,6 +315,7 @@ def plot_rms_iqr(
             baseline_ref=baseline_ref,
             baseline_run=baseline_run,
             verbose=verbose,
+            transform=transform,
         )
 
     results = data["results"]
@@ -447,6 +459,7 @@ def plot_residuals_by_energy(
     baseline_run: str | None = None,
     verbose: bool = True,
     data: dict | None = None,
+    transform=None
 ) -> plt.Figure:
     """Per-energy-bin residual and ratio histograms (notebook cell 9)."""
     if energy_bins is None:
@@ -459,6 +472,7 @@ def plot_residuals_by_energy(
             baseline_ref=baseline_ref,
             baseline_run=baseline_run,
             verbose=verbose,
+            transform=transform,
         )
 
     results = data["results"]
@@ -510,12 +524,233 @@ def plot_residuals_by_energy(
 
         elabel = f"{elow}-{ehigh}" if ehigh < 100 else f"{elow}+"
         ax[0, i].set(xlabel="E reco − E true", ylabel="Counts", title=f"E true: {elabel} GeV")
-        ax[0, i].legend(loc="lower left", fontsize=7)
+        #ax[0, i].legend(loc="lower left", fontsize=7)
         ax[0, i].grid(True)
         ax[1, i].set(xlabel="E reco / E true", ylabel="Counts", title=f"E true: {elabel} GeV")
         ax[1, i].legend(loc="lower left", fontsize=7)
         ax[1, i].grid(True)
 
     fig.tight_layout()
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# Grouped training_names utilities (seeds as arrays)
+# ---------------------------------------------------------------------------
+
+_SEED_SEP = "§"
+
+
+def _extract_sample_count(label: str) -> float:
+    """Extract numeric sample count from labels like 'Transformer 6M' or '500k'."""
+    match = re.search(r"(\d+(?:\.\d+)?)\s*([kKmM])\b", label)
+    if match:
+        num = float(match.group(1))
+        suffix = match.group(2).upper()
+        return num * (1e6 if suffix == "M" else 1e3)
+    match = re.search(r"(\d+)", label)
+    return float(match.group(1)) if match else 0.0
+
+
+def _resolve_color_map(
+    config_labels: list[str],
+    colors: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Build a label → colour mapping from a user-supplied *colors* dict.
+
+    *colors* maps human-readable sample-count tokens (e.g. ``"6M"``,
+    ``"500k"``) to any matplotlib-compatible colour.  Each config label
+    is matched to the first token that appears as a substring.  Labels
+    without a match get a default grey.
+    """
+    if not config_labels:
+        return {}
+    if colors is None:
+        colors = {}
+    out: dict[str, Any] = {}
+    for label in config_labels:
+        matched = False
+        for token, colour in colors.items():
+            if token in label:
+                out[label] = colour
+                matched = True
+                break
+        if not matched:
+            out[label] = "tab:gray"
+    return out
+
+
+def flatten_grouped_training_names(
+    training_names_grouped: dict[str, dict[str, list[str]]],
+) -> dict[str, dict[str, str]]:
+    """Flatten ``{loss: {label: [run, …]}}`` → ``{loss: {label§i: run, …}}``."""
+    flat: dict[str, dict[str, str]] = {}
+    for loss, configs in training_names_grouped.items():
+        flat[loss] = {}
+        for label, runs in configs.items():
+            for i, run in enumerate(runs):
+                flat[loss][f"{label}{_SEED_SEP}{i}"] = run
+    return flat
+
+
+def load_eval_data_grouped(
+    CKPT_DIR: str | Path,
+    training_names_grouped: dict[str, dict[str, list[str]]],
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Load evaluation data for grouped training names (seeds as lists)."""
+    return load_eval_data(
+        CKPT_DIR,
+        flatten_grouped_training_names(training_names_grouped),
+        **kwargs,
+    )
+
+
+def plot_rms_iqr_with_uncertainty(
+    CKPT_DIR: str | Path,
+    training_names_grouped: dict[str, dict[str, list[str]]],
+    playlists: list[str] | None = None,
+    dataset_to_plot: str = "1A",
+    q3_bins: list[float] | None = None,
+    baseline_ref: tuple[str, str] | None = None,
+    baseline_run: str | None = None,
+    rms_clip: float = 0.6,
+    colors: dict[str, Any] | None = None,
+    verbose: bool = True,
+    data: dict | None = None,
+    transform = NONE
+) -> plt.Figure:
+    """RMS / IQR vs *q3* with ±1 std-dev uncertainty bands across seeds.
+
+    Parameters
+    ----------
+    training_names_grouped : ``{loss: {config_label: [run_name, …]}}``
+        Config labels should include a human-readable sample count
+        (e.g. ``"Transformer 6M"``, ``"Transformer 500k"``).
+    colors : dict mapping sample-count tokens (e.g. ``"6M"``, ``"500k"``)
+        to matplotlib colours.  Each config label is matched to the first
+        token found as a substring.  Unmatched labels default to grey.
+    Other parameters match :func:`plot_rms_iqr`.
+    """
+    if q3_bins is None:
+        q3_bins = [0, 0.3, 0.6, 1.2, 100]
+
+    if data is None:
+        data = load_eval_data_grouped(
+            CKPT_DIR, training_names_grouped,
+            playlists=playlists,
+            baseline_ref=baseline_ref,
+            baseline_run=baseline_run,
+            verbose=verbose,
+            transform=transform,
+        )
+
+    E_pred_dict = data["E_pred_dict"]
+    Enu_baselines = data["Enu_baselines"]
+    Enu_filters = data["Enu_filters"]
+    mc_E = data["mc_E"]
+    dp = dataset_to_plot
+
+    has_q3 = (
+        dp in Enu_filters
+        and "muon_filter_CC_paper" in Enu_filters[dp]
+        and "q3" in Enu_filters[dp]
+        and dp in mc_E
+    )
+    has_baselines = (
+        has_q3
+        and dp in Enu_baselines
+        and "E_recoil_CCinc_only" in Enu_baselines[dp]
+    )
+
+    if not has_q3:
+        warnings.warn(
+            f"No q3 / filter data for dataset '{dp}'. "
+            "Pass baseline_run='<run_with_settings.json>'."
+        )
+        return plt.figure()
+
+    q3_arr = np.asarray(q3_bins)
+    n_plot_bins = len(q3_arr) - 2
+    q3_bin_mids = ((q3_arr[:-1] + q3_arr[1:]) / 2)[:n_plot_bins]
+
+    mask_filter = Enu_filters[dp]["muon_filter_CC_paper"]
+    q3 = Enu_filters[dp]["q3"]
+    if has_baselines:
+        mask_reco_bl = Enu_baselines[dp]["E_recoil_CCinc_only"] >= 0
+        mask_sel = mask_filter & mask_reco_bl
+    else:
+        mask_sel = mask_filter
+
+    bin_masks = []
+    for i in range(n_plot_bins):
+        mask_q3 = (q3 > q3_bins[i]) & (q3 <= q3_bins[i + 1])
+        bin_masks.append(mask_q3 & mask_sel)
+
+    all_labels: list[str] = []
+    for loss in training_names_grouped:
+        for label in training_names_grouped[loss]:
+            if label not in all_labels:
+                all_labels.append(label)
+    color_map = _resolve_color_map(all_labels, colors)
+
+    fig, ax = plt.subplots(1, 2, figsize=(9, 4.5))
+
+    if has_baselines:
+        rms_bl: list[float] = []
+        iqr_bl: list[float] = []
+        for i in range(n_plot_bins):
+            true = mc_E[dp][bin_masks[i]]
+            bl = Enu_baselines[dp]["E_recoil_CCinc_only"][bin_masks[i]]
+            res = bl - true
+            iqr_bl.append(float(np.percentile(res, 75) - np.percentile(res, 25)))
+            rms_bl.append(float(np.sqrt(np.mean(res[np.abs(res) < rms_clip] ** 2))))
+        ax[0].plot(q3_bin_mids, rms_bl, ".--", label="baseline", color="black")
+        ax[1].plot(q3_bin_mids, iqr_bl, ".--", label="baseline", color="black")
+
+    for loss in training_names_grouped:
+        for config_label, runs in training_names_grouped[loss].items():
+            seed_rms = np.empty((len(runs), n_plot_bins))
+            seed_iqr = np.empty((len(runs), n_plot_bins))
+            for s in range(len(runs)):
+                flat_key = f"{config_label}{_SEED_SEP}{s}"
+                for i in range(n_plot_bins):
+                    true = mc_E[dp][bin_masks[i]]
+                    reco = E_pred_dict[dp][loss][flat_key][bin_masks[i]]
+                    res = reco - true
+                    seed_iqr[s, i] = float(
+                        np.percentile(res, 75) - np.percentile(res, 25)
+                    )
+                    seed_rms[s, i] = float(
+                        np.sqrt(np.mean(res[np.abs(res) < rms_clip] ** 2))
+                    )
+
+            mean_rms = seed_rms.mean(axis=0)
+            std_rms = seed_rms.std(axis=0)
+            mean_iqr = seed_iqr.mean(axis=0)
+            std_iqr = seed_iqr.std(axis=0)
+
+            color = color_map[config_label]
+            lbl = f"{config_label} ({loss})"
+
+            ax[0].plot(q3_bin_mids, mean_rms, ".-", color=color, label=lbl)
+            ax[0].fill_between(
+                q3_bin_mids, mean_rms - std_rms, mean_rms + std_rms,
+                alpha=0.25, color=color,
+            )
+            ax[1].plot(q3_bin_mids, mean_iqr, ".-", color=color, label=lbl)
+            ax[1].fill_between(
+                q3_bin_mids, mean_iqr - std_iqr, mean_iqr + std_iqr,
+                alpha=0.25, color=color,
+            )
+
+    ax[0].legend(fontsize=7)
+    ax[1].legend(fontsize=7)
+    ax[0].set(xlabel="Bin middle point $q_3$ [GeV]", ylabel="RMS [GeV]")
+    ax[1].set(xlabel="Bin middle point $q_3$ [GeV]", ylabel="IQR [GeV]")
+    ax[0].grid(True)
+    ax[1].grid(True)
+    fig.tight_layout()
+
     return fig
 

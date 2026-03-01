@@ -31,3 +31,4 @@ The script will plot event displays with directions of the particles in the thet
 ## Training (OmniLearned repo)
 
 `python -m omnilearned.cli train --dataset minerva_1A --path /data/Minerva/20260127_nested_split --output_dir ./test_run --save_tag "test" --size small --num_feat 4 --use_pid --pid_idx 4 --pid_dim 6 --conditional --num_cond 4 --mode regression_E_nu --num_classes 1 --batch 16 --epoch 2 --lr 5e-5 --num_workers 2 --nevts 1000`
+

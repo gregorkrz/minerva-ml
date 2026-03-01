@@ -21,7 +21,6 @@ python -m src.jobs.gen_train_cmds_OmniLearned -name E_avail_Log1PLoss_PT --regre
 
 
 Ch. pion classification:
-
 python -m src.jobs.gen_train_cmds_OmniLearned -name Train_CC1orNPi_Fix260226 -nw 10 --class-pions -p --use-pretrained pretrain_s 
 python -m src.jobs.gen_train_cmds_OmniLearned -name Train_CC1orNPi_Fix260226 -nw 10 --class-pions -p --use-pretrained pretrain_m
 python -m src.jobs.gen_train_cmds_OmniLearned -name Train_CC1orNPi_Fix260226_PT -nw 10 --class-pions -p
@@ -116,13 +115,13 @@ train_cmd = f""" -m omnilearned.cli train \
   --mode {mode} \
   --batch {args.batch_size} \
   --epoch 100000 \
-  --lr 5e-5 \
   --size small \
-  --wd 0.3 {dataset_cap_flag} \
+   {dataset_cap_flag} \
   --num-workers {args.num_workers} \
   --use-pid \
   --wandb --regression-loss {args.loss_type} \
   --max-particles {args.max_particles} {weighted_loss_flag} {class_current_type_flag} {class_pions_flag} {regress_E_available_flag} {regress_E_available_no_muon_flag}"""
+
 
 # Handle pretrained checkpoint for fine-tuning
 if args.use_pretrained is not None and args.resume_from is not None:

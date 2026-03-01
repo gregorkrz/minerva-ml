@@ -7,12 +7,12 @@ base_cmd = "python -m src.scripts.train -bs 2048 --mode regression -E-available-
 
 cmds = []
 
-for data_cap in [100000, 500000, 1000000, 2000000]:
+for data_cap in [10000, 50000]:
     for seed in [42, 43, 44]:
         cmd = base_cmd.format(suffix=f"{data_cap}_Evts_seed_{seed}", data_cap=data_cap, seed=seed)
         cmds.append(cmd)
 
-cmds = ["python -m src.scripts.train -bs 2048 --mode regression -E-available-no-muon -name E_avail_Log1PLoss --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info1_split --num_workers 10  --log1p_loss --eval_interval 1000  --epochs 1000000"]
+cmds = ["python -m src.scripts.train -bs 2048 --mode regression -E-available-no-muon -name E_avail_Log1PLoss_NoGlobalFeatures --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info1_split --num_workers 10  --log1p_loss --eval_interval 1000  --epochs 1000000 --use_cond False"]
 
 for i, cmd in enumerate(cmds):
     job_name = f"Tr_{i}_{dt.now().strftime('%Y%m%d_%H%M%S')}"
