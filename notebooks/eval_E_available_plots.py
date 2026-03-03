@@ -141,14 +141,6 @@ def load_eval_data(
                     continue
                 E_true_dict[dataset][loss][model] = results[loss][model][dataset]["pid"].flatten()
                 E_pred_dict[dataset][loss][model] = results[loss][model][dataset]["prediction"].flatten()
-                if transform is not None:
-                    print("Transforming the prediction")
-                    E_pred_dict[dataset][loss][model] = transform(E_pred_dict[dataset][loss][model])
-                    print("E pred dict first 10 entries", E_pred_dict[dataset][loss][model][:10])
-                    print("E true dict first 10 entries", E_true_dict[dataset][loss][model][:10])
-                    print("E pred dict min max", np.min(E_pred_dict[dataset][loss][model]), np.max(E_pred_dict[dataset][loss][model]))
-                    print("E true dict min max", np.min(E_true_dict[dataset][loss][model]), np.max(E_true_dict[dataset][loss][model]))
-
     # --- baselines & filters (cell 7) --------------------------------------
     # Resolve where the baseline / filter data lives.  Three strategies:
     #   1. baseline_run  – a standalone run name with settings.json / best_model.pt
@@ -529,6 +521,7 @@ def plot_residuals_by_energy(
         ax[1, i].set(xlabel="E reco / E true", ylabel="Counts", title=f"E true: {elabel} GeV")
         ax[1, i].legend(loc="lower left", fontsize=7)
         ax[1, i].grid(True)
+        ax[0, i].legend(loc="lower left", fontsize=7)
 
     fig.tight_layout()
     return fig
@@ -618,8 +611,9 @@ def plot_rms_iqr_with_uncertainty(
     colors: dict[str, Any] | None = None,
     verbose: bool = True,
     data: dict | None = None,
-    transform = NONE
-) -> plt.Figure:
+    transform = NONE,
+    return_values: bool = False,
+) -> plt.Figure | tuple[plt.Figure, dict]:
     """RMS / IQR vs *q3* with ±1 std-dev uncertainty bands across seeds.
 
     Parameters
@@ -630,6 +624,8 @@ def plot_rms_iqr_with_uncertainty(
     colors : dict mapping sample-count tokens (e.g. ``"6M"``, ``"500k"``)
         to matplotlib colours.  Each config label is matched to the first
         token found as a substring.  Unmatched labels default to grey.
+    return_values : if *True*, return ``(fig, values)`` where *values* is
+        a dict with q3 bin midpoints and per-config / baseline arrays.
     Other parameters match :func:`plot_rms_iqr`.
     """
     if q3_bins is None:
@@ -668,7 +664,8 @@ def plot_rms_iqr_with_uncertainty(
             f"No q3 / filter data for dataset '{dp}'. "
             "Pass baseline_run='<run_with_settings.json>'."
         )
-        return plt.figure()
+        empty_fig = plt.figure()
+        return (empty_fig, {}) if return_values else empty_fig
 
     q3_arr = np.asarray(q3_bins)
     n_plot_bins = len(q3_arr) - 2
@@ -694,6 +691,8 @@ def plot_rms_iqr_with_uncertainty(
                 all_labels.append(label)
     color_map = _resolve_color_map(all_labels, colors)
 
+    values: dict[str, Any] = {"q3_bin_mids": q3_bin_mids}
+
     fig, ax = plt.subplots(1, 2, figsize=(9, 4.5))
 
     if has_baselines:
@@ -707,13 +706,19 @@ def plot_rms_iqr_with_uncertainty(
             rms_bl.append(float(np.sqrt(np.mean(res[np.abs(res) < rms_clip] ** 2))))
         ax[0].plot(q3_bin_mids, rms_bl, ".--", label="baseline", color="black")
         ax[1].plot(q3_bin_mids, iqr_bl, ".--", label="baseline", color="black")
+        print(f"  baseline: RMS = {rms_bl}, IQR = {iqr_bl}")
+        values["baseline"] = {"rms": np.array(rms_bl), "iqr": np.array(iqr_bl)}
 
+    print(f"E_pred_dict keys for '{dp}': { {l: list(m.keys()) for l, m in E_pred_dict.get(dp, {}).items()} }")
     for loss in training_names_grouped:
         for config_label, runs in training_names_grouped[loss].items():
             seed_rms = np.empty((len(runs), n_plot_bins))
             seed_iqr = np.empty((len(runs), n_plot_bins))
             for s in range(len(runs)):
                 flat_key = f"{config_label}{_SEED_SEP}{s}"
+                if flat_key not in E_pred_dict.get(dp, {}).get(loss, {}):
+                    print(f"  WARNING: '{flat_key}' not found in E_pred_dict['{dp}']['{loss}']")
+                    continue
                 for i in range(n_plot_bins):
                     true = mc_E[dp][bin_masks[i]]
                     reco = E_pred_dict[dp][loss][flat_key][bin_masks[i]]
@@ -730,15 +735,28 @@ def plot_rms_iqr_with_uncertainty(
             mean_iqr = seed_iqr.mean(axis=0)
             std_iqr = seed_iqr.std(axis=0)
 
+            print(f"  {config_label} ({loss}):")
+            print(f"    RMS = {mean_rms.tolist()}")
+            print(f"    IQR = {mean_iqr.tolist()}")
+
+            values.setdefault(loss, {})[config_label] = {
+                "rms_mean": mean_rms,
+                "rms_std": std_rms,
+                "iqr_mean": mean_iqr,
+                "iqr_std": std_iqr,
+                "rms_per_seed": seed_rms,
+                "iqr_per_seed": seed_iqr,
+            }
+
             color = color_map[config_label]
             lbl = f"{config_label} ({loss})"
 
-            ax[0].plot(q3_bin_mids, mean_rms, ".-", color=color, label=lbl)
+            ax[0].plot(q3_bin_mids, mean_rms, ".--", color=color, label=lbl)
             ax[0].fill_between(
                 q3_bin_mids, mean_rms - std_rms, mean_rms + std_rms,
                 alpha=0.25, color=color,
             )
-            ax[1].plot(q3_bin_mids, mean_iqr, ".-", color=color, label=lbl)
+            ax[1].plot(q3_bin_mids, mean_iqr, ".--", color=color, label=lbl)
             ax[1].fill_between(
                 q3_bin_mids, mean_iqr - std_iqr, mean_iqr + std_iqr,
                 alpha=0.25, color=color,
@@ -752,5 +770,87 @@ def plot_rms_iqr_with_uncertainty(
     ax[1].grid(True)
     fig.tight_layout()
 
+    if return_values:
+        return fig, values
+    return fig
+
+
+def plot_scaling_law(
+    values: dict[str, Any],
+    metric: str = "iqr",
+    q3_bin_index: int = -1,
+    colors: dict[str, Any] | None = None,
+    ax: plt.Axes | None = None,
+) -> plt.Figure:
+    """Plot a scaling-law curve: IQR (or RMS) of the highest q3 bin vs training samples.
+
+    Parameters
+    ----------
+    values : the *values* dict returned by
+        ``plot_rms_iqr_with_uncertainty(..., return_values=True)``.
+    metric : ``"iqr"`` or ``"rms"``.
+    q3_bin_index : which q3 bin to use.  ``-1`` (default) picks the last
+        plotted bin (highest q3).
+    colors : optional ``{substring_token: colour}`` mapping applied to
+        config labels (same convention as *plot_rms_iqr_with_uncertainty*).
+    ax : optional axes to draw on; a new figure is created if *None*.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+    """
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(6, 4))
+    else:
+        fig = ax.get_figure()
+
+    q3_mids = values["q3_bin_mids"]
+    bin_idx = q3_bin_index if q3_bin_index >= 0 else len(q3_mids) + q3_bin_index
+
+    all_labels: list[str] = []
+    for loss in values:
+        if loss in ("q3_bin_mids", "baseline"):
+            continue
+        for label in values[loss]:
+            if label not in all_labels:
+                all_labels.append(label)
+    color_map = _resolve_color_map(all_labels, colors)
+
+    mean_key = f"{metric}_mean"
+    std_key = f"{metric}_std"
+
+    for loss in values:
+        if loss in ("q3_bin_mids", "baseline"):
+            continue
+        for config_label, v in values[loss].items():
+            n_samples = _extract_sample_count(config_label)
+            if n_samples == 0:
+                continue
+            y_mean = v[mean_key][bin_idx]
+            y_std = v[std_key][bin_idx]
+            color = color_map.get(config_label, "tab:gray")
+            ax.errorbar(
+                n_samples, y_mean, yerr=y_std, fmt="o",
+                color=color, capsize=4,
+            )
+            ax.annotate(
+                config_label, (n_samples, y_mean),
+                textcoords="offset points", xytext=(6, 4), fontsize=7,
+                color=color,
+            )
+
+    if "baseline" in values:
+        bl_val = values["baseline"][metric][bin_idx]
+        ax.axhline(bl_val, color="black", ls="--", lw=1, label="baseline")
+
+    ax.set_xscale("log")
+    ax.set_xlabel("Number of training samples")
+    metric_label = "IQR" if metric == "iqr" else "RMS"
+    q3_lo = q3_mids[bin_idx] - (q3_mids[1] - q3_mids[0]) / 2 if len(q3_mids) > 1 else 0
+    ax.set_ylabel(f"{metric_label} [GeV]  (q$_3$ bin {bin_idx})")
+    ax.set_title(f"Scaling law – {metric_label} vs training set size")
+    ax.legend(fontsize=7)
+    ax.grid(True)
+    fig.tight_layout()
     return fig
 

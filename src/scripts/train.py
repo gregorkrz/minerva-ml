@@ -17,13 +17,11 @@ python -m src.scripts.train -bs 2048 --mode classifier -cc -name Train_CurrentTy
 python -m src.scripts.train -bs 2048 --mode regression -E-available-no-muon  -log-mse -name Debug_E_avail_LogMSE --lr 5e-4 --optimizer adamw --d_model 128 --depth 4 --n_heads 8 --dropout 0.1 --attn_dropout 0.1 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info1_split --num_workers 5 --eval_interval 1000
 python -m src.scripts.train -bs 2048 --mode regression -E-available-no-muon  -log-mse -name Debug_E_avail_LogMSE_Reprod --lr 5e-4 --optimizer lion --weight_decay 0.3  --d_model 128 --depth 4 --n_heads 8 --dropout 0.1 --attn_dropout 0.1 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info1_split --num_workers 5 --eval_interval 1000
 
-
 # E regression
 python -m src.scripts.train -bs 2048 --mode regression -E-available-no-muon --log1p_loss -name E_avail_no_muon_Log1pMSE --lr 5e-4 --optimizer lion --weight_decay 0.3 --d_model 128 --depth 4 --n_heads 8 --dropout 0.1 --attn_dropout 0.1 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info1_split --num_workers 5 --eval_interval 1000
 
 # Pion classification 25. 2. 2026
-
-python -m src.scripts.train -bs 2048 --mode classifier -npi2 -name Debug --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info_split --num_workers 10 --eval_interval 1000
+python -m src.scripts.train -bs 2048 --mode classifier -npi2 -name Pi_Class_1 --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260227_100Blobs_split --num_workers 10 --eval_interval 1000
 
 """
 
@@ -44,6 +42,45 @@ import numpy as np
 
 from src.dataset.dataloader import load_data, Task
 from src.models.vit import PointGlobalMixedViT, PointGlobalMixedViTConfig
+
+
+class ResidualBlock(nn.Module):
+    def __init__(self, dim, dropout=0.1):
+        super().__init__()
+        self.block = nn.Sequential(
+            nn.Linear(dim, dim),
+            nn.LayerNorm(dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(dim, dim),
+            nn.LayerNorm(dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+        )
+
+    def forward(self, x):
+        return x + self.block(x)
+
+
+class CondOnlyMLP(nn.Module):
+    """MLP with residual blocks that operates only on global/conditional features."""
+    def __init__(self, input_dim, hidden_dim, output_dim, n_layers=3, dropout=0.1):
+        super().__init__()
+        self.input_proj = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+        )
+        self.res_blocks = nn.Sequential(
+            *[ResidualBlock(hidden_dim, dropout) for _ in range(n_layers)]
+        )
+        self.head = nn.Linear(hidden_dim, output_dim)
+
+    def forward(self, x):
+        x = self.input_proj(x)
+        x = self.res_blocks(x)
+        return self.head(x)
 
 
 def parse_args():
@@ -81,6 +118,10 @@ def parse_args():
                         help="Regress available energy of the event, without the muon energy(requires mode=regression)")
     parser.add_argument("--no_use_cond", action="store_true",
                         help="Do NOT use global/conditional features")
+    parser.add_argument("--cond_only", "--cond-only", action="store_true",
+                        help="Train a simple MLP using only global/conditional features (no transformer)")
+    parser.add_argument("--mlp_layers", type=int, default=3,
+                        help="Number of residual blocks in CondOnlyMLP (independent of --depth)")
     parser.add_argument("--use_pid", type=bool, default=True,
                         help="Use particle ID information")
     parser.add_argument("--pid_idx", type=int, default=4, help="Index of PID in features")
@@ -214,20 +255,31 @@ def create_task(args):
             class_idx_map = {0: 0, 1: 1, 2: 2, 3: 3, 4: 4}
         return Task(type="classifier", classification_event_type=args.classification_event_type, 
             classification_current=args.classification_current, classification_cc_1pi=args.classification_cc_1pi,
-            classification_n_pions=args.classification_n_pions, class_idx=class_idx, class_idx_map=class_idx_map, class_label_idx=class_label_idx,
-            classification_CC1orNPi=args.classification_CC1orNPi)
+            classification_n_pions=args.classification_n_pions, class_idx=class_idx, class_idx_map=class_idx_map,
+            class_label_idx=class_label_idx, classification_CC1orNPi=args.classification_CC1orNPi)
     else:
         raise ValueError("Invalid mode")
 
 def create_model(args, task: Task):
-    """Create PointGlobalMixedViT model."""
+    """Create PointGlobalMixedViT model or CondOnlyMLP."""
     if task.type == "classifier":
         num_classes = len(task.class_idx)
     elif task.type == "regression":
         num_classes = 1
     else:
         raise ValueError("Invalid task type")
-    
+
+    if args.cond_only:
+        global_cont_dim = 4
+        model = CondOnlyMLP(
+            input_dim=global_cont_dim,
+            hidden_dim=args.d_model,
+            output_dim=num_classes,
+            n_layers=args.mlp_layers,
+            dropout=args.dropout,
+        )
+        return model
+
     # Point categorical features (PID if used)
     point_cat_num_classes = [8] if args.use_pid else []
     
@@ -357,17 +409,18 @@ def evaluate(model, dataloader, device, args, class_weights, use_amp=False, step
     for batch in tqdm(dataloader, desc="Evaluating", leave=False):
         inputs = prepare_batch(batch, device, args.use_cond, args.use_pid, args.coord_dim, args.pid_idx)
         with autocast(enabled=use_amp):
-            # Forward pass
-            features = model(
-                point_cont=inputs["point_cont"],
-                point_cats=inputs["point_cats"],
-                pos=inputs["pos"],
-                global_cont=inputs["global_cont"],
-                global_cats=inputs["global_cats"],
-                attn_mask=inputs["attn_mask"],
-            )
-            logits = model.head(features)
-            # Compute loss
+            if args.cond_only:
+                logits = model(inputs["global_cont"])
+            else:
+                features = model(
+                    point_cont=inputs["point_cont"],
+                    point_cats=inputs["point_cats"],
+                    pos=inputs["pos"],
+                    global_cont=inputs["global_cont"],
+                    global_cats=inputs["global_cats"],
+                    attn_mask=inputs["attn_mask"],
+                )
+                logits = model.head(features)
             if args.mode == "regression":
                 if args.weighted_regression_loss:
                     loss = compute_weighted_regression_loss(logits.squeeze(-1), inputs["y"])
@@ -442,6 +495,8 @@ def train(args):
     print(f"Output directory: {args.output_dir}")
     print(f"Run name: {run_name_with_timestamp}")
     args.use_cond = not args.no_use_cond
+    if args.cond_only:
+        args.use_cond = True
     # Set seed
     if args.seed is not None:
         set_seed(args.seed)
@@ -561,6 +616,39 @@ def train(args):
     debug_baseline_mses = []
     best_val_loss = float('inf')
     
+    # --- Cond-only diagnostic: inspect first batch ---
+    if args.cond_only:
+        diag_batch = next(iter(train_loader))
+        diag_inputs = prepare_batch(diag_batch, device, args.use_cond, args.use_pid, args.coord_dim, args.pid_idx)
+        gc = diag_inputs["global_cont"]
+        y = diag_inputs["y"]
+        print("=" * 60)
+        print("COND-ONLY DIAGNOSTIC (first batch)")
+        print("=" * 60)
+        if gc is None:
+            print("  *** WARNING: global_cont is None! Cond features not loaded. ***")
+        else:
+            print(f"  global_cont shape: {gc.shape}  dtype: {gc.dtype}")
+            print(f"  global_cont stats per feature (min / mean / max / std):")
+            for fi in range(gc.shape[1]):
+                col = gc[:, fi]
+                print(f"    feat[{fi}]: {col.min().item():+.4f} / {col.mean().item():+.4f} / {col.max().item():+.4f} / {col.std().item():.4f}")
+            print(f"  target (y) shape: {y.shape}  dtype: {y.dtype}")
+            print(f"  target stats: min={y.min().item():.4f}  mean={y.mean().item():.4f}  max={y.max().item():.4f}  std={y.std().item():.4f}")
+            if args.log1p_loss:
+                y_log = torch.log1p(y)
+                print(f"  log1p(target) stats: min={y_log.min().item():.4f}  mean={y_log.mean().item():.4f}  max={y_log.max().item():.4f}  std={y_log.std().item():.4f}")
+            with torch.no_grad():
+                pred0 = model(gc)
+                print(f"  model output (untrained) shape: {pred0.shape}")
+                print(f"  model output stats: min={pred0.min().item():.4f}  mean={pred0.mean().item():.4f}  max={pred0.max().item():.4f}  std={pred0.std().item():.4f}")
+            corr_matrix = torch.corrcoef(torch.cat([gc.T, y.unsqueeze(0)], dim=0))
+            print(f"  Pearson correlation of each cond feature with target:")
+            for fi in range(gc.shape[1]):
+                print(f"    feat[{fi}] <-> y: {corr_matrix[fi, -1].item():+.4f}")
+        print("=" * 60)
+        del diag_batch, diag_inputs, gc, y
+
     print(f"Steps per epoch: {steps_per_epoch}")
     print(f"Training for {args.epochs} epochs")
     for epoch in range(args.epochs):
@@ -579,26 +667,24 @@ def train(args):
             optimizer.zero_grad()
             
             with autocast(enabled=args.use_amp):
-                features = model(
-                    point_cont=inputs["point_cont"],
-                    point_cats=inputs["point_cats"],
-                    pos=inputs["pos"],
-                    global_cont=inputs["global_cont"],
-                    global_cats=inputs["global_cats"],
-                    attn_mask=inputs["attn_mask"],
-                )
-                
-                logits = model.head(features)
+                if args.cond_only:
+                    logits = model(inputs["global_cont"])
+                else:
+                    features = model(
+                        point_cont=inputs["point_cont"],
+                        point_cats=inputs["point_cats"],
+                        pos=inputs["pos"],
+                        global_cont=inputs["global_cont"],
+                        global_cats=inputs["global_cats"],
+                        attn_mask=inputs["attn_mask"],
+                    )
+                    logits = model.head(features)
 
-                # Compute loss
                 if args.mode == "regression":
                     if args.weighted_regression_loss:
                         loss = compute_weighted_regression_loss(logits.squeeze(-1), inputs["y"])
                     else:
                         loss = criterion(logits.squeeze(-1), inputs["y"])
-                        
-                    # if step % 50 == 0:
-                    #     print(f"Step {step}: y pred: {logits.squeeze(-1).detach().cpu().numpy()[:5]}, y true: {inputs['y'].detach().cpu().numpy()[:5]}")
                 else:
                     loss = criterion(logits, inputs["y"])
 

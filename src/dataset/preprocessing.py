@@ -602,17 +602,21 @@ def get_n_pions_label(mc_current, mc_part):
     # CC n Pi label
     n_pi_plus = []
     n_pi_minus = []
+    n_pi_zero = []
     is_multi_pion = np.zeros(len(mc_current), dtype=bool)
     for i in range(len(mc_current)):
         event_PDG = mc_part.data[mc_part.bounds[i]:mc_part.bounds[i+1]][:, 4].astype(int)
         n_pi_plus_event = np.sum(event_PDG == 211)
         n_pi_minus_event = np.sum(event_PDG == -211)
+        n_pi_zero_event = np.sum(event_PDG == 111)
+        n_pi_zero.append(n_pi_zero_event)
         is_multi_pion[i] = (n_pi_plus_event > 1) or (n_pi_minus_event > 1) # Wrong label, don't use it!
         n_pi_plus.append(n_pi_plus_event)
         n_pi_minus.append(n_pi_minus_event)
     n_pi_plus = np.array(n_pi_plus)
     n_pi_minus = np.array(n_pi_minus)
-    return n_pi_plus, n_pi_minus, is_multi_pion
+    n_pi_zero = np.array(n_pi_zero)
+    return n_pi_plus, n_pi_minus, is_multi_pion, n_pi_zero
 
 
 def get_cc_pi_labels(mc_current, mc_part):
@@ -693,10 +697,10 @@ def get_event_labels(master_ana_dev, mc_part):
     E_nu_true_over_reco = incoming_E / muon_reco_energy # learning a correction factor to the muon reco energy
     E_nu_true_over_reco[bad_muons] = -1
     labels, pi_four_vectors = get_cc_pi_labels(current_type, mc_part)
-    n_pi_plus, n_pi_minus, is_multi_pion = get_n_pions_label(current_type, mc_part)
+    n_pi_plus, n_pi_minus, is_multi_pion, n_pi_zero = get_n_pions_label(current_type, mc_part)
     e_avail_true_no_muon, e_muons = get_E_available_true(mc_part)
     scalar_labels = np.stack(
-        [incoming_E, event_type, E_nu_true_over_reco, current_type, labels, n_pi_plus, n_pi_minus, is_multi_pion, e_avail_true_no_muon+e_muons, e_avail_true_no_muon],
+        [incoming_E, event_type, E_nu_true_over_reco, current_type, labels, n_pi_plus, n_pi_minus, is_multi_pion, e_avail_true_no_muon+e_muons, e_avail_true_no_muon, n_pi_zero],
         axis=1,
     )
     return np.concatenate([scalar_labels, pi_four_vectors], axis=1)
@@ -707,7 +711,7 @@ def preprocess_dEdX(dedx):
     dedx = np.where(dedx == np.inf, 100, dedx)
     dedx = np.where(dedx == -np.inf, 100, dedx)
     dedx = np.where(dedx > 100, 100, dedx)
-    return np.log(dedx+1e-1)
+    return np.log(np.abs(dedx)+1e-1)
 
 def get_event_collections(master_ana_dev):
     mc_part_keys = ["mc_FSPartPx", "mc_FSPartPy", "mc_FSPartPz", "mc_FSPartE", "mc_FSPartPDG"]

@@ -6,6 +6,9 @@ from datetime import datetime as dt
 cmds = ["python -m src.scripts.train -bs 2048 --mode regression -E-available-no-muon -name E_avail_HuberEWeighted -wl --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info1_split --num_workers 10 --eval_interval 1000",
         "python -m src.scripts.train -bs 2048 --mode regression -E-available-no-muon  -log-mse -name E_avail_LogMSE --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info1_split --num_workers 10 --eval_interval 1000"]
 
+cmds = ["python -m src.scripts.train -bs 2048 --mode regression -E-available-no-muon --log1p_loss --cond-only -name E_avail_Log1pLoss_CondOnly --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info1_split --num_workers 10 --eval_interval 1000 --cond-only"]
+
+
 
 for i, cmd in enumerate(cmds):
     job_name = f"Tr_{i}_{dt.now().strftime('%Y%m%d_%H%M%S')}"

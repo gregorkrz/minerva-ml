@@ -69,7 +69,7 @@ from sklearn.metrics import accuracy_score, precision_recall_fscore_support, con
 
 from src.dataset.dataloader import load_data
 from src.models.vit import PointGlobalMixedViT, PointGlobalMixedViTConfig
-from src.scripts.train import set_seed, prepare_batch, create_task
+from src.scripts.train import set_seed, prepare_batch, create_task, CondOnlyMLP
 from types import SimpleNamespace
 
 
@@ -98,35 +98,43 @@ def create_model_from_checkpoint(checkpoint_path, device):
     else:
         raise ValueError("Invalid task type")
     
-    # Reconstruct model config
-    point_cat_num_classes = [8] if args_dict.get("use_pid", True) else []
-    global_cat_num_classes = []
-    global_cont_dim = 4 if args_dict.get("use_cond", False) else 0
-    
-    cfg = PointGlobalMixedViTConfig(
-        point_cont_dim=args_dict.get("point_cont_dim", 2),
-        point_cat_num_classes=point_cat_num_classes,
-        global_cont_dim=global_cont_dim,
-        global_cat_num_classes=global_cat_num_classes,
-        coord_dim=args_dict.get("coord_dim", 2),
-        d_model=args_dict.get("d_model", 128),
-        depth=args_dict.get("depth", 4),
-        n_heads=args_dict.get("n_heads", 4),
-        mlp_ratio=args_dict.get("mlp_ratio", 4.0),
-        dropout=args_dict.get("dropout", 0.1),
-        attn_dropout=args_dict.get("attn_dropout", 0.0),
-        use_cls_token=True,
-        use_event_token=args_dict.get("use_cond", False),
-        cat_emb_dim=16,
-    )
-    
-    model = PointGlobalMixedViT(cfg)
-    
-    # Add output head
-    if task.type == "regression":
-        model.head = nn.Linear(args_dict.get("d_model", 128), 1)
+    # Reconstruct model
+    if args_dict.get("cond_only", False):
+        model = CondOnlyMLP(
+            input_dim=4,
+            hidden_dim=args_dict.get("d_model", 128),
+            output_dim=num_classes,
+            n_layers=args_dict.get("mlp_layers", 3),
+            dropout=args_dict.get("dropout", 0.1),
+        )
     else:
-        model.head = nn.Linear(args_dict.get("d_model", 128), num_classes)
+        point_cat_num_classes = [8] if args_dict.get("use_pid", True) else []
+        global_cat_num_classes = []
+        global_cont_dim = 4 if args_dict.get("use_cond", False) else 0
+        
+        cfg = PointGlobalMixedViTConfig(
+            point_cont_dim=args_dict.get("point_cont_dim", 2),
+            point_cat_num_classes=point_cat_num_classes,
+            global_cont_dim=global_cont_dim,
+            global_cat_num_classes=global_cat_num_classes,
+            coord_dim=args_dict.get("coord_dim", 2),
+            d_model=args_dict.get("d_model", 128),
+            depth=args_dict.get("depth", 4),
+            n_heads=args_dict.get("n_heads", 4),
+            mlp_ratio=args_dict.get("mlp_ratio", 4.0),
+            dropout=args_dict.get("dropout", 0.1),
+            attn_dropout=args_dict.get("attn_dropout", 0.0),
+            use_cls_token=True,
+            use_event_token=args_dict.get("use_cond", False),
+            cat_emb_dim=16,
+        )
+        
+        model = PointGlobalMixedViT(cfg)
+        
+        if task.type == "regression":
+            model.head = nn.Linear(args_dict.get("d_model", 128), 1)
+        else:
+            model.head = nn.Linear(args_dict.get("d_model", 128), num_classes)
     
     # Load state dict
     model.load_state_dict(checkpoint["model_state_dict"])
@@ -158,6 +166,7 @@ def evaluate(model, dataloader, device, args_dict, use_amp=False):
     use_pid = args_dict.get("use_pid", True)
     coord_dim = args_dict.get("coord_dim", 2)
     pid_idx = args_dict.get("pid_idx", 4)
+    cond_only = args_dict.get("cond_only", False)
     
     # Setup loss function
     if mode == "regression":
@@ -178,19 +187,19 @@ def evaluate(model, dataloader, device, args_dict, use_amp=False):
         inputs = prepare_batch(batch, device, use_cond, use_pid, coord_dim, pid_idx)
         amp_enabled = bool(use_amp and device.type == "cuda")
         with torch.amp.autocast(device_type="cuda", enabled=amp_enabled):
-            # Forward pass
-            features = model(
-                point_cont=inputs["point_cont"],
-                point_cats=inputs["point_cats"],
-                pos=inputs["pos"],
-                global_cont=inputs["global_cont"],
-                global_cats=inputs["global_cats"],
-                attn_mask=inputs["attn_mask"],
-            )
+            if cond_only:
+                logits = model(inputs["global_cont"])
+            else:
+                features = model(
+                    point_cont=inputs["point_cont"],
+                    point_cats=inputs["point_cats"],
+                    pos=inputs["pos"],
+                    global_cont=inputs["global_cont"],
+                    global_cats=inputs["global_cats"],
+                    attn_mask=inputs["attn_mask"],
+                )
+                logits = model.head(features)
             
-            logits = model.head(features)
-            
-            # Compute loss
             if mode == "regression":
                 loss = criterion(logits.squeeze(-1), inputs["y"])
             else:

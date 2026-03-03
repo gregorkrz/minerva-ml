@@ -19,11 +19,11 @@ python -m src.jobs.gen_train_cmds_OmniLearned -name E_avail_HuberWeighted_NoLog 
 python -m src.jobs.gen_train_cmds_OmniLearned -name E_avail_Log1PLoss --regress-E-available-no-muon -nw 10  --loss-type log1p  -p
 python -m src.jobs.gen_train_cmds_OmniLearned -name E_avail_Log1PLoss_PT --regress-E-available-no-muon -nw 10  --loss-type log1p --use-pretrained pretrain_s -p
 
-
+--------------------------------
 Ch. pion classification:
-python -m src.jobs.gen_train_cmds_OmniLearned -name Train_CC1orNPi_Fix260226 -nw 10 --class-pions -p --use-pretrained pretrain_s 
-python -m src.jobs.gen_train_cmds_OmniLearned -name Train_CC1orNPi_Fix260226 -nw 10 --class-pions -p --use-pretrained pretrain_m
-python -m src.jobs.gen_train_cmds_OmniLearned -name Train_CC1orNPi_Fix260226_PT -nw 10 --class-pions -p
+python -m src.jobs.gen_train_cmds_OmniLearned -name Train_CC1orNPi_Fix260226_PT -nw 10 --class-pions -p --use-pretrained pretrain_s  --dataset Minerva_100Blobs
+#python -m src.jobs.gen_train_cmds_OmniLearned -name OmniM_Train_CC1orNPi_Fix260226_PT -nw 10 --class-pions -p --use-pretrained pretrain_m
+python -m src.jobs.gen_train_cmds_OmniLearned -name Train_CC1orNPi_Fix260226 -nw 10 --class-pions -p --dataset Minerva_100Blobs
 --------------------------------
 """
 
@@ -62,7 +62,8 @@ DATA_DIR = args.data_dir
 DATASETS = {
     "default_Minerva": f"{DATA_DIR}/Minerva/20260216_additional_info1_split",
     "Minerva_v2": f"{DATA_DIR}/Minerva/20260201_all_max_blobs_and_prongs_split_fix_anomalies",
-    "Minerva_150obj": f"{DATA_DIR}/Minerva/20260223_150obj_split"
+    "Minerva_150obj": f"{DATA_DIR}/Minerva/20260223_150obj_split",
+    "Minerva_100Blobs": f"{DATA_DIR}/Minerva/20260227_100Blobs_split"
 }
 
 timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -164,7 +165,7 @@ elif args.resume_from is not None:
         raise ValueError(f"Resume checkpoint not found: {args.resume_from}")
 
 slurm_file_content = SLURM_TEMPLATE_GPU.format(
-    time="10:00:00",
+    time="05:00:00",
     cpus_per_task=32,
     gpus_per_node=1,
     job_name=job_name,
@@ -174,11 +175,13 @@ slurm_file_content = SLURM_TEMPLATE_GPU.format(
     commands="srun python "  + train_cmd,
     queue_name="shared"
 )
+
 if args.print_cmd_only:
     print(env_commands)
-    #print("torchrun --nproc_per_node=4 " +train_cmd)
-    print("python " +train_cmd)
+    #print("torchrun --nproc_per_node=4 " + train_cmd)
+    print("python " + train_cmd)
     exit()
+
 with open(sbatch_file, "w") as f:
     f.write(slurm_file_content)
     print("Written to sbatch file: ", sbatch_file)

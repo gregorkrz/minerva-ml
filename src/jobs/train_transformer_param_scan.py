@@ -14,6 +14,7 @@ configs = [
     {"d_model": 128, "depth": 4, "n_heads": 4},
     {"d_model": 128, "depth": 4, "n_heads": 16},
     {"d_model": 256, "depth": 6, "n_heads": 8},
+    
 ]
 
 cmds = []
