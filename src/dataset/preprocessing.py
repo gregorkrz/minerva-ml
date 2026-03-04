@@ -320,7 +320,8 @@ def get_event_repr_nested_tensor(muons, photons, blobs, prongs, global_features,
     
     file_exists = os.path.exists(output_file)
     data_nested = []
-    data_nested_pos_and_timing = [] # Additional info: [<dE/dx>, x, y, z, t] (or zeros where not applicable)
+    data_nested_pos_and_timing = []
+    # Additional info: [<dE/dx>, x, y, z, t] (or zeros where not applicable)
 
     if file_exists:
         raise ValueError(f"File {output_file} already exists")
@@ -623,20 +624,20 @@ def get_cc_pi_labels(mc_current, mc_part):
     # Labels: 0=other, 1=CC pi+, 2=CC pi-
     # Returns also the four-vectors of the MC pi+ or pi-
     cc_events = np.where(mc_current == 1)[0]
-    other_mesons_piplus = [-211, 111, 311, -311, 321, -321]
-    other_mesons_piminus = [211, 111, 311, -311, 321, -321]
+    # other_mesons_piplus = [-211, 111, 311, -311, 321, -321]
+    # other_mesons_piminus = [211, 111, 311, -311, 321, -321]
     labels = np.zeros(len(mc_current), dtype=int)
     pi_four_vectors = np.zeros((len(mc_current), 4))
     
     for i in range(len(cc_events)):
         event_PDG = mc_part.data[mc_part.bounds[cc_events[i]]:mc_part.bounds[cc_events[i]+1]][:, 4].astype(int)
-        meson_filter = np.isin(event_PDG, other_mesons_piplus)
+        #meson_filter = np.isin(event_PDG, other_mesons_piplus)
         pion_idx = -1
-        if np.sum(event_PDG == 211) == 1 and np.sum(meson_filter) == 0:
+        if np.sum(event_PDG == 211) == 1: # and np.sum(meson_filter) == 0:
             labels[cc_events[i]] = 1
             pion_idx = np.where(event_PDG == 211)[0][0]
-        meson_filter_piminus = np.isin(event_PDG, other_mesons_piminus)
-        if np.sum(event_PDG == -211) == 1 and np.sum(meson_filter_piminus) == 0:
+        #meson_filter_piminus = np.isin(event_PDG, other_mesons_piminus)
+        if np.sum(event_PDG == -211) == 1: # and np.sum(meson_filter_piminus) == 0:
             labels[cc_events[i]] = 2
             pion_idx = np.where(event_PDG == -211)[0][0]
         else:
@@ -712,6 +713,7 @@ def preprocess_dEdX(dedx):
     dedx = np.where(dedx == -np.inf, 100, dedx)
     dedx = np.where(dedx > 100, 100, dedx)
     return np.log(np.abs(dedx)+1e-1)
+
 
 def get_event_collections(master_ana_dev):
     mc_part_keys = ["mc_FSPartPx", "mc_FSPartPy", "mc_FSPartPz", "mc_FSPartE", "mc_FSPartPDG"]

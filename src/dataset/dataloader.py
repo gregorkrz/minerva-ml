@@ -64,7 +64,7 @@ def collate_point_cloud(batch, max_particles=33):
     result = {"X": point_clouds, "y": labels, "attention_mask": attention_masks}#, "data_additional_info": additional_info}
 
     # Handle optional fields in a loop to reduce code duplication
-    optional_fields = ["cond", "pid", "add_info", "data_pid", "vertex_pid"]
+    optional_fields = ["cond", "pid", "add_info", "data_pid", "vertex_pid", "energy_sums"]
     for field in optional_fields:
         if all(field in item and item[field] is not None for item in batch):
             values = [item[field] for item in batch]
@@ -104,8 +104,24 @@ def get_CC1orNPi_labels(file_truth_labels):
     labels[is_cc & multi_pions] = 2 # CC N Pi +-
     labels[~is_cc] = 3 # Not CC
     labels[is_cc & ((n_pi_plus + n_pi_minus) == 0)] = 4 # CC other
-    return labels # labels: 0=CC 1pi+, 1=CC 1pi-, 2=CC N charged pions-, 3=OTHER
+    return labels # Labels: 0=CC 1pi+, 1=CC 1pi-, 2=CC N charged pions-, 3=OTHER
 
+def get_Pi_labels_v2(file_truth_labels):
+    # label0 = CC, 1 charged pion, the rest whatever
+    # label1 = CC, N >1charged pion, the rest whatever
+    # label2 = CC, 1 pi0, no charged pions
+    # label3 = CC, all others
+    # label4 = NC
+    is_cc = file_truth_labels[:, 3] == 1
+    n_pi_plus = file_truth_labels[:, 5]
+    n_pi_minus = file_truth_labels[:, 6]
+    n_pi_zero = file_truth_labels[:, 10]
+    labels = torch.ones(len(file_truth_labels), dtype=torch.long)*4 # 4 is the label for other
+    labels[is_cc & (n_pi_plus == 1) & (n_pi_minus == 0)] = 0
+    labels[is_cc & ((n_pi_plus + n_pi_minus) > 1)] = 1
+    labels[is_cc & ((n_pi_plus + n_pi_minus) == 0)] = 3
+    labels[is_cc & (n_pi_zero == 1) & (n_pi_plus == 0) & (n_pi_minus == 0)] = 2
+    return labels
 
 class HEPTorchDataset(Dataset):
     def __init__(
@@ -119,7 +135,8 @@ class HEPTorchDataset(Dataset):
         nevts=-1,
         max_particles=150,
         task: Task = Task(),
-        concat_additional_info=True
+        concat_additional_info=True,
+        use_energy_sums=False
     ):
         """
         Args:
@@ -134,6 +151,7 @@ class HEPTorchDataset(Dataset):
         self.pid_idx = pid_idx
         self.use_pid = use_pid
         self.concat_additional_info = concat_additional_info
+        self.use_energy_sums = use_energy_sums
         self.folder = folder
         self.file_paths = sorted(list([os.path.join(folder, file) for file in os.listdir(folder) if file.endswith('.pb')]))
         print("Loading files into memory")
@@ -149,7 +167,7 @@ class HEPTorchDataset(Dataset):
         self.files_truth_labels = [file["truth_labels"] for file in self.files]
         # add a column with CC1orNPi labels
         if task.classification_CC1orNPi:
-            self.files_truth_labels = [np.concatenate([file_truth_labels, get_CC1orNPi_labels(file_truth_labels).reshape(-1, 1)], axis=1) for file_truth_labels in self.files_truth_labels]
+            self.files_truth_labels = [np.concatenate([file_truth_labels, get_Pi_labels_v2(file_truth_labels).reshape(-1, 1)], axis=1) for file_truth_labels in self.files_truth_labels]
         self.files_global_features = [file["global_features"] for file in self.files]
         self.nevts = int(nevts)
         self.max_particles = max_particles
@@ -182,17 +200,10 @@ class HEPTorchDataset(Dataset):
         data = self.files_values[file_idx][self.files_offsets[file_idx][sample_idx]:self.files_offsets[file_idx][sample_idx+1]]
         data_additional_info = self.files_values_additional_info[file_idx][self.files_offsets_additional_info[file_idx][sample_idx]:self.files_offsets_additional_info[file_idx][sample_idx+1]]
         valid_attention_mask = torch.ones(data.shape[0], dtype=data.dtype)
-        # pad up to max_particles
-        #if data.shape[0] <= self.max_particles:
-        #    valid_attention_mask = torch.ones(data.shape[0])
-        #    n_padding = self.max_particles - data.shape[0]
-        #    data = torch.cat([data, torch.zeros(n_padding, data.shape[1])], dim=0)
-        #    data_additional_info = torch.cat([data_additional_info, torch.zeros(n_padding, data_additional_info.shape[1])], dim=0)
-        #    valid_attention_mask = torch.cat([valid_attention_mask, torch.zeros(n_padding)], dim=0)
-        #else:
-        #    raise ValueError("Data has more particles than max_particles")
         sample = {}
+
         # Handle labels
+
         if self.task.type == "classifier":
             i = self.task.class_label_idx
             label = self.files_truth_labels[file_idx][sample_idx, i]
@@ -222,6 +233,17 @@ class HEPTorchDataset(Dataset):
         #else:
         #    sample["data_additional_info"] = data_additional_info # shape (N, 5)
         sample["attention_mask"] = valid_attention_mask
+
+        if self.use_energy_sums:
+            pid = data[:, self.pid_idx]
+            E = torch.exp(data[:, 3])  # index 3 is log(E + 1e-6)
+            # PID 2=blob, 3=prong(3), 4=prong(8), 5=prong(13), 6=agg_blob, 7=agg_prong
+            energy_sums = torch.zeros(6, dtype=torch.float32)
+            for i, pid_val in enumerate([2, 3, 4, 5, 6, 7]):
+                mask = pid == pid_val
+                energy_sums[i] = E[mask].sum()
+            sample["energy_sums"] = energy_sums
+
         return sample
 
 
@@ -245,7 +267,8 @@ def load_data(
     max_particles=33,
     task: Task = Task(),
     concat_additional_info=True,
-    event_sampler_random_state=42
+    event_sampler_random_state=42,
+    use_energy_sums=False
 ):
     supported_datasets = ["minerva_1A", "minerva_1B", "minerva_1C", "minerva_1D", "minerva_1E", "minerva_1F",
     "minerva_1G", "minerva_1L", "minerva_1M", "minerva_1N", "minerva_1O", "minerva_1P"]
@@ -266,7 +289,8 @@ def load_data(
             max_particles=max_particles,
             task=task,
             concat_additional_info=concat_additional_info,
-            nevts=-1 # Here, keep the whole dataset, only later we will sample a subset of the data
+            nevts=-1, # Here, keep the whole dataset, only later we will sample a subset of the data
+            use_energy_sums=use_energy_sums
         )
         if nevts > 0 and nevts < len(data):
             print(f"Using a subset of the data: {nevts} events out of {len(data)}")

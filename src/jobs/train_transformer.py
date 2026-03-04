@@ -8,7 +8,7 @@ cmds = ["python -m src.scripts.train -bs 2048 --mode regression -E-available-no-
 
 cmds = ["python -m src.scripts.train -bs 2048 --mode regression -E-available-no-muon --log1p_loss --cond-only -name E_avail_Log1pLoss_CondOnly --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info1_split --num_workers 10 --eval_interval 1000 --cond-only"]
 
-
+cmds = ["python -m src.scripts.train -bs 2048 --mode classifier -npi2 -name Pi_Class_v3 --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260227_100Blobs_v1_split --num_workers 10 --eval_interval 1000"]
 
 for i, cmd in enumerate(cmds):
     job_name = f"Tr_{i}_{dt.now().strftime('%Y%m%d_%H%M%S')}"
@@ -19,7 +19,7 @@ for i, cmd in enumerate(cmds):
     with open(slurm_file, "w") as f:
         f.write(SLURM_TEMPLATE_GPU.format(
             queue_name="shared",
-            time="20:00:00",
+            time="03:00:00",
             cpus_per_task=32,
             gpus_per_node=1,
             job_name=job_name,

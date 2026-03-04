@@ -21,10 +21,18 @@ python -m src.jobs.gen_train_cmds_OmniLearned -name E_avail_Log1PLoss_PT --regre
 
 --------------------------------
 Ch. pion classification:
-python -m src.jobs.gen_train_cmds_OmniLearned -name Train_CC1orNPi_Fix260226_PT -nw 10 --class-pions -p --use-pretrained pretrain_s  --dataset Minerva_100Blobs
-#python -m src.jobs.gen_train_cmds_OmniLearned -name OmniM_Train_CC1orNPi_Fix260226_PT -nw 10 --class-pions -p --use-pretrained pretrain_m
-python -m src.jobs.gen_train_cmds_OmniLearned -name Train_CC1orNPi_Fix260226 -nw 10 --class-pions -p --dataset Minerva_100Blobs
+python -m src.jobs.gen_train_cmds_OmniLearned -name Train_CC1orNPi_v3_PT_S -nw 10 --class-pions -p --resume-from /global/cfs/cdirs/m3246/gregork/checkpoints/Train_CC1orNPi_v3_PT_S_1A_20260303_082607/best_model_Train_CC1orNPi_v3_PT_S_1A_20260303_082607.pt  --dataset Minerva_100Blobs_v1
+python -m src.jobs.gen_train_cmds_OmniLearned -name Train_CC1orNPi_v3 -nw 10 --class-pions -p --dataset Minerva_100Blobs_v1 --resume-from /global/cfs/cdirs/m3246/gregork/checkpoints/Train_CC1orNPi_v3_1A_20260303_082351/best_model_Train_CC1orNPi_v3_1A_20260303_082351.pt
+
+
 --------------------------------
+python -m src.jobs.gen_train_cmds_OmniLearned -name Train_CC1orNPi_v3_PT_S -nw 10 --class-pions  --dataset Minerva_100Blobs_v1 --use-pretrained pretrain_s --run
+python -m src.jobs.gen_train_cmds_OmniLearned -name Train_CC1orNPi_v3_PT_M -nw 10 --class-pions  --dataset Minerva_100Blobs_v1 --use-pretrained pretrain_m --run
+python -m src.jobs.gen_train_cmds_OmniLearned -name Train_CC1orNPi_v3 -nw 10 --class-pions --dataset Minerva_100Blobs_v1  --run
+--------------------------------
+
+python -m src.scripts.train -bs 2048 --mode classifier -npi2 -name Pi_Class_v3 --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260227_100Blobs_v1_split --num_workers 10 --eval_interval 1000 
+
 """
 
 
@@ -63,7 +71,8 @@ DATASETS = {
     "default_Minerva": f"{DATA_DIR}/Minerva/20260216_additional_info1_split",
     "Minerva_v2": f"{DATA_DIR}/Minerva/20260201_all_max_blobs_and_prongs_split_fix_anomalies",
     "Minerva_150obj": f"{DATA_DIR}/Minerva/20260223_150obj_split",
-    "Minerva_100Blobs": f"{DATA_DIR}/Minerva/20260227_100Blobs_split"
+    "Minerva_100Blobs": f"{DATA_DIR}/Minerva/20260227_100Blobs_split",
+    "Minerva_100Blobs_v1": f"{DATA_DIR}/Minerva/20260227_100Blobs_v1_split"
 }
 
 timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -165,7 +174,7 @@ elif args.resume_from is not None:
         raise ValueError(f"Resume checkpoint not found: {args.resume_from}")
 
 slurm_file_content = SLURM_TEMPLATE_GPU.format(
-    time="05:00:00",
+    time="08:00:00",
     cpus_per_task=32,
     gpus_per_node=1,
     job_name=job_name,

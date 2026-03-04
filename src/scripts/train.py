@@ -20,8 +20,10 @@ python -m src.scripts.train -bs 2048 --mode regression -E-available-no-muon  -lo
 # E regression
 python -m src.scripts.train -bs 2048 --mode regression -E-available-no-muon --log1p_loss -name E_avail_no_muon_Log1pMSE --lr 5e-4 --optimizer lion --weight_decay 0.3 --d_model 128 --depth 4 --n_heads 8 --dropout 0.1 --attn_dropout 0.1 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info1_split --num_workers 5 --eval_interval 1000
 
-# Pion classification 25. 2. 2026
-python -m src.scripts.train -bs 2048 --mode classifier -npi2 -name Pi_Class_1 --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260227_100Blobs_split --num_workers 10 --eval_interval 1000
+# Pion classification 2.3.2026
+
+python -m src.scripts.train -bs 2048 --mode classifier -npi2 -name Pi_Class_v3 --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260227_100Blobs_v1_split --num_workers 10 --eval_interval 1000 
+
 
 """
 
@@ -198,6 +200,11 @@ def parse_args():
     parser.add_argument("--optimizer", type=str, default="adamw",
                         choices=["adamw", "lion"],
                         help="Optimizer to use")
+    parser.add_argument("--include-E-sum", action="store_true",
+                        help="Include per-PID energy sums (blob, prong types, aggregated) as extra global features")
+    parser.add_argument("--zero-cond-feature", type=int, nargs="+", default=None,
+                        help="Zero out global/cond feature(s) at these indices (ablation). "
+                             "E.g. --zero-cond-feature 3 to ablate E_recoil_CCinc")
     return parser.parse_args()
 
 
@@ -269,8 +276,10 @@ def create_model(args, task: Task):
     else:
         raise ValueError("Invalid task type")
 
+    e_sum_dim = 6 if args.include_E_sum else 0
+
     if args.cond_only:
-        global_cont_dim = 4
+        global_cont_dim = 4 + e_sum_dim
         model = CondOnlyMLP(
             input_dim=global_cont_dim,
             hidden_dim=args.d_model,
@@ -287,7 +296,8 @@ def create_model(args, task: Task):
     global_cat_num_classes = []
     
     # Global continuous dimension
-    global_cont_dim = 4 if args.use_cond else 0
+    global_cont_dim = (4 if args.use_cond else 0) + e_sum_dim
+    use_event_token = args.use_cond or args.include_E_sum
     
     cfg = PointGlobalMixedViTConfig(
         point_cont_dim=args.point_cont_dim,
@@ -302,7 +312,7 @@ def create_model(args, task: Task):
         dropout=args.dropout,
         attn_dropout=args.attn_dropout,
         use_cls_token=True,
-        use_event_token=args.use_cond,
+        use_event_token=use_event_token,
         cat_emb_dim=16,
     )
     
@@ -316,7 +326,8 @@ def create_model(args, task: Task):
     return model
 
 
-def prepare_batch(batch, device, use_cond=False, use_pid=False, coord_dim=2, pid_idx=4):
+def prepare_batch(batch, device, use_cond=False, use_pid=False, coord_dim=2, pid_idx=4,
+                   include_E_sum=False, zero_cond_feature=None):
     """Prepare batch for model input."""
     X = batch["X"].to(device, dtype=torch.float32)
     y = batch["y"].to(device)
@@ -340,12 +351,25 @@ def prepare_batch(batch, device, use_cond=False, use_pid=False, coord_dim=2, pid
     global_cats = None
     if use_cond and batch.get("cond") is not None:
         global_cont = batch["cond"].to(device, dtype=torch.float32)  # [B, global_cont_dim]
-    
+
+    if include_E_sum and batch.get("energy_sums") is not None:
+        e_sums = batch["energy_sums"].to(device, dtype=torch.float32)
+        e_sums = torch.log(e_sums + 1e-3)  # [B, 6]
+        if global_cont is not None:
+            global_cont = torch.cat([global_cont, e_sums], dim=1)
+        else:
+            global_cont = e_sums
+
+    if zero_cond_feature is not None and global_cont is not None:
+        for idx in zero_cond_feature:
+            global_cont[:, idx] = 0.0
+
     # Expand attention mask to account for special tokens
     # Model always adds CLS token, and adds EVT token if use_cond=True
     B = X.shape[0]
+    use_event_token = use_cond or include_E_sum
     num_special_tokens = 1  # CLS token
-    if use_cond:
+    if use_event_token:
         num_special_tokens += 1  # EVT token
     
     # Prepend ones for special tokens (they are always "valid")
@@ -407,7 +431,7 @@ def evaluate(model, dataloader, device, args, class_weights, use_amp=False, step
     else:
         criterion = nn.CrossEntropyLoss(weight=class_weights)
     for batch in tqdm(dataloader, desc="Evaluating", leave=False):
-        inputs = prepare_batch(batch, device, args.use_cond, args.use_pid, args.coord_dim, args.pid_idx)
+        inputs = prepare_batch(batch, device, args.use_cond, args.use_pid, args.coord_dim, args.pid_idx, include_E_sum=args.include_E_sum, zero_cond_feature=args.zero_cond_feature)
         with autocast(enabled=use_amp):
             if args.cond_only:
                 logits = model(inputs["global_cont"])
@@ -526,6 +550,7 @@ def train(args):
         concat_additional_info=True,
         event_sampler_random_state=args.event_sampler_random_state,
         nevts=args.event_cap,
+        use_energy_sums=args.include_E_sum,
     )
     
     val_loader, _ = load_data(
@@ -544,6 +569,7 @@ def train(args):
         shuffle=False,
         max_particles=args.max_particles,
         concat_additional_info=True,
+        use_energy_sums=args.include_E_sum,
     )
     
     print(f"Train samples: {len(train_loader.dataset)}")
@@ -619,7 +645,7 @@ def train(args):
     # --- Cond-only diagnostic: inspect first batch ---
     if args.cond_only:
         diag_batch = next(iter(train_loader))
-        diag_inputs = prepare_batch(diag_batch, device, args.use_cond, args.use_pid, args.coord_dim, args.pid_idx)
+        diag_inputs = prepare_batch(diag_batch, device, args.use_cond, args.use_pid, args.coord_dim, args.pid_idx, include_E_sum=args.include_E_sum, zero_cond_feature=args.zero_cond_feature)
         gc = diag_inputs["global_cont"]
         y = diag_inputs["y"]
         print("=" * 60)
@@ -661,7 +687,7 @@ def train(args):
             data_fetch_times.append(time.perf_counter() - iter_end_time)
 
             # Prepare inputs
-            inputs = prepare_batch(batch, device, args.use_cond, args.use_pid, args.coord_dim, args.pid_idx)
+            inputs = prepare_batch(batch, device, args.use_cond, args.use_pid, args.coord_dim, args.pid_idx, include_E_sum=args.include_E_sum, zero_cond_feature=args.zero_cond_feature)
             
             # Forward pass
             optimizer.zero_grad()

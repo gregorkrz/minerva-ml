@@ -24,6 +24,9 @@ import uproot
 import pickle
 from pathlib import Path
 from tqdm import tqdm
+from src.dataset.preprocessing import get_dense
+
+mc_part_keys = ["mc_FSPartPx", "mc_FSPartPy", "mc_FSPartPz", "mc_FSPartE", "mc_FSPartPDG"]
 
 
 def get_muon_kinematics(master_ana_dev):
@@ -121,6 +124,31 @@ def compute_ccqe_formula(muon_kinematics):
     
     return E_nu_formula
 
+def get_pion_kinematics(master_ana_dev):
+    # Get pion kinematics if there is exactly one charged pion (or one neutral pion with no charged pions).
+    # Returns an (N_events, 4) array of four-vectors; rows are zero for events
+    # that are not CC or don't have a unique single-pion final state.
+    mc_part = get_dense(mc_part_keys, master_ana_dev)
+    current = master_ana_dev["mc_current"].array().to_numpy()
+    cc_events = np.where(current == 1)[0]
+    n_events = len(current)
+    pion_four_vectors = np.zeros((n_events, 4))
+    for i in range(len(cc_events)):
+        ev = cc_events[i]
+        event_PDG = mc_part.data[mc_part.bounds[ev]:mc_part.bounds[ev+1]][:, 4].astype(int)
+        pion_idx = -1
+        n_piplus = np.sum(event_PDG == 211)
+        n_piminus = np.sum(event_PDG == -211)
+        n_pi0 = np.sum(event_PDG == 111)
+        if n_piplus == 1 and n_piminus == 0:
+            pion_idx = np.where(event_PDG == 211)[0][0]
+        elif n_piplus == 0 and n_piminus == 1:
+            pion_idx = np.where(event_PDG == -211)[0][0]
+        elif n_piplus == 0 and n_piminus == 0 and n_pi0 == 1:
+            pion_idx = np.where(event_PDG == 111)[0][0]
+        if pion_idx != -1:
+            pion_four_vectors[ev, :] = mc_part.data[mc_part.bounds[ev]:mc_part.bounds[ev+1]][pion_idx, :4]
+    return pion_four_vectors
 
 def compute_enu_baselines(root_file_path):
     """
@@ -186,6 +214,9 @@ def compute_enu_baselines(root_file_path):
         q0 = get_q0(muon_kinematics, E_true)
         q3 = get_q3(muon_kinematics, E_true, q0)
 
+        # 8. Pion four-vectors (px, py, pz, E) for single-pion CC events
+        pion_four_vectors = get_pion_kinematics(master_ana_dev)
+
         return {
             'CCQE_formula': E_nu_from_formula,
             'Enu_from_muon': E_nu_from_df,
@@ -199,6 +230,7 @@ def compute_enu_baselines(root_file_path):
             "muon_filter_CC_paper": muon_filter_CC_paper,
             "q0": q0,
             "q3": q3,
+            "pion_four_vectors": pion_four_vectors,
         }
 
 
@@ -235,6 +267,7 @@ def process_playlist(playlist_path, playlist_name):
         "muon_filter_CC_paper": [],
         "q0": [],
         "q3": [],
+        "pion_four_vectors": [],
     }
     
     # Process each file

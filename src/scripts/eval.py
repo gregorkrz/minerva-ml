@@ -53,7 +53,10 @@ python -m src.scripts.eval --checkpoint Train_Regress_E_available3_no_muon_20260
 
 
 python -m src.scripts.eval --checkpoint Train_CC1orNPi_Fix250226_20260225_235334 --batch_size 1024 --dataset_name minerva_1A
+
+python -m src.scripts.eval --checkpoint Pi_Class_v3_20260303_082729 --batch_size 1024 --dataset_name minerva_1A --no_amp
 """
+
 
 import argparse
 import os
@@ -99,9 +102,11 @@ def create_model_from_checkpoint(checkpoint_path, device):
         raise ValueError("Invalid task type")
     
     # Reconstruct model
+    e_sum_dim = 6 if args_dict.get("include_E_sum", False) else 0
+
     if args_dict.get("cond_only", False):
         model = CondOnlyMLP(
-            input_dim=4,
+            input_dim=4 + e_sum_dim,
             hidden_dim=args_dict.get("d_model", 128),
             output_dim=num_classes,
             n_layers=args_dict.get("mlp_layers", 3),
@@ -110,7 +115,8 @@ def create_model_from_checkpoint(checkpoint_path, device):
     else:
         point_cat_num_classes = [8] if args_dict.get("use_pid", True) else []
         global_cat_num_classes = []
-        global_cont_dim = 4 if args_dict.get("use_cond", False) else 0
+        global_cont_dim = (4 if args_dict.get("use_cond", False) else 0) + e_sum_dim
+        use_event_token = args_dict.get("use_cond", False) or args_dict.get("include_E_sum", False)
         
         cfg = PointGlobalMixedViTConfig(
             point_cont_dim=args_dict.get("point_cont_dim", 2),
@@ -125,7 +131,7 @@ def create_model_from_checkpoint(checkpoint_path, device):
             dropout=args_dict.get("dropout", 0.1),
             attn_dropout=args_dict.get("attn_dropout", 0.0),
             use_cls_token=True,
-            use_event_token=args_dict.get("use_cond", False),
+            use_event_token=use_event_token,
             cat_emb_dim=16,
         )
         
@@ -167,6 +173,8 @@ def evaluate(model, dataloader, device, args_dict, use_amp=False):
     coord_dim = args_dict.get("coord_dim", 2)
     pid_idx = args_dict.get("pid_idx", 4)
     cond_only = args_dict.get("cond_only", False)
+    include_E_sum = args_dict.get("include_E_sum", False)
+    zero_cond_feature = args_dict.get("zero_cond_feature", None)
     
     # Setup loss function
     if mode == "regression":
@@ -184,7 +192,7 @@ def evaluate(model, dataloader, device, args_dict, use_amp=False):
     all_cond = []
 
     for batch in tqdm(dataloader, desc=f"Evaluating", leave=True):
-        inputs = prepare_batch(batch, device, use_cond, use_pid, coord_dim, pid_idx)
+        inputs = prepare_batch(batch, device, use_cond, use_pid, coord_dim, pid_idx, include_E_sum=include_E_sum, zero_cond_feature=zero_cond_feature)
         amp_enabled = bool(use_amp and device.type == "cuda")
         with torch.amp.autocast(device_type="cuda", enabled=amp_enabled):
             if cond_only:
@@ -368,6 +376,7 @@ def main():
         max_particles=max_particles,
         task=task,
         nevts=-1,
+        use_energy_sums=args_dict.get("include_E_sum", False),
     )
     
     print(f"Number of samples: {len(dataloader.dataset)}")
