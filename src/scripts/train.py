@@ -24,7 +24,6 @@ python -m src.scripts.train -bs 2048 --mode regression -E-available-no-muon --lo
 
 python -m src.scripts.train -bs 2048 --mode classifier -npi2 -name Pi_Class_v3 --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260227_100Blobs_v1_split --num_workers 10 --eval_interval 1000 
 
-
 """
 
 import argparse

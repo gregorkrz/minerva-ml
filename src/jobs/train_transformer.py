@@ -10,6 +10,8 @@ cmds = ["python -m src.scripts.train -bs 2048 --mode regression -E-available-no-
 
 cmds = ["python -m src.scripts.train -bs 2048 --mode classifier -npi2 -name Pi_Class_v3 --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260227_100Blobs_v1_split --num_workers 10 --eval_interval 1000"]
 
+cmds = ["python -m src.scripts.train -bs 2048 --mode regression -E-available-no-muon --log1p_loss -name E_avail_Log1pLoss_ZeroRecoilCCinc_GlobalSums --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info1_split --num_workers 10 --eval_interval 1000 --include-E-sum --zero-cond-feature 3"]
+
 for i, cmd in enumerate(cmds):
     job_name = f"Tr_{i}_{dt.now().strftime('%Y%m%d_%H%M%S')}"
     log_dir = f"/global/cfs/cdirs/m3246/gregork/Minerva/logs/transformer/{job_name}.log"
