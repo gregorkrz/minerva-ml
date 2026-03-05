@@ -5,56 +5,8 @@ This script evaluates a trained ViT model on particle physics data using the HEP
 It supports both regression and classification tasks with wandb logging and metric computation.
 
 Example usage:
-python -m src.scripts.eval --checkpoint Train_Regression_SmallModel_20260210_003728 --batch_size 1024 --dataset_name minerva_1A
-python -m src.scripts.eval --checkpoint Train_Regression_20260210_003302 --batch_size 1024 --dataset_name minerva_1A
-Train_CC_SmallModel_20260210_004255
-Train_CC_20260210_003828
+python -m src.scripts.eval --checkpoint Training_Name --batch_size 1024 --dataset_name minerva_1A
 
-python -m src.scripts.eval --checkpoint Train_CC_SmallModel_20260210_004255 --batch_size 1024 --dataset_name minerva_1A
-python -m src.scripts.eval --checkpoint Train_CC_20260210_003828 --batch_size 1024 --dataset_name minerva_1A
-
-python -m src.scripts.eval --checkpoint Train_MultiPi_20260213s_122832 --batch_size 1024 --dataset_name minerva_1A
-python -m src.scripts.eval --checkpoint Train_MultiPi_20260213_122831 --batch_size 1024 --dataset_name minerva_1A
-python -m src.scripts.eval --checkpoint Train_MultiPi_20260213_122827 --batch_size 1024 --dataset_name minerva_1A
-python -m src.scripts.eval --checkpoint Train_MultiPi_20260213_122825 --batch_size 1024 --dataset_name minerva_1A
-
-
-python -m src.scripts.eval --checkpoint Train_CC1pi_20260210_190400 --batch_size 1024 --dataset_name minerva_1A
-python -m src.scripts.eval --checkpoint Train_CC1pi_20260210_190406 --batch_size 1024 --dataset_name minerva_1A
-python -m src.scripts.eval --checkpoint Train_CC1pi_20260210_190413 --batch_size 1024 --dataset_name minerva_1A
-python -m src.scripts.eval --checkpoint Train_CC1pi_20260210_190428 --batch_size 1024 --dataset_name minerva_1A
-
-
-# eval /global/cfs/cdirs/m3246/gregork/checkpoints/Train_Regress_E_available2_20260214_232056/
-python -m src.scripts.eval --checkpoint Train_Regress_E_available2_20260214_232056 --batch_size 1024 --dataset_name minerva_1A
-
-
-python -m src.scripts.eval --checkpoint Train_Regress_E_available3_20260217_073551 --batch_size 1024 --dataset_name minerva_1A
-python -m src.scripts.eval --checkpoint Train_Regress_E_available3_20260217_072850 --batch_size 1024 --dataset_name minerva_1A
-
-python -m src.scripts.eval --checkpoint Train_CurrentType_20260217_073440 --batch_size 1024 --dataset_name minerva_1A
-python -m src.scripts.eval --checkpoint Train_CurrentType_20260217_072847 --batch_size 1024 --dataset_name minerva_1A
-
-python -m src.scripts.eval --checkpoint Train_CC1orNPi_20260217_073415 --batch_size 1024 --dataset_name minerva_1A
-python -m src.scripts.eval --checkpoint Train_CC1orNPi_20260217_072842 --batch_size 1024 --dataset_name minerva_1Až
-
-
-python -m src.scripts.eval --checkpoint Train_Regress_E_available3_no_muon_20260218_000924 --batch_size 1024 --dataset_name minerva_1A
-
-python -m src.scripts.eval --checkpoint Train_Regress_E_available3_no_muon_Linear_20260220_225855 --batch_size 1024 --dataset_name minerva_1A --no_amp
-
-python -m src.scripts.eval --checkpoint Train_Regress_E_available3_no_muon_Linear_HuberLoss_20260221_033035 --batch_size 1024 --dataset_name minerva_1A --no_amp
-python -m src.scripts.eval --checkpoint Train_Regress_E_available3_no_muon_Linear_HuberLoss_Weighted_20260221_033254 --batch_size 1024 --dataset_name minerva_1A --no_amp
-python -m src.scripts.eval --checkpoint debug_20260222_220755 --batch_size 1024 --dataset_name minerva_1A --no_amp
-
-python -m src.scripts.eval --checkpoint Train_Regress_E_available3_no_muon_Linear_HuberLoss_20260221_033035 --batch_size 1024 --dataset_name minerva_1A --no_amp --dataset_type train
-
-python -m src.scripts.eval --checkpoint Train_Regress_E_available3_no_muon_20260218_000722 --batch_size 1024 --dataset_name minerva_1A --no_amp
-
-
-python -m src.scripts.eval --checkpoint Train_CC1orNPi_Fix250226_20260225_235334 --batch_size 1024 --dataset_name minerva_1A
-
-python -m src.scripts.eval --checkpoint Pi_Class_v3_20260303_082729 --batch_size 1024 --dataset_name minerva_1A --no_amp
 """
 
 
@@ -314,7 +266,6 @@ def parse_args():
     # Data arguments
     parser.add_argument("--dataset_name", type=str, default="minerva_1A",
                         help="Dataset name (e.g., minerva_1A). If None, will use from checkpoint.")
-    #parser.add_argument("--data_path", type=str, default="/global/cfs/cdirs/m3246/gregork/Minerva/20260201_all_max_blobs_and_prongs_split_fix_anomalies")
     parser.add_argument("--dataset_type", type=str, default="test",
                         choices=["train", "val", "test"],
                         help="Dataset split to evaluate on")

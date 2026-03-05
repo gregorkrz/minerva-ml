@@ -217,6 +217,10 @@ def compute_enu_baselines(root_file_path):
         # 8. Pion four-vectors (px, py, pz, E) for single-pion CC events
         pion_four_vectors = get_pion_kinematics(master_ana_dev)
 
+        # 9. MC current type and interaction type
+        mc_current = master_ana_dev["mc_current"].array().to_numpy()
+        mc_intType = master_ana_dev["mc_intType"].array().to_numpy()
+
         return {
             'CCQE_formula': E_nu_from_formula,
             'Enu_from_muon': E_nu_from_df,
@@ -231,6 +235,8 @@ def compute_enu_baselines(root_file_path):
             "q0": q0,
             "q3": q3,
             "pion_four_vectors": pion_four_vectors,
+            "mc_current": mc_current,
+            "mc_intType": mc_intType,
         }
 
 
@@ -268,6 +274,8 @@ def process_playlist(playlist_path, playlist_name):
         "q0": [],
         "q3": [],
         "pion_four_vectors": [],
+        "mc_current": [],
+        "mc_intType": [],
     }
     
     # Process each file
