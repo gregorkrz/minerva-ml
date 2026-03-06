@@ -629,7 +629,7 @@ def plot_rms_iqr_with_uncertainty(
     Other parameters match :func:`plot_rms_iqr`.
     """
     if q3_bins is None:
-        q3_bins = [0, 0.3, 0.6, 1.2, 100]
+        q3_bins = [0, 0.3, 0.6, 1.2, 1.8, 2.4, 100]
 
     if data is None:
         data = load_eval_data_grouped(

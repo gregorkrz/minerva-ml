@@ -814,3 +814,132 @@ def plot_binned_by_inttype(
 
     fig.suptitle(title, fontsize=14, y=1.005)
     return fig
+
+
+# ---------------------------------------------------------------------------
+# PRC curves
+# ---------------------------------------------------------------------------
+
+def _compute_prc_curves(
+    results: dict[str, list[dict]],
+    signal_classes: list[int],
+    playlist: str = "1A",
+    recall_grid: np.ndarray | None = None,
+) -> dict[str, dict[str, np.ndarray]]:
+    """Compute interpolated PRC curves for all models/runs.
+
+    Returns ``{model: {"precision_mean", "precision_std", "recall",
+    "auprc_mean", "auprc_std"}}``.
+    """
+    if recall_grid is None:
+        recall_grid = np.linspace(0, 1, 200)
+
+    out = {}
+    for model_name, run_list in results.items():
+        precisions_interp = []
+        thresholds_interp = []
+        auprcs = []
+        for run_result in run_list:
+            sig = get_signal_probabilities(run_result, signal_classes, playlist)
+            prec, rec, thresholds = precision_recall_curve(sig["ytrue"], sig["ypred"])
+            auprc_val = auc(rec, prec)
+            auprcs.append(auprc_val)
+            prec_interp = np.interp(recall_grid, rec[::-1], prec[::-1])
+            precisions_interp.append(prec_interp)
+            thresh_ext = np.append(thresholds, thresholds[-1])
+            thresholds_interp.append(
+                np.interp(recall_grid, rec[::-1], thresh_ext[::-1])
+            )
+
+        prec_arr = np.array(precisions_interp)
+        thresh_arr = np.array(thresholds_interp)
+        out[model_name] = {
+            "precision_mean": np.mean(prec_arr, axis=0),
+            "precision_std": np.std(prec_arr, axis=0),
+            "recall": recall_grid,
+            "threshold_mean": np.mean(thresh_arr, axis=0),
+            "auprc_mean": np.mean(auprcs),
+            "auprc_std": np.std(auprcs),
+        }
+    return out
+
+
+def plot_prc_curves(
+    results: dict[str, list[dict]],
+    signal_classes: list[int],
+    title: str = "Precision-Recall Curve",
+    playlist: str = "1A",
+    uncertainties: bool = False,
+    max_threshold: float | None = None,
+) -> plt.Figure:
+    """Plot PRC curves for all models with optional uncertainty bands.
+
+    Parameters
+    ----------
+    max_threshold : if set, the right (log-scale) plot only shows the
+        portion of each curve where the mean classification threshold is
+        below this value.
+    """
+    curves = _compute_prc_curves(results, signal_classes, playlist)
+
+    first_model = next(iter(results))
+    sig = get_signal_probabilities(results[first_model][0], signal_classes, playlist)
+    signal_frac = sig["ytrue"].mean()
+
+    fig, axes = plt.subplots(1, 2, figsize=(16, 7), tight_layout=True)
+
+    for ax in axes:
+        ax.axhline(signal_frac, color="black", linestyle="--", linewidth=1,
+                    label=f"Random baseline ({signal_frac:.1%} signal)")
+
+    for model_name, c in curves.items():
+        rec = c["recall"]
+        prec_mean = c["precision_mean"]
+        prec_std = c["precision_std"]
+        auprc_m = c["auprc_mean"]
+        auprc_s = c["auprc_std"]
+        if uncertainties and auprc_s > 0:
+            label = f"{model_name} (AUPRC={auprc_m:.3f}±{auprc_s:.3f})"
+        else:
+            label = f"{model_name} (AUPRC={auprc_m:.3f})"
+
+        for ax_idx, ax in enumerate(axes):
+            if ax_idx == 1 and max_threshold is not None:
+                mask = c["threshold_mean"] < max_threshold
+                r, p, s = rec[mask], prec_mean[mask], prec_std[mask]
+            else:
+                r, p, s = rec, prec_mean, prec_std
+
+            line, = ax.plot(r, p, "-", label=label)
+            if uncertainties:
+                ax.fill_between(r, p - s, p + s, alpha=0.2, color=line.get_color())
+
+    for ax, scale in zip(axes, ["linear", "log"]):
+        ax.set_xlabel("Recall")
+        ax.set_ylabel("Precision")
+        ax.set_title(f"{title} ({scale} scale)")
+        ax.legend(fontsize=9)
+        ax.grid(True)
+        ax.set_xlim(0, 1)
+        if scale == "log":
+            ax.set_yscale("log")
+            ax.set_xscale("log")
+            ax.set_ylim(bottom=signal_frac * 0.5, top=1.05)
+        else:
+            ax.set_ylim(0, 1)
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# Multi-figure PDF export
+# ---------------------------------------------------------------------------
+
+def save_figures_to_pdf(figures: list[plt.Figure], path: str | Path) -> None:
+    """Save a list of matplotlib figures into a single multi-page PDF."""
+    from matplotlib.backends.backend_pdf import PdfPages
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with PdfPages(path) as pdf:
+        for fig in figures:
+            pdf.savefig(fig, bbox_inches="tight")
+    print(f"Saved {len(figures)} page(s) to {path}")
