@@ -258,12 +258,14 @@ def bin_separation_metrics(
     if fixed_fpr is None:
         fixed_fpr = DEFAULT_FIXED_FPR
     sig_in_bin = is_signal & bin_mask
+    n_sig = sig_in_bin.sum()
+    n_bg = is_background.sum()
+    if n_sig == 0 or n_bg == 0:
+        return None
+
     eval_mask = sig_in_bin | is_background
     y_eval = y_true[eval_mask]
     p_eval = probs[eval_mask]
-    n_sig = sig_in_bin.sum()
-    if n_sig == 0:
-        return None
 
     prec, rec, _ = precision_recall_curve(y_eval, p_eval)
     auprc_val = auc(rec, prec)
@@ -567,6 +569,28 @@ def compute_signal_baseline(
 # Plotting helpers
 # ---------------------------------------------------------------------------
 
+def compute_reco_baseline_recall_per_bin(
+    reco_pred: np.ndarray,
+    is_signal: np.ndarray,
+    bin_var: np.ndarray,
+    bin_edges: np.ndarray,
+    has_pion: np.ndarray | None = None,
+) -> np.ndarray:
+    """Per-bin recall of a binary reconstruction-level baseline."""
+    recalls = []
+    for i in range(len(bin_edges) - 1):
+        bm = (bin_var > bin_edges[i]) & (bin_var <= bin_edges[i + 1])
+        if has_pion is not None:
+            bm = bm & has_pion
+        sig_in_bin = is_signal & bm
+        n_sig = sig_in_bin.sum()
+        if n_sig == 0:
+            recalls.append(np.nan)
+        else:
+            recalls.append(((reco_pred == 1) & sig_in_bin).sum() / n_sig)
+    return np.array(recalls)
+
+
 def _plot_metric_line(
     ax: plt.Axes,
     x: np.ndarray,
@@ -621,10 +645,19 @@ def plot_cc1pi_vs_pion_kinematics(
     baseline: dict[str, np.ndarray],
     fixed_fpr: list[float] | None = None,
     uncertainties: bool = False,
+    reco_baseline_tpr: dict[str, np.ndarray] | None = None,
+    reco_baseline_label: str = "Reco baseline",
 ) -> plt.Figure:
     """2x3 figure: pion E (top row) and pion theta (bottom row).
 
     Columns: AUPRC, AUROC, TPR@FPR.
+
+    Parameters
+    ----------
+    reco_baseline_tpr : optional dict with keys ``"E"`` and ``"theta"``,
+        each a per-bin recall array for a reconstruction-level baseline.
+        Plotted on the rightmost (TPR@FPR) panels.
+    reco_baseline_label : label for the reco baseline in the legend.
     """
     if fixed_fpr is None:
         fixed_fpr = DEFAULT_FIXED_FPR
@@ -657,6 +690,14 @@ def plot_cc1pi_vs_pion_kinematics(
                 f"{model_name} (FPR={fpr_val:.0%})", uncertainties,
             )
 
+    if reco_baseline_tpr is not None:
+        if "E" in reco_baseline_tpr:
+            axes[0, 2].plot(E_mid, reco_baseline_tpr["E"], "s--", color="black",
+                            label=reco_baseline_label)
+        if "theta" in reco_baseline_tpr:
+            axes[1, 2].plot(theta_mid, reco_baseline_tpr["theta"], "s--", color="black",
+                            label=reco_baseline_label)
+
     col_labels = ["AUPRC", "AUROC", "Efficiency (TPR)"]
     for row, kinematic in enumerate(["Pion energy [GeV]", "Pion angle [rad]"]):
         for col, metric in enumerate(col_labels):
@@ -670,6 +711,7 @@ def plot_cc1pi_vs_pion_kinematics(
             ax.legend(fontsize=7)
             ax.grid(True)
             if row == 0:
+                ax.set_xlim(E_mid[0] * 0.8, E_mid[-1] * 1.2)
                 ax.set_xscale("log")
 
     fig.suptitle(r"$CC1\pi^\pm$ event tagging", fontsize=14)
@@ -734,12 +776,18 @@ def plot_binned_by_inttype(
     uncertainties: bool = False,
     int_types: dict[int, str] | None = None,
     playlist: str = "1A",
+    reco_baseline_pred: np.ndarray | None = None,
+    reco_baseline_label: str = "Reco baseline",
 ) -> plt.Figure:
     """One row per interaction type, 3 metric columns.
 
     Parameters
     ----------
     x_var : ``"pion_E"``, ``"pion_theta"``, or ``"q3"``.
+    reco_baseline_pred : optional binary prediction array (same length as
+        test set). When provided, the per-bin recall is overlaid on the
+        rightmost (TPR@FPR) panel for each interaction type.
+    reco_baseline_label : legend label for the reco baseline.
     """
     if fixed_fpr is None:
         fixed_fpr = DEFAULT_FIXED_FPR
@@ -752,6 +800,12 @@ def plot_binned_by_inttype(
     if n_int == 1:
         axes = axes[np.newaxis, :]
 
+    # Pre-compute y_true once for the reco baseline overlay
+    if reco_baseline_pred is not None:
+        first_model = next(iter(results))
+        sig_info = get_signal_probabilities(results[first_model][0], signal_classes, playlist)
+        y_true_reco = sig_info["ytrue"]
+
     for row_idx, (int_code, int_name) in enumerate(int_types.items()):
         int_mask = int_type_arr == int_code
         n_events = int_mask.sum()
@@ -759,15 +813,21 @@ def plot_binned_by_inttype(
         # Choose x-axis bins
         if x_var == "q3":
             x_mid = data["q3_bin_mids"]
-            compute_fn = compute_all_metrics_q3
         elif x_var == "pion_E":
             x_mid = data["pion_E_MC_bins_mid"]
-            compute_fn = None  # handled below
         elif x_var == "pion_theta":
             x_mid = data["pion_theta_MC_bins_mid"]
-            compute_fn = None
         else:
             raise ValueError(f"Unknown x_var: {x_var}")
+
+        if n_events == 0:
+            for col in range(3):
+                axes[row_idx, col].text(
+                    0.5, 0.5, "No data", transform=axes[row_idx, col].transAxes,
+                    ha="center", va="center", fontsize=14, color="gray",
+                )
+                axes[row_idx, col].set_title(f"{int_name} (N=0)")
+            continue
 
         # Compute baseline
         bl = compute_signal_baseline(results, data, signal_classes, int_mask, playlist)
@@ -798,6 +858,25 @@ def plot_binned_by_inttype(
                     f"{model_name} (FPR={fpr_val:.0%})", uncertainties,
                 )
 
+        # Reco baseline on rightmost panel
+        if reco_baseline_pred is not None:
+            is_signal_masked = (y_true_reco == 1) & int_mask
+            if x_var == "q3":
+                reco_bl = compute_reco_baseline_recall_per_bin(
+                    reco_baseline_pred, is_signal_masked,
+                    data["q3_GeV"], data["q3_bin_edges"],
+                )
+            else:
+                var_key = {"pion_E": "pion_E_MC", "pion_theta": "pion_theta_MC"}[x_var]
+                edges_key = {"pion_E": "pion_E_MC_bins", "pion_theta": "pion_theta_MC_bins"}[x_var]
+                reco_bl = compute_reco_baseline_recall_per_bin(
+                    reco_baseline_pred, is_signal_masked,
+                    data[var_key], data[edges_key],
+                    has_pion=data["has_pion"],
+                )
+            axes[row_idx, 2].plot(x_mid, reco_bl, "s--", color="black",
+                                  label=reco_baseline_label)
+
         col_labels = ["AUPRC", "AUROC", "Efficiency (TPR)"]
         for col, metric in enumerate(col_labels):
             ax = axes[row_idx, col]
@@ -810,6 +889,7 @@ def plot_binned_by_inttype(
             ax.legend(fontsize=7)
             ax.grid(True)
             if log_x:
+                ax.set_xlim(x_mid[0] * 0.8, x_mid[-1] * 1.2)
                 ax.set_xscale("log")
 
     fig.suptitle(title, fontsize=14, y=1.005)
@@ -923,7 +1003,7 @@ def plot_prc_curves(
         ax.set_xlim(0, 1)
         if scale == "log":
             ax.set_yscale("log")
-            ax.set_xscale("log")
+            #ax.set_xscale("log")
             ax.set_ylim(bottom=signal_frac * 0.5, top=1.05)
         else:
             ax.set_ylim(0, 1)
@@ -943,3 +1023,4 @@ def save_figures_to_pdf(figures: list[plt.Figure], path: str | Path) -> None:
         for fig in figures:
             pdf.savefig(fig, bbox_inches="tight")
     print(f"Saved {len(figures)} page(s) to {path}")
+

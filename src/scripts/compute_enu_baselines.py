@@ -24,9 +24,15 @@ import uproot
 import pickle
 from pathlib import Path
 from tqdm import tqdm
-from src.dataset.preprocessing import get_dense
+from src.dataset.preprocessing import get_dense, get_muons, get_photons
 
 mc_part_keys = ["mc_FSPartPx", "mc_FSPartPy", "mc_FSPartPz", "mc_FSPartE", "mc_FSPartPDG"]
+PRONG_KEYS = [
+    "prong_part_pos", "prong_part_E", "prong_part_score",
+    "prong_part_mass", "prong_part_charge", "prong_part_pid",
+    "prong_dEdXMean",
+]
+CHARGED_PION_PIDS = {8, 9}  # Geant3 codes for pi+, pi-
 
 
 def get_muon_kinematics(master_ana_dev):
@@ -221,6 +227,44 @@ def compute_enu_baselines(root_file_path):
         mc_current = master_ana_dev["mc_current"].array().to_numpy()
         mc_intType = master_ana_dev["mc_intType"].array().to_numpy()
 
+        # 9b. Michel electron tags
+        improved_nmichel = master_ana_dev["improved_nmichel"].array().to_numpy()
+        hadron_endMichel_category = master_ana_dev["MasterAnaDev_hadron_endMichel_category"].array().to_numpy()
+
+        # 10. Pi-zero signal classification and two-photon invariant mass
+        muons_coll = get_muons(master_ana_dev)
+        photons_coll = get_photons(master_ana_dev)
+        prongs_coll = get_dense(PRONG_KEYS, master_ana_dev)
+        n_events = len(muons_coll.n)
+
+        has_muon_and_2gamma = (muons_coll.n == 1) & (photons_coll.n == 2)
+
+        prong_pids = prongs_coll.data[:, -2].astype(int)
+        prong_charges = prongs_coll.data[:, -3]
+        is_pion = np.isin(prong_pids, list(CHARGED_PION_PIDS))
+        no_pion_prong = np.ones(n_events, dtype=bool)
+        n_muons = muons_coll.n.copy()
+        n_charged_prongs = np.zeros(n_events, dtype=np.int32)
+        for ev in range(n_events):
+            start, end = prongs_coll.bounds[ev], prongs_coll.bounds[ev + 1]
+            if np.any(is_pion[start:end]):
+                no_pion_prong[ev] = False
+            n_charged_prongs[ev] = np.count_nonzero(prong_charges[start:end])
+
+        # 0 = background, 1 = muon + 2 gamma, 2 = additionally no charged-pion prong
+        is_pizero_signal = np.zeros(n_events, dtype=np.int32)
+        is_pizero_signal[has_muon_and_2gamma] = 1
+        is_pizero_signal[has_muon_and_2gamma & no_pion_prong] = 2
+
+        two_gamma_invariant_mass = np.full(n_events, -1.0)
+        for ev in np.where(has_muon_and_2gamma)[0]:
+            ps, pe = photons_coll.bounds[ev], photons_coll.bounds[ev + 1]
+            photon_E = photons_coll.data[ps:pe, 3]
+            photon_pxyz = photons_coll.data[ps:pe, :3]
+            p_total = np.sum(photon_pxyz, axis=0)
+            m_sq = np.sum(photon_E)**2 - np.dot(p_total, p_total)
+            two_gamma_invariant_mass[ev] = np.sqrt(max(m_sq, 0.0))
+
         return {
             'CCQE_formula': E_nu_from_formula,
             'Enu_from_muon': E_nu_from_df,
@@ -237,6 +281,12 @@ def compute_enu_baselines(root_file_path):
             "pion_four_vectors": pion_four_vectors,
             "mc_current": mc_current,
             "mc_intType": mc_intType,
+            "is_pizero_signal": is_pizero_signal,
+            "two_gamma_invariant_mass": two_gamma_invariant_mass,
+            "n_muons": n_muons,
+            "n_charged_prongs": n_charged_prongs,
+            "improved_nmichel": improved_nmichel,
+            "hadron_endMichel_category": hadron_endMichel_category,
         }
 
 
@@ -276,6 +326,12 @@ def process_playlist(playlist_path, playlist_name):
         "pion_four_vectors": [],
         "mc_current": [],
         "mc_intType": [],
+        "is_pizero_signal": [],
+        "two_gamma_invariant_mass": [],
+        "n_muons": [],
+        "n_charged_prongs": [],
+        "improved_nmichel": [],
+        "hadron_endMichel_category": [],
     }
     
     # Process each file
@@ -393,3 +449,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

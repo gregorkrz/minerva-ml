@@ -25,5 +25,6 @@ for dscap in [10000, 50000, 100000, 500000]:
 #print(training_cmd_PT_template)
 #print(training_cmd_non_PT_template)
 
-
 #training_cmd_PT_template1 = "python -m src.jobs.gen_train_cmds_OmniLearned -name OmniM_FullDataset_E_avail_Log1PLoss_PT --regress-E-available-no-muon -nw 10  --loss-type log1p --use-pretrained pretrain_m --run "#print(training_cmd_PT_template1)
+
+# python -m src.jobs.gen_train_cmds_OmniLearned -name OmniM_FullDataset_E_avail_Log1PLoss_PT --regress-E-available-no-muon -nw 10  --loss-type log1p --use-pretrained pretrain_m --run
