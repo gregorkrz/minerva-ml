@@ -724,8 +724,18 @@ def plot_multi_pion_vs_q3(
     baseline_q3: np.ndarray,
     fixed_fpr: list[float] | None = None,
     uncertainties: bool = False,
+    reco_baseline_tpr_q3: np.ndarray | None = None,
+    reco_baseline_label: str = "Reco baseline",
 ) -> plt.Figure:
-    """1x3 figure: AUPRC / AUROC / TPR@FPR vs q3."""
+    """1x3 figure: AUPRC / AUROC / TPR@FPR vs q3.
+
+    Parameters
+    ----------
+    reco_baseline_tpr_q3 : optional per-bin recall array for a
+        reconstruction-level baseline.  Plotted on the rightmost
+        (TPR@FPR) panel.
+    reco_baseline_label : label for the reco baseline in the legend.
+    """
     if fixed_fpr is None:
         fixed_fpr = DEFAULT_FIXED_FPR
     fig, axes = plt.subplots(1, 3, figsize=(17, 5), tight_layout=True)
@@ -743,6 +753,10 @@ def plot_multi_pion_vs_q3(
                 axes[2], q3_mid, agg[key],
                 f"{model_name} (FPR={fpr_val:.0%})", uncertainties,
             )
+
+    if reco_baseline_tpr_q3 is not None:
+        axes[2].plot(q3_mid, reco_baseline_tpr_q3, "s--", color="black",
+                     label=reco_baseline_label)
 
     col_labels = ["AUPRC", "AUROC", "Efficiency (TPR)"]
     for col, metric in enumerate(col_labels):
@@ -779,14 +793,15 @@ def plot_binned_by_inttype(
     reco_baseline_pred: np.ndarray | None = None,
     reco_baseline_label: str = "Reco baseline",
 ) -> plt.Figure:
-    """One row per interaction type, 3 metric columns.
+    """One row per interaction type, 4 columns: AUPRC, AUROC, TPR@FPR,
+    and an event-count histogram.
 
     Parameters
     ----------
     x_var : ``"pion_E"``, ``"pion_theta"``, or ``"q3"``.
     reco_baseline_pred : optional binary prediction array (same length as
         test set). When provided, the per-bin recall is overlaid on the
-        rightmost (TPR@FPR) panel for each interaction type.
+        TPR@FPR panel for each interaction type.
     reco_baseline_label : legend label for the reco baseline.
     """
     if fixed_fpr is None:
@@ -796,7 +811,7 @@ def plot_binned_by_inttype(
 
     int_type_arr = data["int_type_arr"]
     n_int = len(int_types)
-    fig, axes = plt.subplots(n_int, 3, figsize=(17, 4.5 * n_int), tight_layout=True)
+    fig, axes = plt.subplots(n_int, 4, figsize=(22, 4.5 * n_int), tight_layout=True)
     if n_int == 1:
         axes = axes[np.newaxis, :]
 
@@ -806,22 +821,41 @@ def plot_binned_by_inttype(
         sig_info = get_signal_probabilities(results[first_model][0], signal_classes, playlist)
         y_true_reco = sig_info["ytrue"]
 
+    has_pion = data["has_pion"]
+
+    # Resolve bin edges for the histogram column
+    if x_var == "q3":
+        hist_var = data["q3_GeV"]
+        bin_edges = data["q3_bin_edges"]
+        hist_pion_mask = np.ones(len(hist_var), dtype=bool)
+    elif x_var == "pion_E":
+        hist_var = data["pion_E_MC"]
+        bin_edges = data["pion_E_MC_bins"]
+        hist_pion_mask = has_pion
+    elif x_var == "pion_theta":
+        hist_var = data["pion_theta_MC"]
+        bin_edges = data["pion_theta_MC_bins"]
+        hist_pion_mask = has_pion
+    else:
+        raise ValueError(f"Unknown x_var: {x_var}")
+
     for row_idx, (int_code, int_name) in enumerate(int_types.items()):
         int_mask = int_type_arr == int_code
-        n_events = int_mask.sum()
 
-        # Choose x-axis bins
+        # Count events actually entering the plots
+        plot_mask = int_mask & hist_pion_mask
+        n_events = int(plot_mask.sum())
+
+        # Choose x-axis midpoints
         if x_var == "q3":
             x_mid = data["q3_bin_mids"]
         elif x_var == "pion_E":
             x_mid = data["pion_E_MC_bins_mid"]
-        elif x_var == "pion_theta":
-            x_mid = data["pion_theta_MC_bins_mid"]
         else:
-            raise ValueError(f"Unknown x_var: {x_var}")
+            x_mid = data["pion_theta_MC_bins_mid"]
 
         if n_events == 0:
-            for col in range(3):
+            for col in range(4):
                 axes[row_idx, col].text(
                     0.5, 0.5, "No data", transform=axes[row_idx, col].transAxes,
                     ha="center", va="center", fontsize=14, color="gray",
@@ -858,7 +892,7 @@ def plot_binned_by_inttype(
                     f"{model_name} (FPR={fpr_val:.0%})", uncertainties,
                 )
 
-        # Reco baseline on rightmost panel
+        # Reco baseline on TPR panel
         if reco_baseline_pred is not None:
             is_signal_masked = (y_true_reco == 1) & int_mask
             if x_var == "q3":
@@ -877,6 +911,7 @@ def plot_binned_by_inttype(
             axes[row_idx, 2].plot(x_mid, reco_bl, "s--", color="black",
                                   label=reco_baseline_label)
 
+        # --- Metric columns ---
         col_labels = ["AUPRC", "AUROC", "Efficiency (TPR)"]
         for col, metric in enumerate(col_labels):
             ax = axes[row_idx, col]
@@ -891,6 +926,95 @@ def plot_binned_by_inttype(
             if log_x:
                 ax.set_xlim(x_mid[0] * 0.8, x_mid[-1] * 1.2)
                 ax.set_xscale("log")
+
+        # --- Histogram column (col 3) ---
+        ax_h = axes[row_idx, 3]
+        counts, _ = np.histogram(hist_var[plot_mask], bins=bin_edges)
+        widths = np.diff(bin_edges)
+        ax_h.bar(bin_edges[:-1], counts, width=widths, align="edge",
+                 edgecolor="black", linewidth=0.5, alpha=0.7)
+        for i, c in enumerate(counts):
+            if c > 0:
+                ax_h.text(bin_edges[i] + widths[i] / 2, c, str(c),
+                          ha="center", va="bottom", fontsize=7)
+        ax_h.set_xlabel(xlabel)
+        ax_h.set_ylabel("Events")
+        ax_h.set_title(f"{int_name} (N={n_events:,}) — event counts")
+        ax_h.grid(True, axis="y", alpha=0.3)
+        if log_x:
+            ax_h.set_xscale("log")
+
+    fig.suptitle(title, fontsize=14, y=1.005)
+    return fig
+
+
+def plot_event_counts_by_inttype(
+    data: dict,
+    x_var: str,
+    xlabel: str,
+    title: str,
+    log_x: bool = False,
+    int_types: dict[int, str] | None = None,
+) -> plt.Figure:
+    """Histogram of event counts per bin, one row per interaction type.
+
+    The bar heights in each row sum to the total N for that interaction
+    type (shown in the row title).
+
+    Parameters
+    ----------
+    x_var : ``"pion_E"``, ``"pion_theta"``, or ``"q3"``.
+    """
+    if int_types is None:
+        int_types = MC_INT_TYPE
+
+    int_type_arr = data["int_type_arr"]
+
+    if x_var == "q3":
+        var = data["q3_GeV"]
+        bin_edges = data["q3_bin_edges"]
+    elif x_var == "pion_E":
+        var = data["pion_E_MC"]
+        bin_edges = data["pion_E_MC_bins"]
+    elif x_var == "pion_theta":
+        var = data["pion_theta_MC"]
+        bin_edges = data["pion_theta_MC_bins"]
+    else:
+        raise ValueError(f"Unknown x_var: {x_var}")
+
+    has_pion = data["has_pion"] if x_var != "q3" else np.ones(len(var), dtype=bool)
+
+    n_int = len(int_types)
+    fig, axes = plt.subplots(n_int, 1, figsize=(8, 3.0 * n_int), tight_layout=True)
+    if n_int == 1:
+        axes = np.array([axes])
+
+    for row_idx, (int_code, int_name) in enumerate(int_types.items()):
+        ax = axes[row_idx]
+        int_mask = int_type_arr == int_code
+        n_events = int_mask.sum()
+
+        mask = int_mask & has_pion
+        counts, _ = np.histogram(var[mask], bins=bin_edges)
+        n_plotted = int(counts.sum())
+
+        widths = np.diff(bin_edges)
+        ax.bar(bin_edges[:-1], counts, width=widths, align="edge",
+               edgecolor="black", linewidth=0.5, alpha=0.7)
+
+        for i, c in enumerate(counts):
+            if c > 0:
+                ax.text(
+                    bin_edges[i] + widths[i] / 2, c, str(c),
+                    ha="center", va="bottom", fontsize=7,
+                )
+
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel("Events")
+        ax.set_title(f"{int_name} (N={n_plotted:,})")
+        ax.grid(True, axis="y", alpha=0.3)
+        if log_x:
+            ax.set_xscale("log")
 
     fig.suptitle(title, fontsize=14, y=1.005)
     return fig
