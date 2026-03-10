@@ -24,7 +24,8 @@ from sklearn.metrics import accuracy_score, precision_recall_fscore_support, con
 
 from src.dataset.dataloader import load_data
 from src.models.vit import PointGlobalMixedViT, PointGlobalMixedViTConfig
-from src.scripts.train import set_seed, prepare_batch, create_task, CondOnlyMLP
+from src.models.omnilearned import PET2, get_model_parameters
+from src.scripts.train import set_seed, prepare_batch, prepare_batch_omnilearned, create_task, CondOnlyMLP
 from types import SimpleNamespace
 
 
@@ -54,9 +55,33 @@ def create_model_from_checkpoint(checkpoint_path, device):
         raise ValueError("Invalid task type")
     
     # Reconstruct model
-    e_sum_dim = 6 if args_dict.get("include_E_sum", False) else 0
-
-    if args_dict.get("cond_only", False):
+    ol_size = args_dict.get("use_omnilearned", None)
+    if ol_size:
+        model_params = get_model_parameters(ol_size)
+        use_cond = args_dict.get("use_cond", True)
+        model = PET2(
+            input_dim=args_dict.get("ol_num_feat", 4),
+            use_int=args_dict.get("ol_interaction", False),
+            local_int=args_dict.get("ol_local_interaction", False),
+            int_type=args_dict.get("ol_interaction_type", "lhc"),
+            conditional=use_cond,
+            cond_dim=args_dict.get("ol_num_cond", 4),
+            pid=args_dict.get("use_pid", True),
+            pid_dim=args_dict.get("ol_pid_dim", 8),
+            add_info=True,
+            add_dim=args_dict.get("ol_num_add", 5),
+            mode=args_dict.get("mode", "classifier"),
+            num_classes=num_classes,
+            num_gen_classes=1,
+            mlp_drop=args_dict.get("dropout", 0.0),
+            attn_drop=args_dict.get("attn_dropout", 0.0),
+            feature_drop=0.0,
+            num_coord=args_dict.get("coord_dim", 2),
+            K=10,
+            **model_params,
+        )
+    elif args_dict.get("cond_only", False):
+        e_sum_dim = 6 if args_dict.get("include_E_sum", False) else 0
         model = CondOnlyMLP(
             input_dim=4 + e_sum_dim,
             hidden_dim=args_dict.get("d_model", 128),
@@ -65,6 +90,7 @@ def create_model_from_checkpoint(checkpoint_path, device):
             dropout=args_dict.get("dropout", 0.1),
         )
     else:
+        e_sum_dim = 6 if args_dict.get("include_E_sum", False) else 0
         point_cat_num_classes = [8] if args_dict.get("use_pid", True) else []
         global_cat_num_classes = []
         global_cont_dim = (4 if args_dict.get("use_cond", False) else 0) + e_sum_dim
@@ -127,6 +153,7 @@ def evaluate(model, dataloader, device, args_dict, use_amp=False):
     cond_only = args_dict.get("cond_only", False)
     include_E_sum = args_dict.get("include_E_sum", False)
     zero_cond_feature = args_dict.get("zero_cond_feature", None)
+    use_omnilearned = args_dict.get("use_omnilearned", None)
     
     # Setup loss function
     if mode == "regression":
@@ -144,10 +171,19 @@ def evaluate(model, dataloader, device, args_dict, use_amp=False):
     all_cond = []
 
     for batch in tqdm(dataloader, desc=f"Evaluating", leave=True):
-        inputs = prepare_batch(batch, device, use_cond, use_pid, coord_dim, pid_idx, include_E_sum=include_E_sum, zero_cond_feature=zero_cond_feature)
+        if use_omnilearned:
+            inputs = prepare_batch_omnilearned(batch, device, use_cond, use_pid, pid_idx)
+        else:
+            inputs = prepare_batch(batch, device, use_cond, use_pid, coord_dim, pid_idx, include_E_sum=include_E_sum, zero_cond_feature=zero_cond_feature)
         amp_enabled = bool(use_amp and device.type == "cuda")
         with torch.amp.autocast(device_type="cuda", enabled=amp_enabled):
-            if cond_only:
+            if use_omnilearned:
+                outputs = model(
+                    inputs["X"], inputs["y"],
+                    cond=inputs["cond"], pid=inputs["pid"], add_info=inputs["add_info"],
+                )
+                logits = outputs["y_pred"]
+            elif cond_only:
                 logits = model(inputs["global_cont"])
             else:
                 features = model(
@@ -313,6 +349,8 @@ def main():
     print(f"Data path: {data_path}")
     
     # Create dataloader
+    use_omnilearned = args_dict.get("use_omnilearned", None)
+    concat_additional_info = not bool(use_omnilearned)
     dataloader, _ = load_data(
         dataset_name=dataset_name,
         path=data_path,
@@ -328,6 +366,7 @@ def main():
         task=task,
         nevts=-1,
         use_energy_sums=args_dict.get("include_E_sum", False),
+        concat_additional_info=concat_additional_info,
     )
     
     print(f"Number of samples: {len(dataloader.dataset)}")

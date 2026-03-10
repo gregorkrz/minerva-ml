@@ -226,12 +226,11 @@ class HEPTorchDataset(Dataset):
         if self.use_pid:
             sample["pid"] = data[:, self.pid_idx].int()
         #sample["data_additional_info"] = data_additional_info # shape (N, 5)
-        if self.concat_additional_info: # concate data and data_additional_info into a single tensor
-            sample["X"] = torch.cat([data, data_additional_info], dim=1) # shape (N, F+5)
+        if self.concat_additional_info:
+            sample["X"] = torch.cat([data, data_additional_info], dim=1)
         else:
-            sample["X"] = data
-        #else:
-        #    sample["data_additional_info"] = data_additional_info # shape (N, 5)
+            sample["X"] = data.float()
+            sample["add_info"] = data_additional_info.float()
         sample["attention_mask"] = valid_attention_mask
 
         if self.use_energy_sums:

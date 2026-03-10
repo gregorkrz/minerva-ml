@@ -17,7 +17,7 @@ python -m src.jobs.gen_train_cmds_OmniLearned -name E_avail_HuberWeighted_PT_NoL
 python -m src.jobs.gen_train_cmds_OmniLearned -name E_avail_HuberWeighted_NoLog --regress-E-available-no-muon -nw 10  --loss-type huber --weighted-loss -p
 
 python -m src.jobs.gen_train_cmds_OmniLearned -name E_avail_Log1PLoss --regress-E-available-no-muon -nw 10  --loss-type log1p  -p
-python -m src.jobs.gen_train_cmds_OmniLearned -name E_avail_Log1PLoss_PT --regress-E-available-no-muon -nw 10  --loss-type log1p --use-pretrained pretrain_s -p
+python -m src.jobs.gen_train_cmds_OmniLearned -name E_avail_Log1PLoss_PT_M --regress-E-available-no-muon -nw 10  --loss-type log1p --use-pretrained pretrain_m --run
 
 --------------------------------
 Ch. pion classification:

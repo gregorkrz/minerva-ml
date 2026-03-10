@@ -43,6 +43,7 @@ import numpy as np
 
 from src.dataset.dataloader import load_data, Task
 from src.models.vit import PointGlobalMixedViT, PointGlobalMixedViTConfig
+from src.models.omnilearned import PET2, get_model_parameters, load_pretrained_omnilearned
 
 
 class ResidualBlock(nn.Module):
@@ -204,6 +205,27 @@ def parse_args():
     parser.add_argument("--zero-cond-feature", type=int, nargs="+", default=None,
                         help="Zero out global/cond feature(s) at these indices (ablation). "
                              "E.g. --zero-cond-feature 3 to ablate E_recoil_CCinc")
+    # OmniLearned (PET2) arguments
+    parser.add_argument("--use-omnilearned", type=str, default=None,
+                        choices=["small", "medium", "large"],
+                        help="Use OmniLearned PET2 model of given size instead of ViT")
+    parser.add_argument("--use-pretrained", type=str, default=None,
+                        help="Load pretrained OmniLearned checkpoint (e.g. pretrain_s, pretrain_m)")
+    parser.add_argument("--ol-num-feat", type=int, default=4,
+                        help="Number of kinematic input features for PET2 (excluding PID)")
+    parser.add_argument("--ol-num-add", type=int, default=5,
+                        help="Number of additional features for PET2 add_info input")
+    parser.add_argument("--ol-num-cond", type=int, default=4,
+                        help="Number of global conditioning features for PET2")
+    parser.add_argument("--ol-pid-dim", type=int, default=8,
+                        help="Number of unique PID classes for PET2 embedding")
+    parser.add_argument("--ol-interaction", action="store_true", default=False,
+                        help="Enable interaction matrix in PET2")
+    parser.add_argument("--ol-local-interaction", action="store_true", default=False,
+                        help="Enable local interaction matrix in PET2")
+    parser.add_argument("--ol-interaction-type", type=str, default="lhc",
+                        choices=["lhc", "astro"],
+                        help="Interaction type for PET2")
     return parser.parse_args()
 
 
@@ -325,6 +347,85 @@ def create_model(args, task: Task):
     return model
 
 
+def create_omnilearned_model(args, task):
+    """Create an OmniLearned PET2 model."""
+    if task.type == "classifier":
+        num_classes = len(task.class_idx)
+    elif task.type == "regression":
+        num_classes = 1
+    else:
+        raise ValueError("Invalid task type")
+
+    model_params = get_model_parameters(args.use_omnilearned)
+    use_cond = not args.no_use_cond
+
+    model = PET2(
+        input_dim=args.ol_num_feat,
+        use_int=args.ol_interaction,
+        local_int=args.ol_local_interaction,
+        int_type=args.ol_interaction_type,
+        conditional=use_cond,
+        cond_dim=args.ol_num_cond,
+        pid=args.use_pid,
+        pid_dim=args.ol_pid_dim,
+        add_info=True,
+        add_dim=args.ol_num_add,
+        mode=args.mode,
+        num_classes=num_classes,
+        num_gen_classes=1,
+        mlp_drop=args.dropout,
+        attn_drop=args.attn_dropout,
+        feature_drop=0.0,
+        num_coord=args.coord_dim,
+        K=10,
+        **model_params,
+    )
+    return model
+
+
+def prepare_batch_omnilearned(batch, device, use_cond=False, use_pid=False, pid_idx=4):
+    """Prepare batch for OmniLearned PET2 model input."""
+    X = batch["X"].to(device, dtype=torch.float32)
+    y = batch["y"].to(device)
+
+    pid = None
+    if use_pid and batch.get("pid") is not None:
+        pid = batch["pid"].to(device)
+        X = torch.cat([X[:, :, :pid_idx], X[:, :, pid_idx + 1:]], dim=2)
+
+    cond = None
+    if use_cond and batch.get("cond") is not None:
+        cond = batch["cond"].to(device, dtype=torch.float32)
+
+    add_info = None
+    if batch.get("add_info") is not None:
+        add_info = batch["add_info"].to(device, dtype=torch.float32)
+
+    return {"X": X, "y": y, "cond": cond, "pid": pid, "add_info": add_info}
+
+
+def forward_model(model, inputs, args):
+    """Run forward pass for either ViT or PET2, returns logits."""
+    if args.use_omnilearned:
+        outputs = model(
+            inputs["X"], inputs["y"],
+            cond=inputs["cond"], pid=inputs["pid"], add_info=inputs["add_info"],
+        )
+        return outputs["y_pred"]
+    elif args.cond_only:
+        return model(inputs["global_cont"])
+    else:
+        features = model(
+            point_cont=inputs["point_cont"],
+            point_cats=inputs["point_cats"],
+            pos=inputs["pos"],
+            global_cont=inputs["global_cont"],
+            global_cats=inputs["global_cats"],
+            attn_mask=inputs["attn_mask"],
+        )
+        return model.head(features)
+
+
 def prepare_batch(batch, device, use_cond=False, use_pid=False, coord_dim=2, pid_idx=4,
                    include_E_sum=False, zero_cond_feature=None):
     """Prepare batch for model input."""
@@ -430,20 +531,12 @@ def evaluate(model, dataloader, device, args, class_weights, use_amp=False, step
     else:
         criterion = nn.CrossEntropyLoss(weight=class_weights)
     for batch in tqdm(dataloader, desc="Evaluating", leave=False):
-        inputs = prepare_batch(batch, device, args.use_cond, args.use_pid, args.coord_dim, args.pid_idx, include_E_sum=args.include_E_sum, zero_cond_feature=args.zero_cond_feature)
+        if args.use_omnilearned:
+            inputs = prepare_batch_omnilearned(batch, device, args.use_cond, args.use_pid, args.pid_idx)
+        else:
+            inputs = prepare_batch(batch, device, args.use_cond, args.use_pid, args.coord_dim, args.pid_idx, include_E_sum=args.include_E_sum, zero_cond_feature=args.zero_cond_feature)
         with autocast(enabled=use_amp):
-            if args.cond_only:
-                logits = model(inputs["global_cont"])
-            else:
-                features = model(
-                    point_cont=inputs["point_cont"],
-                    point_cats=inputs["point_cats"],
-                    pos=inputs["pos"],
-                    global_cont=inputs["global_cont"],
-                    global_cats=inputs["global_cats"],
-                    attn_mask=inputs["attn_mask"],
-                )
-                logits = model.head(features)
+            logits = forward_model(model, inputs, args)
             if args.mode == "regression":
                 if args.weighted_regression_loss:
                     loss = compute_weighted_regression_loss(logits.squeeze(-1), inputs["y"])
@@ -531,6 +624,7 @@ def train(args):
     # Create dataloaders
     print("Creating dataloaders...")
     task = create_task(args)
+    concat_additional_info = not bool(args.use_omnilearned)
     train_loader, class_weights = load_data(
         dataset_name=args.dataset_name,
         path=args.data_path,
@@ -546,7 +640,7 @@ def train(args):
         num_workers=args.num_workers,
         rank=0,
         size=1,
-        concat_additional_info=True,
+        concat_additional_info=concat_additional_info,
         event_sampler_random_state=args.event_sampler_random_state,
         nevts=args.event_cap,
         use_energy_sums=args.include_E_sum,
@@ -567,7 +661,7 @@ def train(args):
         distributed=True,
         shuffle=False,
         max_particles=args.max_particles,
-        concat_additional_info=True,
+        concat_additional_info=concat_additional_info,
         use_energy_sums=args.include_E_sum,
     )
     
@@ -576,8 +670,18 @@ def train(args):
     
     # Create model
     print("Creating model...")
-    model = create_model(args, task)
+    if args.use_omnilearned:
+        model = create_omnilearned_model(args, task)
+    else:
+        model = create_model(args, task)
     model = model.to(device)
+
+    # Load pretrained OmniLearned weights (before optimizer setup)
+    if args.use_pretrained:
+        if not args.use_omnilearned:
+            raise ValueError("--use-pretrained requires --use-omnilearned")
+        print(f"Loading pretrained weights: {args.use_pretrained}")
+        load_pretrained_omnilearned(model, args.use_pretrained, args.output_dir)
     
     # Count parameters
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -686,24 +790,16 @@ def train(args):
             data_fetch_times.append(time.perf_counter() - iter_end_time)
 
             # Prepare inputs
-            inputs = prepare_batch(batch, device, args.use_cond, args.use_pid, args.coord_dim, args.pid_idx, include_E_sum=args.include_E_sum, zero_cond_feature=args.zero_cond_feature)
+            if args.use_omnilearned:
+                inputs = prepare_batch_omnilearned(batch, device, args.use_cond, args.use_pid, args.pid_idx)
+            else:
+                inputs = prepare_batch(batch, device, args.use_cond, args.use_pid, args.coord_dim, args.pid_idx, include_E_sum=args.include_E_sum, zero_cond_feature=args.zero_cond_feature)
             
             # Forward pass
             optimizer.zero_grad()
             
             with autocast(enabled=args.use_amp):
-                if args.cond_only:
-                    logits = model(inputs["global_cont"])
-                else:
-                    features = model(
-                        point_cont=inputs["point_cont"],
-                        point_cats=inputs["point_cats"],
-                        pos=inputs["pos"],
-                        global_cont=inputs["global_cont"],
-                        global_cats=inputs["global_cats"],
-                        attn_mask=inputs["attn_mask"],
-                    )
-                    logits = model.head(features)
+                logits = forward_model(model, inputs, args)
 
                 if args.mode == "regression":
                     if args.weighted_regression_loss:
