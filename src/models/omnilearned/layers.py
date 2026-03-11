@@ -281,7 +281,16 @@ class LocalEmbeddingBlock(nn.Module):
         )
 
     def pairwise_distance(self, points):
+        return torch.cdist(points, points, p=2).pow(2)
         r = torch.sum(points * points, dim=2, keepdim=True)
+        print("Points shape", points.shape)
+        print("Points dtype", points.dtype)
+        print("Points device", points.device)
+        print("Points requires_grad", points.requires_grad)
+        print("Points grad", points.grad)
+        print("Points grad_fn", points.grad_fn)
+        print("Points grad_fn", points.grad_fn)
+        print("Points min max", points.min(), points.max())
         m = torch.bmm(points, points.transpose(1, 2))
         D = r - 2 * m + r.transpose(1, 2)
         return D

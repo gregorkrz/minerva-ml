@@ -59,13 +59,17 @@ def create_model_from_checkpoint(checkpoint_path, device):
     if ol_size:
         model_params = get_model_parameters(ol_size)
         use_cond = args_dict.get("use_cond", True)
+        e_sum_dim = 6 if args_dict.get("include_E_sum", False) else 0
+        cond_dim = args_dict.get("ol_num_cond", 4) + e_sum_dim
+        if e_sum_dim > 0:
+            use_cond = True
         model = PET2(
             input_dim=args_dict.get("ol_num_feat", 4),
             use_int=args_dict.get("ol_interaction", False),
             local_int=args_dict.get("ol_local_interaction", False),
             int_type=args_dict.get("ol_interaction_type", "lhc"),
             conditional=use_cond,
-            cond_dim=args_dict.get("ol_num_cond", 4),
+            cond_dim=cond_dim,
             pid=args_dict.get("use_pid", True),
             pid_dim=args_dict.get("ol_pid_dim", 8),
             add_info=True,
@@ -172,7 +176,8 @@ def evaluate(model, dataloader, device, args_dict, use_amp=False):
 
     for batch in tqdm(dataloader, desc=f"Evaluating", leave=True):
         if use_omnilearned:
-            inputs = prepare_batch_omnilearned(batch, device, use_cond, use_pid, pid_idx)
+            inputs = prepare_batch_omnilearned(batch, device, use_cond, use_pid, pid_idx,
+                                              include_E_sum=include_E_sum)
         else:
             inputs = prepare_batch(batch, device, use_cond, use_pid, coord_dim, pid_idx, include_E_sum=include_E_sum, zero_cond_feature=zero_cond_feature)
         amp_enabled = bool(use_amp and device.type == "cuda")

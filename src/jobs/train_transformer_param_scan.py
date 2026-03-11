@@ -2,7 +2,7 @@ from src.jobs.slurm_template import SLURM_TEMPLATE_GPU
 import os
 from datetime import datetime as dt
 
-base_cmd = "python -m src.scripts.train -bs 2048 --mode regression -E-available-no-muon -name ParamScan_d{d_model}_L{depth}_H{n_heads} --d_model {d_model} --depth {depth} --n_heads {n_heads} --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info1_split --num_workers 10 --log1p_loss --eval_interval 1000 --epochs 1000000"
+base_cmd = "python -m src.scripts.train -bs 2048 --mode regression -E-available-no-muon -name ParamScan_d{d_model}_L{depth}_H{n_heads} --d_model {d_model} --depth {depth} --n_heads {n_heads} --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info1_split --num_workers 10 --log1p_loss --eval_interval 1000 --max_steps 1000000"
 
 configs = [
     {"d_model": 64,  "depth": 4, "n_heads": 4},

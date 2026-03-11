@@ -1,28 +1,29 @@
 """
-Training script for PointGlobalMixedViT on HEP data.
+Training script for PointGlobalMixedViT or OmniLearned on HEP data.
 
-This script trains a ViT model on particle physics data using the HEPTorchDataset.
-It supports both regression and classification tasks with wandb logging and checkpointing.
+# Energy regression training:
+## ViT-like transformer training:
+python -m src.scripts.train -bs 10 --mode regression -E-available-no-muon -name DEBUG --d_model 64 --depth 4 --n_heads 4  --max_steps 250000 [-cap {data_cap} -seed-event-sampler {seed} --seed {seed}]
 
 
-### 2026 02 16 - trainings with additional info #######
+## OmniLearned Small training:
+python -m src.scripts.train -bs 10 --mode regression -E-available-no-muon -name DEBUG  --max_steps 250000 --use-omnilearned small --use-pretrained pretrain_s [-cap {data_cap} -seed-event-sampler {seed} --seed {seed}]
 
-### Classification 1 or N Pi +- according to signal definition in Eberly et al. 2015 #######
-python -m src.scripts.train -bs 2048 --mode classifier -npi2 -name Train_CC1orNPi --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info_split --num_workers 10 --eval_interval 1000
 
-### Classification of MC current type ### 
-python -m src.scripts.train -bs 2048 --mode classifier -cc -name Train_CurrentType --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info_split --num_workers 10 --eval_interval 1000
+## OmniLearned Small random weights training:
+python -m src.scripts.train -bs 10 --mode regression -E-available-no-muon -name DEBUG  --max_steps 250000 --use-omnilearned small  [-cap {data_cap} -seed-event-sampler {seed} --seed {seed}]
 
-# Longer training
-python -m src.scripts.train -bs 2048 --mode regression -E-available-no-muon  -log-mse -name Debug_E_avail_LogMSE --lr 5e-4 --optimizer adamw --d_model 128 --depth 4 --n_heads 8 --dropout 0.1 --attn_dropout 0.1 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info1_split --num_workers 5 --eval_interval 1000
-python -m src.scripts.train -bs 2048 --mode regression -E-available-no-muon  -log-mse -name Debug_E_avail_LogMSE_Reprod --lr 5e-4 --optimizer lion --weight_decay 0.3  --d_model 128 --depth 4 --n_heads 8 --dropout 0.1 --attn_dropout 0.1 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info1_split --num_workers 5 --eval_interval 1000
 
-# E regression
-python -m src.scripts.train -bs 2048 --mode regression -E-available-no-muon --log1p_loss -name E_avail_no_muon_Log1pMSE --lr 5e-4 --optimizer lion --weight_decay 0.3 --d_model 128 --depth 4 --n_heads 8 --dropout 0.1 --attn_dropout 0.1 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260216_additional_info1_split --num_workers 5 --eval_interval 1000
 
-# Pion classification 2.3.2026
+# Event Classification training:
+## ViT-like transformer training:
+python -m src.scripts.train -bs 10 --mode classifier -npi2 -name DEBUG --d_model 64 --depth 4 --n_heads 4  --max_steps 100000 [-cap {data_cap} -seed-event-sampler {seed} --seed {seed}]
 
-python -m src.scripts.train -bs 2048 --mode classifier -npi2 -name Pi_Class_v3 --d_model 128 --depth 4 --n_heads 8 --dropout 0.01 --attn_dropout 0.01 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260227_100Blobs_v1_split --num_workers 10 --eval_interval 1000 
+## OmniLearned Small training:
+python -m src.scripts.train -bs 10 --mode classifier -npi2 -name DEBUG --max_steps 100000 --use-omnilearned small --use-pretrained pretrain_s [-cap {data_cap} -seed-event-sampler {seed} --seed {seed}]
+
+## OmniLearned Small random weights training:
+python -m src.scripts.train -bs 10 --mode classifier -npi2 -name DEBUG --max_steps 100000 --use-omnilearned small  [-cap {data_cap} -seed-event-sampler {seed} --seed {seed}]
 
 """
 
@@ -93,12 +94,12 @@ def parse_args():
                         help="Dataset name (e.g., minerva_1A)")
     parser.add_argument("--data_path", type=str,
                         help="Path to dataset directory",
-                        default="/global/cfs/cdirs/m3246/gregork/Minerva/20260201_all_max_blobs_and_prongs_split_fix_anomalies")
-    parser.add_argument("--batch_size", "-bs", type=int, default=1024,
+                        default="/global/cfs/cdirs/m3246/gregork/Minerva/20260227_100Blobs_v1_split")
+    parser.add_argument("--batch_size", "-bs", type=int, default=2048,
                         help="Batch size for training")
-    parser.add_argument("--num_workers", type=int, default=4,
+    parser.add_argument("--num_workers", type=int, default=8,
                         help="Number of dataloader workers")
-    parser.add_argument("--max_particles", type=int, default=33,
+    parser.add_argument("--max_particles", type=int, default=113,
                         help="Maximum number of particles per event")
     # Model arguments
     parser.add_argument("--mode", type=str, default="regression", 
@@ -140,7 +141,7 @@ def parse_args():
                         help="Number of attention heads")
     parser.add_argument("--mlp_ratio", type=float, default=4.0,
                         help="MLP hidden dimension ratio")
-    parser.add_argument("--dropout", type=float, default=0.1,
+    parser.add_argument("--dropout", type=float, default=0.0,
                         help="Dropout rate")
     parser.add_argument("--attn_dropout", type=float, default=0.0,
                         help="Attention dropout rate")
@@ -157,8 +158,8 @@ def parse_args():
                         help="Maximum number of events to use in the dataset")
     parser.add_argument("--event-sampler-random-state", "-seed-event-sampler", type=int, default=42,
                         help="Random seed for event sampler")
-    parser.add_argument("--epochs", type=int, default=1000,
-                        help="Number of training epochs")
+    parser.add_argument("--max_steps", type=int, default=100000,
+                        help="Maximum number of training steps")
     parser.add_argument("--warmup_steps", type=int, default=1000,
                         help="Number of warmup steps")
     parser.add_argument("--grad_clip", type=float, default=1.0,
@@ -167,29 +168,20 @@ def parse_args():
                         help="Use automatic mixed precision")
     parser.add_argument("--max_samples_per_epoch", type=int, default=None,
                         help="Maximum number of samples to use per epoch")
-    parser.add_argument("--single_batch_overfit", action="store_true",
-                        help="Debug mode: repeatedly train on one fixed batch to verify model can overfit")
-    parser.add_argument("--single_batch_steps", type=int, default=500,
-                        help="Number of optimizer steps in single-batch overfit mode")
-    parser.add_argument("--single_batch_eval_interval", type=int, default=100,
-                        help="How often to log overfit-batch eval metrics in single-batch mode")
     # Logging and evaluation
     parser.add_argument("--log_interval", type=int, default=1000,
                         help="Log training loss every N steps")
-    parser.add_argument("--eval_interval", type=int, default=10000,
+    parser.add_argument("--eval_interval", type=int, default=1000,
                         help="Run evaluation every N steps")
-    parser.add_argument("--save_interval", type=int, default=10000,
+    parser.add_argument("--save_interval", type=int, default=1000,
                         help="Save checkpoint every N steps")
-    parser.add_argument("--debug_regression_collapse", action="store_true",
-                        help="Log per-batch regression variance and constant-baseline diagnostics")
     parser.add_argument("--wandb_project", type=str, default="minerva-models",
                         help="Wandb project name")
     parser.add_argument("--run_name", "-name", type=str, required=True,
                         help="Name for this training run (timestamp will be appended)")
     parser.add_argument("--output_dir", type=str, default="/global/cfs/cdirs/m3246/gregork/checkpoints",
                         help="Base output directory for checkpoints (run_name with timestamp will be appended)")
-    parser.add_argument("--log1p_loss", action="store_true",
-                        help="Use log1p loss")
+    parser.add_argument("--log1p_loss", type=bool, default=True, help="Use log1p loss")
     # Other
     parser.add_argument("--seed", type=int, default=None,
                         help="Random seed")
@@ -200,8 +192,7 @@ def parse_args():
     parser.add_argument("--optimizer", type=str, default="adamw",
                         choices=["adamw", "lion"],
                         help="Optimizer to use")
-    parser.add_argument("--include-E-sum", action="store_true",
-                        help="Include per-PID energy sums (blob, prong types, aggregated) as extra global features")
+    parser.add_argument("--include-E-sum", type=bool, default=True, help="Include per-PID energy sums (blob, prong types, aggregated) as extra global features")
     parser.add_argument("--zero-cond-feature", type=int, nargs="+", default=None,
                         help="Zero out global/cond feature(s) at these indices (ablation). "
                              "E.g. --zero-cond-feature 3 to ablate E_recoil_CCinc")
@@ -358,6 +349,10 @@ def create_omnilearned_model(args, task):
 
     model_params = get_model_parameters(args.use_omnilearned)
     use_cond = not args.no_use_cond
+    e_sum_dim = 6 if args.include_E_sum else 0
+    cond_dim = args.ol_num_cond + e_sum_dim
+    if e_sum_dim > 0:
+        use_cond = True
 
     model = PET2(
         input_dim=args.ol_num_feat,
@@ -365,7 +360,7 @@ def create_omnilearned_model(args, task):
         local_int=args.ol_local_interaction,
         int_type=args.ol_interaction_type,
         conditional=use_cond,
-        cond_dim=args.ol_num_cond,
+        cond_dim=cond_dim,
         pid=args.use_pid,
         pid_dim=args.ol_pid_dim,
         add_info=True,
@@ -383,7 +378,8 @@ def create_omnilearned_model(args, task):
     return model
 
 
-def prepare_batch_omnilearned(batch, device, use_cond=False, use_pid=False, pid_idx=4):
+def prepare_batch_omnilearned(batch, device, use_cond=False, use_pid=False, pid_idx=4,
+                              include_E_sum=False):
     """Prepare batch for OmniLearned PET2 model input."""
     X = batch["X"].to(device, dtype=torch.float32)
     y = batch["y"].to(device)
@@ -396,6 +392,14 @@ def prepare_batch_omnilearned(batch, device, use_cond=False, use_pid=False, pid_
     cond = None
     if use_cond and batch.get("cond") is not None:
         cond = batch["cond"].to(device, dtype=torch.float32)
+
+    if include_E_sum and batch.get("energy_sums") is not None:
+        e_sums = batch["energy_sums"].to(device, dtype=torch.float32)
+        e_sums = torch.log(e_sums + 1e-3)
+        if cond is not None:
+            cond = torch.cat([cond, e_sums], dim=1)
+        else:
+            cond = e_sums
 
     add_info = None
     if batch.get("add_info") is not None:
@@ -532,7 +536,8 @@ def evaluate(model, dataloader, device, args, class_weights, use_amp=False, step
         criterion = nn.CrossEntropyLoss(weight=class_weights)
     for batch in tqdm(dataloader, desc="Evaluating", leave=False):
         if args.use_omnilearned:
-            inputs = prepare_batch_omnilearned(batch, device, args.use_cond, args.use_pid, args.pid_idx)
+            inputs = prepare_batch_omnilearned(batch, device, args.use_cond, args.use_pid, args.pid_idx,
+                                              include_E_sum=args.include_E_sum)
         else:
             inputs = prepare_batch(batch, device, args.use_cond, args.use_pid, args.coord_dim, args.pid_idx, include_E_sum=args.include_E_sum, zero_cond_feature=args.zero_cond_feature)
         with autocast(enabled=use_amp):
@@ -698,9 +703,7 @@ def train(args):
     else:
         criterion = nn.CrossEntropyLoss(weight=torch.tensor(task.class_weights, device=device, dtype=torch.float32))
     
-    # Calculate number of epochs needed to reach max_steps
     steps_per_epoch = len(train_loader)
-    max_steps = args.epochs * steps_per_epoch
 
     # Setup optimizer and scheduler
     if args.optimizer == "adamw":
@@ -710,7 +713,7 @@ def train(args):
     else:
         raise ValueError(f"Invalid optimizer: {args.optimizer}")
     
-    scheduler = get_lr_schedule(optimizer, args.warmup_steps, max_steps=max_steps)
+    scheduler = get_lr_schedule(optimizer, args.warmup_steps, max_steps=args.max_steps)
     
     # Setup AMP
     scaler = GradScaler() if args.use_amp else None
@@ -739,10 +742,6 @@ def train(args):
     train_losses = []
     data_fetch_times = []
     backprop_times = []
-    debug_pred_stds = []
-    debug_target_stds = []
-    debug_model_mses = []
-    debug_baseline_mses = []
     best_val_loss = float('inf')
     
     # --- Cond-only diagnostic: inspect first batch ---
@@ -779,25 +778,27 @@ def train(args):
         del diag_batch, diag_inputs, gc, y
 
     print(f"Steps per epoch: {steps_per_epoch}")
-    print(f"Training for {args.epochs} epochs")
-    for epoch in range(args.epochs):
-        # Epoch progress bar
+    print(f"Training for {args.max_steps} steps")
+    epoch = 0
+    done = False
+
+    while not done:
         epoch_pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}", leave=True)
         iter_end_time = time.perf_counter()
-        
+
         for batch in epoch_pbar:
-            # Time spent waiting for the dataloader to produce the next batch.
             data_fetch_times.append(time.perf_counter() - iter_end_time)
 
             # Prepare inputs
             if args.use_omnilearned:
-                inputs = prepare_batch_omnilearned(batch, device, args.use_cond, args.use_pid, args.pid_idx)
+                inputs = prepare_batch_omnilearned(batch, device, args.use_cond, args.use_pid, args.pid_idx,
+                                                  include_E_sum=args.include_E_sum)
             else:
                 inputs = prepare_batch(batch, device, args.use_cond, args.use_pid, args.coord_dim, args.pid_idx, include_E_sum=args.include_E_sum, zero_cond_feature=args.zero_cond_feature)
-            
+
             # Forward pass
             optimizer.zero_grad()
-            
+
             with autocast(enabled=args.use_amp):
                 logits = forward_model(model, inputs, args)
 
@@ -809,16 +810,6 @@ def train(args):
                 else:
                     loss = criterion(logits, inputs["y"])
 
-            # Optional diagnostics for regression collapse (predicting close to batch mean).
-            if args.mode == "regression" and args.debug_regression_collapse:
-                with torch.no_grad():
-                    preds = logits.squeeze(-1).detach()
-                    targets = inputs["y"].detach()
-                    debug_pred_stds.append(preds.std(unbiased=False).item())
-                    debug_target_stds.append(targets.std(unbiased=False).item())
-                    debug_model_mses.append(torch.mean((preds - targets) ** 2).item())
-                    debug_baseline_mses.append(torch.mean((targets - targets.mean()) ** 2).item())
-            
             # Backward pass
             backprop_start_time = time.perf_counter()
             if scaler is not None:
@@ -832,21 +823,21 @@ def train(args):
                 torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
                 optimizer.step()
             backprop_times.append(time.perf_counter() - backprop_start_time)
-            
+
             scheduler.step()
-            
+
             # Track loss
             train_losses.append(loss.item())
             step += 1
-            
+
             # Update progress bar with current metrics
             current_lr = scheduler.get_last_lr()[0]
             epoch_pbar.set_postfix({
                 "loss": f"{loss.item():.4f}",
                 "lr": f"{current_lr:.2e}",
-                "step": step
+                "step": f"{step}/{args.max_steps}",
             })
-            
+
             # Log training loss
             if step % args.log_interval == 0:
                 avg_train_loss = np.mean(train_losses)
@@ -859,42 +850,35 @@ def train(args):
                     "epoch": epoch,
                 }
 
-                if args.mode == "regression" and args.debug_regression_collapse and len(debug_pred_stds) > 0:
-                    log_dict.update({
-                        "debug/pred_std": float(np.mean(debug_pred_stds)),
-                        "debug/target_std": float(np.mean(debug_target_stds)),
-                        "debug/model_mse": float(np.mean(debug_model_mses)),
-                        "debug/baseline_mse": float(np.mean(debug_baseline_mses)),
-                    })
-                
                 if not args.no_wandb:
                     wandb.log(log_dict, step=step)
-                
+
                 train_losses = []
                 data_fetch_times = []
                 backprop_times = []
-                debug_pred_stds = []
-                debug_target_stds = []
-                debug_model_mses = []
-                debug_baseline_mses = []
             iter_end_time = time.perf_counter()
-            
+
             # Evaluation
             if step % args.eval_interval == 0 or step == 1:
                 epoch_pbar.write(f"\nRunning evaluation at step {step}...")
                 eval_metrics = evaluate(model, val_loader, device, args, torch.tensor(task.class_weights, device=device, dtype=torch.float32) if task.type == "classifier" else None, args.use_amp, step)
-                
+
                 epoch_pbar.write(f"Eval loss: {eval_metrics['eval_loss']:.4f}")
-                # save as best_model.pt if val loss is lower
                 if eval_metrics['eval_loss'] < best_val_loss:
                     best_val_loss = eval_metrics['eval_loss']
                     save_checkpoint(model, optimizer, scheduler, scaler, step, args, best_val_loss,
                                     filename="best_model.pt")
                     epoch_pbar.write(f"New best model saved! Val loss: {best_val_loss:.4f}")
-                
+
                 if not args.no_wandb:
                     wandb.log(eval_metrics, step=step)
                     wandb.log({"best_val_loss": best_val_loss}, step=step)
+
+            if step >= args.max_steps:
+                done = True
+                break
+
+        epoch += 1
     # Final evaluation
     print("\nRunning final evaluation...")
     eval_metrics = evaluate(model, val_loader, device, args, torch.tensor(task.class_weights, device=device, dtype=torch.float32) if task.type == "classifier" else None, args.use_amp, step)

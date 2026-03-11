@@ -576,8 +576,9 @@ class PET_body(nn.Module):
 
         # Move away zero-padded entries
         coord_shift = 999.0 * (~mask).float()
+        points = coord_shift + x[:, :, : self.num_coord]
         local_features, indices = self.local_physics(
-            coord_shift + x[:, :, : self.num_coord], x, mask
+            points, x, mask
         )
 
         x_int = None
