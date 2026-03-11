@@ -1,5 +1,5 @@
 # Train the transformer locally
-from src.jobs.slurm_template import SLURM_TEMPLATE_GPU
+from src.constants.slurm_template import SLURM_TEMPLATE_GPU
 import os
 from datetime import datetime as dt
 

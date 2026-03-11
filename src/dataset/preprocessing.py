@@ -5,6 +5,16 @@ import os
 import h5py
 import torch
 
+from src.constants.physics import (
+    pdg_masses,
+    pdg_kinetic_energy,
+    pdg_total_energy_no_muon,
+    pdg_muons,
+    NEUTRAL_PION_PDG_ID,
+    PI_PLUS_PDG_ID,
+    PI_MINUS_PDG_ID,
+)
+
 @dataclass
 class DenseCollection:
     bounds: np.ndarray  # shape (n_events + 1,)
@@ -392,196 +402,6 @@ def get_event_repr_nested_tensor(muons, photons, blobs, prongs, global_features,
     print(f"✓ Nested tensor data written to {output_file} (total events: {N_events})")
     return N_events
 
-
-def get_event_repr(muons, photons, blobs, prongs, global_features, truth_labels, output_file, max_objects=100, chunk_size=1000):
-    """
-    Convert event data to OmniLearned format and write directly to HDF5 file.
-    
-    Args:
-        muons: DenseCollection of muon data
-        photons: DenseCollection of photon data
-        blobs: DenseCollection of blob data
-        prongs: DenseCollection of prong data
-        global_features: Global, event-level features
-        incoming_E: Incoming neutrino energy (Ground Truth)
-        event_type: Event type (Ground Truth)
-        output_file: Path to output HDF5 file
-        max_objects: Maximum number of objects per event
-        chunk_size: Number of events to process at once before writing to disk
-    Returns: Number of events written to file
-
-    """
-    muon_four_momentum = muons.data[:, :4]
-    photon_four_momentum = photons.data[:, :4]
-    blob_four_momentum = blobs.data[:, [0, 1, 2, 5]].copy() # really this is [x, y, z, E]
-    # Adjust blob x, y, z such that we assume a massless particle originating from the origin
-    # Convert position (x,y,z) to momentum-like (px,py,pz) by normalizing direction and scaling by energy
-    blob_norm = np.linalg.norm(blob_four_momentum[:, 0:3], axis=1, keepdims=True)
-    blob_norm = np.where(blob_norm > 1e-6, blob_norm, 1.0)  # Avoid division by zero
-    blob_four_momentum[:, 0:3] = (blob_four_momentum[:, 0:3] / blob_norm) * blob_four_momentum[:, 3:4]
-    prong_four_momentum = prongs.data[:, 4:8]
-    prong_PID = prongs.data[:, -1]
-    # Our PID hardcoded:
-    # muon = 0, photon = 1, blob = 2 (no PID), aggregated_blob = 7, aggregated_prong = 8, prong PIDs: -999=3, 0=4, 3=5, 4=6
-    prong_pid = np.zeros(len(prong_PID), dtype=np.int32)
-    for i in range(len(prong_PID)):
-        if prong_PID[i] == -999:
-            prong_pid[i] = 3
-        elif prong_PID[i] == 0:
-            prong_pid[i] = 4
-        elif prong_PID[i] == 3:
-            prong_pid[i] = 5
-        elif prong_PID[i] == 4:
-            prong_pid[i] = 6
-    muon_pid = np.zeros(len(muon_four_momentum), dtype=np.int32)
-    photon_pid = np.ones(len(photon_four_momentum), dtype=np.int32)
-    blob_pid = np.ones(len(blob_four_momentum), dtype=np.int32) * 2 # Not real PID!
-    
-    # Convert muon, photon, and prong features at once (more efficient)
-    # Note: We'll handle blob features per-event to enable aggregation
-    muon_features = np.concatenate([convert_four_momentum(muon_four_momentum), muon_pid[:, np.newaxis]], axis=1)
-    photon_features = np.concatenate([convert_four_momentum(photon_four_momentum), photon_pid[:, np.newaxis]], axis=1)
-    prong_features = np.concatenate([convert_four_momentum(prong_four_momentum), prong_pid[:, np.newaxis]], axis=1)
-
-    # Get number of events
-    N_events = len(muons.n)
-    assert N_events == len(photons.n) == len(blobs.n) == len(prongs.n)
-    assert len(global_features) == N_events, f"Global features length {len(global_features)} doesn't match N_events {N_events}"
-    
-    # Get number of global features
-    n_global_features = global_features.shape[1] if len(global_features.shape) > 1 else 1
-    if len(global_features.shape) == 1:
-        global_features = global_features[:, np.newaxis]
-    
-
-    file_exists = os.path.exists(output_file)
-    existing_events = 0
-    
-    if file_exists:
-        with h5py.File(output_file, 'r') as hf:
-            existing_events = hf['data'].shape[0]
-            print(f"File exists with {existing_events} events, appending {N_events} new events...")
-    else:
-        print(f"Creating new file with {N_events} events...")
-    
-    # Open file in appropriate mode
-    mode = 'a' if file_exists else 'w'
-    
-    # Create or append to HDF5 file
-    with h5py.File(output_file, mode) as hf:
-        if file_exists:
-            # Resize existing datasets to accommodate new events
-            dset = hf['data']
-            dset_global = hf['global']
-            dset_truth_labels = hf['truth_labels']
-            dset_number_of_particles = hf['number_of_particles']
-            old_size = dset.shape[0]
-            new_size = old_size + N_events
-            dset.resize(new_size, axis=0)
-            dset_global.resize(new_size, axis=0)
-            dset_truth_labels.resize(new_size, axis=0)
-            dset_number_of_particles.resize(new_size, axis=0)
-            write_offset = old_size
-        else:
-            # Create datasets with chunking for efficient writing
-            dset = hf.create_dataset(
-                'data', 
-                shape=(N_events, max_objects, 5),
-                maxshape=(None, max_objects, 5),  # Allow unlimited growth in first dimension
-                dtype=np.float32,
-                chunks=(min(chunk_size, N_events), max_objects, 5),
-                compression='gzip',
-                compression_opts=4
-            )
-            dset_global = hf.create_dataset(
-                'global',
-                shape=(N_events, n_global_features),
-                maxshape=(None, n_global_features),
-                dtype=np.float32,
-                chunks=(min(chunk_size, N_events), n_global_features),
-                compression='gzip',
-                compression_opts=4
-            )
-            dset_truth_labels = hf.create_dataset(
-                'truth_labels',
-                shape=(N_events, 4),
-                maxshape=(None, 4),
-                dtype=np.float32,
-                chunks=(min(chunk_size, N_events), 4),
-                compression='gzip',
-                compression_opts=4
-            )
-            dset_number_of_particles = hf.create_dataset(
-                'number_of_particles',
-                shape=(N_events,),
-                maxshape=(None,),
-                dtype=np.int32,
-                chunks=(min(chunk_size, N_events),),
-                compression='gzip',
-                compression_opts=4
-            ) # Number of tokens per event - to make it easier to plot histograms of quantities
-            write_offset = 0
-        # Process events in chunks to save memory
-        for chunk_start in range(0, N_events, chunk_size):
-            chunk_end = min(chunk_start + chunk_size, N_events)
-            chunk_data = np.zeros((chunk_end - chunk_start, max_objects, 5), dtype=np.float32)
-            n_particles_in_chunk = np.zeros(chunk_end - chunk_start, dtype=np.int32)
-            for i, event_idx in enumerate(range(chunk_start, chunk_end)):
-                muon_features_event = muon_features[muons.bounds[event_idx]:muons.bounds[event_idx+1]]
-                photon_features_event = photon_features[photons.bounds[event_idx]:photons.bounds[event_idx+1]]
-                prong_features_event = prong_features[prongs.bounds[event_idx]:prongs.bounds[event_idx+1]]
-                
-                # Handle blobs with aggregation
-                blob_four_momentum_event = blob_four_momentum[blobs.bounds[event_idx]:blobs.bounds[event_idx+1]]
-                blob_pid_event = blob_pid[blobs.bounds[event_idx]:blobs.bounds[event_idx+1]]
-                
-                # Aggregate low-energy blobs (keep top 20, combine rest with PID=7)
-                agg_blob_four_momentum, agg_blob_pid = aggregate_low_energy_blobs_from_four_momentum(
-                    blob_four_momentum_event,
-                    blob_pid_event,
-                    n_keep=20,
-                    aggregate_pid=7
-                )
-                
-                # Convert aggregated blobs to features
-                blob_features_event = np.concatenate([
-                    convert_four_momentum(agg_blob_four_momentum),
-                    agg_blob_pid[:, np.newaxis]
-                ], axis=1)
-                
-                # Stack them all into a single array
-                event_features = np.concatenate([muon_features_event, photon_features_event, blob_features_event, prong_features_event], axis=0)
-                if len(event_features) > 0:
-                    # Sort by energy (descending)
-                    event_features_idx_energy = event_features[:, 3].argsort()[::-1]
-                    # Keep only the max_objects per event
-                    n_to_keep = min(len(event_features), max_objects)
-                    event_features_sorted = event_features[event_features_idx_energy[:n_to_keep]]
-                    chunk_data[i, :n_to_keep] = event_features_sorted
-                    n_particles_in_chunk[i] = n_to_keep  # Store number actually kept
-                else:
-                    n_particles_in_chunk[i] = 0
-            # Write chunk to disk at the appropriate offset
-            dset[write_offset + chunk_start:write_offset + chunk_end] = chunk_data
-            # Write truth labels
-            dset_truth_labels[write_offset + chunk_start:write_offset + chunk_end] = truth_labels[chunk_start:chunk_end]
-            dset_number_of_particles[write_offset + chunk_start:write_offset + chunk_end] = n_particles_in_chunk
-            print(f"Processed events {chunk_start} to {chunk_end} / {N_events} (total in file: {write_offset + chunk_end})")
-        # Write global features
-        dset_global[write_offset:write_offset + N_events] = global_features
-        # Update metadata
-        total_events = write_offset + N_events
-        hf.attrs['n_events'] = total_events
-        hf.attrs['max_objects'] = max_objects
-        hf.attrs['n_features'] = 5
-        hf.attrs['n_global_features'] = n_global_features
-        hf.attrs['feature_names'] = ['delta_eta', 'delta_phi', 'log_pt', 'log_E', 'pid']
-        hf.attrs['global_feature_names'] = ['muon_fuzz_energy', 'muon_iso_blobs_energy', 'E_recoil', 'E_recoil_CCinc']
-        hf.attrs['pid_mapping'] = 'muon=0, photon=1, blob=2, prong_-999=3, prong_0=4, prong_3=5, prong_4=6, aggregated_blob=7, aggregated_prong=8'
-    print(f"✓ Data written to {output_file} (total events: {total_events})")
-    return N_events
-
-
 def get_global_features(master_ana_dev):
     # Get the global features: muon fuzz energy, muon iso blobs energy, E_recoil, E_recoil_CCinc
     muon_fuzz_energy = master_ana_dev["muon_fuzz_energy"].array().to_numpy()
@@ -607,9 +427,9 @@ def get_n_pions_label(mc_current, mc_part):
     is_multi_pion = np.zeros(len(mc_current), dtype=bool)
     for i in range(len(mc_current)):
         event_PDG = mc_part.data[mc_part.bounds[i]:mc_part.bounds[i+1]][:, 4].astype(int)
-        n_pi_plus_event = np.sum(event_PDG == 211)
-        n_pi_minus_event = np.sum(event_PDG == -211)
-        n_pi_zero_event = np.sum(event_PDG == 111)
+        n_pi_plus_event = np.sum(event_PDG == PI_PLUS_PDG_ID)
+        n_pi_minus_event = np.sum(event_PDG == PI_MINUS_PDG_ID)
+        n_pi_zero_event = np.sum(event_PDG == NEUTRAL_PION_PDG_ID)
         n_pi_zero.append(n_pi_zero_event)
         is_multi_pion[i] = (n_pi_plus_event > 1) or (n_pi_minus_event > 1) # Wrong label, don't use it!
         n_pi_plus.append(n_pi_plus_event)
@@ -633,44 +453,20 @@ def get_cc_pi_labels(mc_current, mc_part):
         event_PDG = mc_part.data[mc_part.bounds[cc_events[i]]:mc_part.bounds[cc_events[i]+1]][:, 4].astype(int)
         #meson_filter = np.isin(event_PDG, other_mesons_piplus)
         pion_idx = -1
-        if np.sum(event_PDG == 211) == 1: # and np.sum(meson_filter) == 0:
+        if np.sum(event_PDG == PI_PLUS_PDG_ID) == 1: # and np.sum(meson_filter) == 0:
             labels[cc_events[i]] = 1
             pion_idx = np.where(event_PDG == 211)[0][0]
         #meson_filter_piminus = np.isin(event_PDG, other_mesons_piminus)
-        if np.sum(event_PDG == -211) == 1: # and np.sum(meson_filter_piminus) == 0:
+        if np.sum(event_PDG == PI_MINUS_PDG_ID) == 1: # and np.sum(meson_filter_piminus) == 0:
             labels[cc_events[i]] = 2
-            pion_idx = np.where(event_PDG == -211)[0][0]
+            pion_idx = np.where(event_PDG == PI_MINUS_PDG_ID)[0][0]
         else:
             labels[cc_events[i]] = 0
         if pion_idx != -1:
             pi_four_vectors[cc_events[i], :] = mc_part.data[mc_part.bounds[cc_events[i]]:mc_part.bounds[cc_events[i]+1]][pion_idx, :4]
     return labels, pi_four_vectors
 
-pdg_masses = {
-    2212: 938.272,   # proton
-    -2212: 938.272,  # anti-proton
-    211: 139.570,    # pi+
-    -211: 139.570,   # pi-
-    321: 493.677,    # K+
-    -321: 493.677,   # K-
-    2112: 939.565,   # neutron (will be excluded)
-    13: 105.658,     # mu-
-    -13: 105.658,    # mu+
-    111: 134.9766,   # pi0
-    311: 497.6,      # K0
-    -311: 497.6,     # K0
-    11: 0.511,       # e-
-    -11: 0.511,      # e+
-    22: 0,
-    130: 493.677,
-    -2112: 939.565,
-}
-
-pdg_kinetic_energy = {2212, -2212}
-pdg_total_energy_no_muon = {22, 11, -11, 111, -111, 211, -211, 321, -321}
-pdg_muons = {13, -13}
-
-def get_E_available_true(mc_part, exclude_muons=False):
+def get_E_available_true(mc_part):
     E_available_true = np.zeros(len(mc_part.n))
     E_muon = np.zeros(len(mc_part.n))
     for i in range(len(mc_part.n)):
