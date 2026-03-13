@@ -50,42 +50,52 @@ from src.models.omnilearned import PET2, get_model_parameters, load_pretrained_o
 print(f"CUDA_VISIBLE_DEVICES: {os.environ.get('CUDA_VISIBLE_DEVICES')}")
 
 class ResidualBlock(nn.Module):
+    """Pre-norm residual block with SiLU (smooth, good for regression)."""
     def __init__(self, dim, dropout=0.1):
         super().__init__()
+        self.norm = nn.LayerNorm(dim)
         self.block = nn.Sequential(
-            nn.Linear(dim, dim),
-            nn.LayerNorm(dim),
-            nn.GELU(),
+            nn.Linear(dim, dim * 2),
+            nn.SiLU(),
             nn.Dropout(dropout),
-            nn.Linear(dim, dim),
-            nn.LayerNorm(dim),
-            nn.GELU(),
+            nn.Linear(dim * 2, dim),
             nn.Dropout(dropout),
         )
 
     def forward(self, x):
-        return x + self.block(x)
+        return x + self.block(self.norm(x))
 
 
 class CondOnlyMLP(nn.Module):
-    """MLP with residual blocks that operates only on global/conditional features."""
-    def __init__(self, input_dim, hidden_dim, output_dim, n_layers=3, dropout=0.1):
+    """MLP with residual blocks that operates only on global/conditional features.
+    Uses SiLU activations and optional positive output for log(1+E) regression."""
+    def __init__(self, input_dim, hidden_dim, output_dim, n_layers=3, dropout=0.0, output_positive=False):
         super().__init__()
+        self.output_positive = output_positive
         self.input_proj = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
             nn.LayerNorm(hidden_dim),
-            nn.GELU(),
+            nn.SiLU(),
             nn.Dropout(dropout),
         )
         self.res_blocks = nn.Sequential(
             *[ResidualBlock(hidden_dim, dropout) for _ in range(n_layers)]
         )
-        self.head = nn.Linear(hidden_dim, output_dim)
+        self.head_norm = nn.LayerNorm(hidden_dim)
+        self.head = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.SiLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, output_dim),
+        )
 
     def forward(self, x):
         x = self.input_proj(x)
         x = self.res_blocks(x)
-        return self.head(x)
+        x = self.head(self.head_norm(x))
+        if self.output_positive:
+            x = F.softplus(x)
+        return x
 
 
 def parse_args():
@@ -303,6 +313,7 @@ def create_model(args, task: Task):
             output_dim=num_classes,
             n_layers=args.mlp_layers,
             dropout=args.dropout,
+            output_positive=(task.type == "regression"),
         )
         return model
 
@@ -971,6 +982,14 @@ def train(args):
                 scheduler.step()
                 step += 1
                 performed_step = True
+                # Print 5 example y_pred vs y_true for cond_only regression every 100 steps
+                if args.cond_only and args.mode == "regression" and step % 100 == 0:
+                    pred = logits.squeeze(-1).detach().cpu()
+                    y_true = inputs["y"].detach().cpu()
+                    n = min(5, pred.size(0))
+                    print(f"[step {step}] cond_only regression — 5 example y_pred vs y_true:")
+                    for i in range(n):
+                        print(f"  [{i}] y_pred={pred[i].item():.6f}  y_true={y_true[i].item():.6f}")
 
             backprop_times.append(time.perf_counter() - backprop_start_time)
 

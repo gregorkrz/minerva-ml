@@ -90,6 +90,7 @@ def create_model_from_checkpoint(checkpoint_path, device):
             output_dim=num_classes,
             n_layers=args_dict.get("mlp_layers", 3),
             dropout=args_dict.get("dropout", 0.1),
+            output_positive=(task.type == "regression"),
         )
     else:
         e_sum_dim = 6 if args_dict.get("include_E_sum", False) else 0

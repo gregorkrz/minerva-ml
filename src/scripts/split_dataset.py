@@ -140,6 +140,13 @@ for dataset in os.listdir(args.input_dir):
         
         print(f"✓ {dataset} split and written to {args.output_dir}")
 
-# Save the result to the output directory
-with open(os.path.join(args.output_dir, "result.pkl"), "wb") as f:
+# Save the result to the output directory (merge with existing result.pkl if present, so 1A then 1B don't overwrite)
+result_path = os.path.join(args.output_dir, "result.pkl")
+if os.path.exists(result_path):
+    with open(result_path, "rb") as f:
+        existing_result = pickle.load(f)
+    for k, v in result.items():
+        existing_result[k] = v
+    result = existing_result
+with open(result_path, "wb") as f:
     pickle.dump(result, f)
