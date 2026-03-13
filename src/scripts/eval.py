@@ -12,7 +12,6 @@ python -m src.scripts.eval --checkpoint Training_Name --batch_size 1024 --datase
 
 import argparse
 import os
-import json
 from pathlib import Path
 from datetime import datetime
 import torch
@@ -20,7 +19,6 @@ import torch.nn as nn
 import wandb
 from tqdm import tqdm
 import numpy as np
-from sklearn.metrics import accuracy_score, precision_recall_fscore_support, confusion_matrix, r2_score, mean_absolute_error
 
 from src.dataset.dataloader import load_data
 from src.models.vit import PointGlobalMixedViT, PointGlobalMixedViTConfig
@@ -224,72 +222,8 @@ def evaluate(model, dataloader, device, args_dict, use_amp=False):
     all_targets = np.concatenate(all_targets)
     all_cond = np.concatenate(all_cond)
     avg_loss = np.mean(all_losses)
-    # Compute metrics
     metrics = {"loss": avg_loss}
-    
-    if mode == "regression":
-        # Regression metrics
-        metrics["r2_score"] = r2_score(all_targets, all_preds)
-        metrics["mae"] = mean_absolute_error(all_targets, all_preds)
-        metrics["rmse"] = np.sqrt(avg_loss)  # Since we used MSELoss
-        
-        # Compute residuals
-        residuals = all_targets - all_preds
-        metrics["mean_residual"] = np.mean(residuals)
-        metrics["std_residual"] = np.std(residuals)
-        
-        print(f"\n{'='*60}")
-        print(f"Regression Metrics:")
-        print(f"{'='*60}")
-        print(f"Loss (MSE):        {metrics['loss']:.6f}")
-        print(f"RMSE:              {metrics['rmse']:.6f}")
-        print(f"MAE:               {metrics['mae']:.6f}")
-        print(f"R² Score:          {metrics['r2_score']:.6f}")
-        print(f"Mean Residual:     {metrics['mean_residual']:.6f}")
-        print(f"Std Residual:      {metrics['std_residual']:.6f}")
-        print(f"{'='*60}\n")
-        
-    else:
-        # Classification metrics are computed from class predictions (argmax of logits),
-        # while preserving raw logits in all_preds for downstream analysis/saving.
-        all_pred_labels = np.argmax(all_preds, axis=1)
-        metrics["accuracy"] = accuracy_score(all_targets, all_pred_labels)
-        precision, recall, f1, support = precision_recall_fscore_support(
-            all_targets, all_pred_labels, average='weighted', zero_division=0
-        )
-        metrics["precision"] = precision
-        metrics["recall"] = recall
-        metrics["f1_score"] = f1
-        
-        # Per-class metrics
-        precision_per_class, recall_per_class, f1_per_class, support_per_class = precision_recall_fscore_support(
-            all_targets, all_pred_labels, average=None, zero_division=0
-        )
-        # Confusion matrix
-        cm = confusion_matrix(all_targets, all_pred_labels)
-        print(f"\n{'='*60}")
-        print(f"Classification Metrics:")
-        print(f"{'='*60}")
-        print(f"Loss:              {metrics['loss']:.6f}")
-        print(f"Accuracy:          {metrics['accuracy']:.4f}")
-        print(f"Precision:         {metrics['precision']:.4f}")
-        print(f"Recall:            {metrics['recall']:.4f}")
-        print(f"F1 Score:          {metrics['f1_score']:.4f}")
-        print(f"\nPer-class metrics:")
-        for i in range(len(support_per_class)):
-            print(f"  Class {i}: P={precision_per_class[i]:.4f}, R={recall_per_class[i]:.4f}, "
-                  f"F1={f1_per_class[i]:.4f}, Support={support_per_class[i]}")
-        print(f"\nConfusion Matrix:")
-        print(cm)
-        print(f"{'='*60}\n")
-        
-        # Store per-class metrics
-        for i in range(len(support_per_class)):
-            metrics[f"precision_class_{i}"] = precision_per_class[i]
-            metrics[f"recall_class_{i}"] = recall_per_class[i]
-            metrics[f"f1_class_{i}"] = f1_per_class[i]
-            metrics[f"support_class_{i}"] = int(support_per_class[i])
-    
+
     results = {
         "metrics": metrics,
         "predictions": all_preds,
@@ -299,7 +233,7 @@ def evaluate(model, dataloader, device, args_dict, use_amp=False):
     return results
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Evaluate PointGlobalMixedViT on HEP data")    
+    parser = argparse.ArgumentParser(description="Evaluate models on Minerva data")    
     # Model checkpoint
     parser.add_argument("--checkpoint", type=str, required=True,
                         help="Path to model checkpoint")
@@ -310,18 +244,15 @@ def parse_args():
     parser.add_argument("--dataset_type", type=str, default="test",
                         choices=["train", "val", "test"],
                         help="Dataset split to evaluate on")
-    parser.add_argument("--batch_size", type=int, default=1024,
+    parser.add_argument("--batch_size", "-bs", type=int, default=2048,
                         help="Batch size for evaluation")
-    parser.add_argument("--num_workers", type=int, default=0,
+    parser.add_argument("--num_workers", type=int, default=8,
                         help="Number of dataloader workers")
     parser.add_argument("--max_particles", type=int, default=None, 
                         help="Maximum number of particles per event. If None, will use from checkpoint.")    
     # Evaluation settings
     parser.add_argument("--use_amp", dest="use_amp", action="store_true",
                         help="Use automatic mixed precision")
-    parser.add_argument("--no_amp", dest="use_amp", action="store_false",
-                        help="Disable automatic mixed precision")
-    parser.set_defaults(use_amp=True)
     args = parser.parse_args()
     args.checkpoint = os.path.join(args.base_dir, args.checkpoint, "best_model.pt")
     return args

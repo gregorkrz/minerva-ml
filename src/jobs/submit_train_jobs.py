@@ -16,7 +16,10 @@ def get_env_vars():
     return env_commands
 
 
-def generate_cmd(data_cap=-1, seed=42, task="regression", model="Transformer1", bs=2048, max_steps=250000, grad_accum_steps=1):
+def generate_cmd(data_cap=-1, seed=42, task="regression", model="Transformer1", bs=2048, max_steps=250000, grad_accum_steps=1, continue_from=""):
+    if continue_from:
+        base = "python -m src.scripts.train --resume {continue_from}"
+        return base.format(continue_from=continue_from)
     base = "python -m src.scripts.train -bs {bs} --mode {task} {detailed_task} -name {name} --d_model 128 --depth 4 --n_heads 8 --dropout 0.0 --attn_dropout 0.0 {cap} --seed {seed} -seed-event-sampler {seed}  --max_steps {max_steps} --grad_accum_steps {grad_accum_steps} {extra}"
     # Model options: "Transformer1", "OLS" (OmniLearned Small), "OLS_RW" (OLS Random Weights)
     # Seed both the event sampler and the whole training with seed
@@ -38,33 +41,53 @@ def generate_cmd(data_cap=-1, seed=42, task="regression", model="Transformer1", 
     cap = f" -cap {data_cap} " if data_cap > 0 else ""
     return base.format(bs=bs, task=task, detailed_task=detailed_task, name=name, cap=cap, seed=seed, max_steps=max_steps, extra=extra, grad_accum_steps=grad_accum_steps)
 
-cmds = []
-slurm_times = []
 
-for seed in [42]:
-    for data_cap in [-1]:
-        for task in ["regression", "classifier"]:
-            for model in ["OLS", "OLS_RW", "OLM", "Transformer1"]: #["Transformer1", "OLS", "OLS_RW", "OLM"]:
-                if "OL" in model:
-                    slurm_times.append("12:00:00")
-                    bs = 2048
-                    grad_accum_steps = 1
-                    if "OLM" in model:
-                        bs = 1024
-                        grad_accum_steps = 2
-                else:
-                    bs = 2048
-                    grad_accum_steps = 1
-                    if task == "regression":
-                        slurm_times.append("05:00:00")
+def get_cmds_and_slurm_times():
+    cmds = []
+    slurm_times = []
+
+    for seed in [42]:
+        for data_cap in [20000, 50000, 100000, 200000]:
+            for task in ["regression", "classifier"]:
+                for model in ["OLS", "OLS_RW", "Transformer1"]: #["Transformer1", "OLS", "OLS_RW", "OLM"]:
+                    if "OL" in model:
+                        bs = 2048
+                        grad_accum_steps = 1
+                        if "OLM" in model:
+                            bs = 512
+                            grad_accum_steps = 4
+                            slurm_times.append("30:00:00")
+                        else:
+                            slurm_times.append("10:00:00")
                     else:
-                        slurm_times.append("05:00:00")
-                max_steps = {
-                    "regression": 250000,
-                    "classifier": 100000,
-                }
-                cmd = generate_cmd(data_cap=data_cap, seed=seed, task=task, model=model, max_steps=max_steps[task], bs=bs, grad_accum_steps=grad_accum_steps)
-                cmds.append(cmd)
+                        bs = 2048
+                        grad_accum_steps = 1
+                        if task == "regression":
+                            slurm_times.append("05:00:00")
+                        else:
+                            slurm_times.append("05:00:00")
+                    max_steps = {
+                        "regression": 500000,
+                        "classifier": 500000,
+                    }
+                    cmd = generate_cmd(data_cap=data_cap, seed=seed, task=task, model=model, max_steps=max_steps[task], bs=bs, grad_accum_steps=grad_accum_steps)
+                    cmds.append(cmd)
+    return cmds, slurm_times
+
+def get_cmds_and_slurm_times_continue():
+    to_resume = ["Run_1203_OLS_RW_regression_-1_seed42_20260312_211002"]
+    CKPT_DIR = "/global/cfs/cdirs/m3246/gregork/checkpoints"
+    cmds = []
+    slurm_times = []
+    for ckpt in to_resume:
+        ckpt_path = os.path.join(CKPT_DIR, ckpt)
+        cmd = generate_cmd(continue_from=ckpt_path)
+        cmds.append(cmd)
+        slurm_times.append("05:00:00")
+    return cmds, slurm_times
+
+cmds, slurm_times = get_cmds_and_slurm_times_continue()
+
 
 for i, cmd in enumerate(cmds):
     job_name = f"run_{i}_{dt.now().strftime('%Y%m%d_%H%M%S')}"

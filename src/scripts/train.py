@@ -398,13 +398,18 @@ def prepare_batch_omnilearned(batch, device, use_cond=False, use_pid=False, pid_
     if use_cond and batch.get("cond") is not None:
         cond = batch["cond"].to(device, dtype=torch.float32)
 
-    if include_E_sum and batch.get("energy_sums") is not None:
-        e_sums = batch["energy_sums"].to(device, dtype=torch.float32)
-        e_sums = torch.log(e_sums + 1e-3)
-        if cond is not None:
-            cond = torch.cat([cond, e_sums], dim=1)
-        else:
-            cond = e_sums
+    if include_E_sum:
+        if batch.get("energy_sums") is not None:
+            # Legacy: 4-col cond + raw energy_sums; concat log(e_sums+1e-3)
+            e_sums = batch["energy_sums"].to(device, dtype=torch.float32)
+            e_sums = torch.log(e_sums + 1e-3)
+            if cond is not None:
+                cond = torch.cat([cond, e_sums], dim=1)
+            else:
+                cond = e_sums
+        elif cond is not None and cond.shape[1] == 10:
+            # New: cond already has 10 cols (4 base + 6 log energy sums); use as-is
+            pass
 
     add_info = None
     if batch.get("add_info") is not None:
@@ -559,13 +564,18 @@ def prepare_batch(batch, device, use_cond=False, use_pid=False, coord_dim=2, pid
     if use_cond and batch.get("cond") is not None:
         global_cont = batch["cond"].to(device, dtype=torch.float32)  # [B, global_cont_dim]
 
-    if include_E_sum and batch.get("energy_sums") is not None:
-        e_sums = batch["energy_sums"].to(device, dtype=torch.float32)
-        e_sums = torch.log(e_sums + 1e-3)  # [B, 6]
-        if global_cont is not None:
-            global_cont = torch.cat([global_cont, e_sums], dim=1)
-        else:
-            global_cont = e_sums
+    if include_E_sum:
+        if batch.get("energy_sums") is not None:
+            # Legacy: 4-col cond + raw energy_sums; concat log(e_sums+1e-3)
+            e_sums = batch["energy_sums"].to(device, dtype=torch.float32)
+            e_sums = torch.log(e_sums + 1e-3)  # [B, 6]
+            if global_cont is not None:
+                global_cont = torch.cat([global_cont, e_sums], dim=1)
+            else:
+                global_cont = e_sums
+        elif global_cont is not None and global_cont.shape[1] == 10:
+            # New: cond already has 10 cols (4 base + 6 log energy sums); use as-is
+            pass
 
     if zero_cond_feature is not None and global_cont is not None:
         for idx in zero_cond_feature:
@@ -709,13 +719,34 @@ def make_log_loss(criterion):
 
 def train(args):
     """Main training function."""
-    # Create timestamped run name
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_name_with_timestamp = f"{args.run_name}_{timestamp}"
-    
-    # Update output directory with timestamped run name
-    args.output_dir = os.path.join(args.output_dir, run_name_with_timestamp)
-    os.makedirs(args.output_dir, exist_ok=True)
+    # If resuming, load saved arguments from the checkpoint and override current ones,
+    # so that training continues with the exact same configuration as the original run.
+    if args.resume:
+        checkpoint = torch.load(args.resume, map_location="cpu")
+        saved_args = checkpoint.get("args", None)
+        if saved_args is not None:
+            # Preserve explicitly provided CLI controls like --resume and --no_wandb.
+            preserve_keys = {"resume", "no_wandb"}
+            for k, v in saved_args.items():
+                if k in preserve_keys:
+                    continue
+                setattr(args, k, v)
+        print(f"Loaded training configuration from checkpoint: {args.resume}")
+
+    # Determine run name and output directory
+    if args.resume:
+        # When resuming, derive run name from the directory containing the checkpoint.
+        # This directory name is treated as the wandb run name and the output directory.
+        checkpoint_dir = os.path.dirname(args.resume)
+        run_name_with_timestamp = os.path.basename(checkpoint_dir)
+        args.output_dir = checkpoint_dir
+        os.makedirs(args.output_dir, exist_ok=True)
+    else:
+        # Create a new timestamped run name and corresponding output directory.
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        run_name_with_timestamp = f"{args.run_name}_{timestamp}"
+        args.output_dir = os.path.join(args.output_dir, run_name_with_timestamp)
+        os.makedirs(args.output_dir, exist_ok=True)
     print(f"Output directory: {args.output_dir}")
     print(f"Run name: {run_name_with_timestamp}")
     args.use_cond = not args.no_use_cond
@@ -833,6 +864,7 @@ def train(args):
             project=args.wandb_project,
             name=run_name_with_timestamp,
             config=vars(args),
+            # Always resume the wandb run when a checkpoint path is provided.
             resume="allow" if args.resume else None,
         )
         wandb.watch(model, log="all", log_freq=args.log_interval)

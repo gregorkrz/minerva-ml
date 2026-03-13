@@ -330,11 +330,11 @@ def get_event_repr_nested_tensor(muons, photons, blobs, prongs, global_features,
     
     file_exists = os.path.exists(output_file)
     data_nested = []
-    data_nested_pos_and_timing = []
-    # Additional info: [<dE/dx>, x, y, z, t] (or zeros where not applicable)
+    # Additional info is concatenated with event features into single (n_particles, 10) tensor per event
 
     if file_exists:
         raise ValueError(f"File {output_file} already exists")
+    energy_sums_log_list = []
     for event_idx in range(N_events):
         if event_idx % 1000 == 0:
             print(f"Processed events {event_idx} to {event_idx+1000} / {N_events}")
@@ -392,13 +392,22 @@ def get_event_repr_nested_tensor(muons, photons, blobs, prongs, global_features,
                 assert event_features.shape[0] <= max_prongs + max_blobs + 2 + 1, f"Event features length {event_features.shape[0]} > max_prongs + max_blobs + 2 + 1 {max_prongs + max_blobs + 2 + 1}"
             else:
                 assert event_features.shape[0] <= max_objects, f"Event features length {event_features.shape[0]} > max_objects {max_objects}"
-        data_nested.append(event_features)
-        data_nested_pos_and_timing.append(event_additional_info)
-        # assert that shapes are consistent (event_features.shape[0] == event_additional_info.shape[0])
+        # Pre-concatenate event features and additional info into single (n_particles, 10) array
+        event_combined = np.concatenate([event_features, event_additional_info], axis=1)
         assert event_features.shape[0] == event_additional_info.shape[0], f"Event features length {event_features.shape[0]} != event_additional_info length {event_additional_info.shape[0]}"
+        data_nested.append(event_combined)
+        # Energy sums per PID (2=blob, 3=prong(3), 4=prong(8), 5=prong(13), 6=agg_blob, 7=agg_prong), log(sum E + 1e-3)
+        E = np.exp(event_features[:, 3].astype(np.float64))
+        pid = event_features[:, 4].astype(np.int32)
+        energy_sums = np.zeros(6, dtype=np.float64)
+        for i, pid_val in enumerate([2, 3, 4, 5, 6, 7]):
+            energy_sums[i] = np.sum(E[pid == pid_val])
+        energy_sums_log_list.append(np.log(energy_sums + 1e-3).astype(np.float32))
+    energy_sums_log = np.array(energy_sums_log_list, dtype=np.float32)
+    global_features_out = np.concatenate([global_features, energy_sums_log], axis=1)
     data_nested = torch.nested.nested_tensor(data_nested, layout=torch.jagged)
-    data_nested_pos_and_timing = torch.nested.nested_tensor(data_nested_pos_and_timing, layout=torch.jagged)
-    torch.save({"data": data_nested, "data_additional_info": data_nested_pos_and_timing, "truth_labels": truth_labels, "global_features": global_features}, output_file)
+    # New format: single "data" tensor (n_particles, 10); no separate data_additional_info
+    torch.save({"data": data_nested, "truth_labels": truth_labels, "global_features": global_features_out}, output_file)
     print(f"✓ Nested tensor data written to {output_file} (total events: {N_events})")
     return N_events
 

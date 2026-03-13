@@ -161,14 +161,21 @@ class HEPTorchDataset(Dataset):
         self.files_n_events_sum = np.cumsum(self.files_n_events)
         self.files_values = [file["data"].values() for file in self.files]
         self.files_offsets = [file["data"].offsets() for file in self.files]
-        self.files_values_additional_info = [file["data_additional_info"].values() for file in self.files]
-        self.files_offsets_additional_info = [file["data_additional_info"].offsets() for file in self.files]
+        # data_feature_dim: 10 = new format (data already has features+additional_info concat), 5 = legacy (data + data_additional_info)
+        self.data_feature_dim = self.files_values[0].shape[1]
+        if "data_additional_info" in self.files[0]:
+            self.files_values_additional_info = [file["data_additional_info"].values() for file in self.files]
+            self.files_offsets_additional_info = [file["data_additional_info"].offsets() for file in self.files]
+        else:
+            self.files_values_additional_info = None
+            self.files_offsets_additional_info = None
         # truth_labels and global_features are regular tensors, not nested
         self.files_truth_labels = [file["truth_labels"] for file in self.files]
         # add a column with CC1orNPi labels
         if task.classification_CC1orNPi:
             self.files_truth_labels = [np.concatenate([file_truth_labels, get_Pi_labels_v2(file_truth_labels).reshape(-1, 1)], axis=1) for file_truth_labels in self.files_truth_labels]
         self.files_global_features = [file["global_features"] for file in self.files]
+        self.global_feature_dim = self.files_global_features[0].shape[1]
         self.nevts = int(nevts)
         self.max_particles = max_particles
         self.task = task
@@ -198,7 +205,6 @@ class HEPTorchDataset(Dataset):
         else:
             sample_idx = idx
         data = self.files_values[file_idx][self.files_offsets[file_idx][sample_idx]:self.files_offsets[file_idx][sample_idx+1]]
-        data_additional_info = self.files_values_additional_info[file_idx][self.files_offsets_additional_info[file_idx][sample_idx]:self.files_offsets_additional_info[file_idx][sample_idx+1]]
         valid_attention_mask = torch.ones(data.shape[0], dtype=data.dtype)
         sample = {}
 
@@ -225,15 +231,25 @@ class HEPTorchDataset(Dataset):
         
         if self.use_pid:
             sample["pid"] = data[:, self.pid_idx].int()
-        #sample["data_additional_info"] = data_additional_info # shape (N, 5)
-        if self.concat_additional_info:
-            sample["X"] = torch.cat([data, data_additional_info], dim=1)
+        if self.data_feature_dim == 10:
+            # New format: data is (n_particles, 10), cols 0-4 = features, 5-9 = additional_info
+            if self.concat_additional_info:
+                sample["X"] = data.float()
+            else:
+                sample["X"] = data[:, :5].float()
+                sample["add_info"] = data[:, 5:10].float()
         else:
-            sample["X"] = data.float()
-            sample["add_info"] = data_additional_info.float()
+            # Legacy: data (5 cols) + data_additional_info (5 cols)
+            data_additional_info = self.files_values_additional_info[file_idx][self.files_offsets_additional_info[file_idx][sample_idx]:self.files_offsets_additional_info[file_idx][sample_idx+1]]
+            if self.concat_additional_info:
+                sample["X"] = torch.cat([data, data_additional_info], dim=1)
+            else:
+                sample["X"] = data.float()
+                sample["add_info"] = data_additional_info.float()
         sample["attention_mask"] = valid_attention_mask
 
-        if self.use_energy_sums:
+        if self.use_energy_sums and self.global_feature_dim == 4:
+            # Legacy: 4-col global_features; compute energy sums on-the-fly (cols 0-4 are features in both formats)
             pid = data[:, self.pid_idx]
             E = torch.exp(data[:, 3])  # index 3 is log(E + 1e-6)
             # PID 2=blob, 3=prong(3), 4=prong(8), 5=prong(13), 6=agg_blob, 7=agg_prong
@@ -242,6 +258,7 @@ class HEPTorchDataset(Dataset):
                 mask = pid == pid_val
                 energy_sums[i] = E[mask].sum()
             sample["energy_sums"] = energy_sums
+        # When global_feature_dim == 10, cond already includes the 6 log(energy_sum+1e-3) columns
 
         return sample
 
