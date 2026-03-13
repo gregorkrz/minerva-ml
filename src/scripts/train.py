@@ -3,7 +3,7 @@ Training script for PointGlobalMixedViT or OmniLearned on HEP data.
 
 # Energy regression training:
 ## ViT-like transformer training:
-python -m src.scripts.train -bs 10 --mode regression -E-available-no-muon -name DEBUG --d_model 64 --depth 4 --n_heads 4  --max_steps 250000 [-cap {data_cap} -seed-event-sampler {seed} --seed {seed}]
+python -m src.scripts.train -bs 10 --mode regression -E-available-no-muon -name DEBUG --d_model 128 --depth 4 --n_heads 8  --max_steps 250000 [-cap {data_cap} -seed-event-sampler {seed} --seed {seed}]
 
 
 ## OmniLearned Small training:
@@ -17,7 +17,7 @@ python -m src.scripts.train -bs 10 --mode regression -E-available-no-muon -name 
 
 # Event Classification training:
 ## ViT-like transformer training:
-python -m src.scripts.train -bs 10 --mode classifier -npi2 -name DEBUG --d_model 64 --depth 4 --n_heads 4  --max_steps 100000 [-cap {data_cap} -seed-event-sampler {seed} --seed {seed}]
+python -m src.scripts.train -bs 10 --mode classifier -npi2 -name DEB    UG --d_model 64 --depth 4 --n_heads 4  --max_steps 100000 [-cap {data_cap} -seed-event-sampler {seed} --seed {seed}]
 
 ## OmniLearned Small training:
 python -m src.scripts.train -bs 10 --mode classifier -npi2 -name DEBUG --max_steps 100000 --use-omnilearned small --use-pretrained pretrain_s [-cap {data_cap} -seed-event-sampler {seed} --seed {seed}]
@@ -46,6 +46,8 @@ from src.dataset.dataloader import load_data, Task
 from src.models.vit import PointGlobalMixedViT, PointGlobalMixedViTConfig
 from src.models.omnilearned import PET2, get_model_parameters, load_pretrained_omnilearned
 
+# print CUDA_VISIBLE_DEVICES
+print(f"CUDA_VISIBLE_DEVICES: {os.environ.get('CUDA_VISIBLE_DEVICES')}")
 
 class ResidualBlock(nn.Module):
     def __init__(self, dim, dropout=0.1):
@@ -88,18 +90,17 @@ class CondOnlyMLP(nn.Module):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train PointGlobalMixedViT on HEP data")
-    
     # Data arguments
     parser.add_argument("--dataset_name", type=str, default="minerva_1A", 
                         help="Dataset name (e.g., minerva_1A)")
     parser.add_argument("--data_path", type=str,
                         help="Path to dataset directory",
-                        default="/global/cfs/cdirs/m3246/gregork/Minerva/20260227_100Blobs_v1_split")
+                        default="/global/cfs/cdirs/m3246/gregork/Minerva/20260311")
     parser.add_argument("--batch_size", "-bs", type=int, default=2048,
                         help="Batch size for training")
     parser.add_argument("--num_workers", type=int, default=8,
                         help="Number of dataloader workers")
-    parser.add_argument("--max_particles", type=int, default=113,
+    parser.add_argument("--max_particles", type=int, default=33,
                         help="Maximum number of particles per event")
     # Model arguments
     parser.add_argument("--mode", type=str, default="regression", 
@@ -168,6 +169,8 @@ def parse_args():
                         help="Use automatic mixed precision")
     parser.add_argument("--max_samples_per_epoch", type=int, default=None,
                         help="Maximum number of samples to use per epoch")
+    parser.add_argument("--grad_accum_steps", type=int, default=1,
+                        help="Number of gradient accumulation steps (virtual batch size = batch_size * grad_accum_steps)")
     # Logging and evaluation
     parser.add_argument("--log_interval", type=int, default=1000,
                         help="Log training loss every N steps")
@@ -177,8 +180,8 @@ def parse_args():
                         help="Save checkpoint every N steps")
     parser.add_argument("--wandb_project", type=str, default="minerva-models",
                         help="Wandb project name")
-    parser.add_argument("--run_name", "-name", type=str, required=True,
-                        help="Name for this training run (timestamp will be appended)")
+    parser.add_argument("--run_name", "-name", type=str, default=None,
+                        help="Name for this training run (timestamp will be appended); not required when --calculate-flops")
     parser.add_argument("--output_dir", type=str, default="/global/cfs/cdirs/m3246/gregork/checkpoints",
                         help="Base output directory for checkpoints (run_name with timestamp will be appended)")
     parser.add_argument("--log1p_loss", type=bool, default=True, help="Use log1p loss")
@@ -217,6 +220,8 @@ def parse_args():
     parser.add_argument("--ol-interaction-type", type=str, default="lhc",
                         choices=["lhc", "astro"],
                         help="Interaction type for PET2")
+    parser.add_argument("--calculate-flops", action="store_true",
+                        help="Only compute FLOPs per batch (inference and approx training) then exit")
     return parser.parse_args()
 
 
@@ -406,6 +411,104 @@ def prepare_batch_omnilearned(batch, device, use_cond=False, use_pid=False, pid_
         add_info = batch["add_info"].to(device, dtype=torch.float32)
 
     return {"X": X, "y": y, "cond": cond, "pid": pid, "add_info": add_info}
+
+
+class _FlopsWrapper(nn.Module):
+    """Thin wrapper so calflops can run one forward with fixed inputs."""
+    def __init__(self, model, args, inputs):
+        super().__init__()
+        self.model = model
+        self.args = args
+        self._inputs = inputs
+
+    def forward(self, _dummy=None):
+        return forward_model(self.model, self._inputs, self.args)
+
+
+def _make_dummy_batch(args, device):
+    """Build a minimal batch dict with shape (batch_size, max_particles, ...) for FLOPs."""
+    B = args.batch_size
+    N = args.max_particles
+    use_cond = not getattr(args, "no_use_cond", False)
+    if getattr(args, "cond_only", False):
+        use_cond = True
+    e_sum_dim = 6 if getattr(args, "include_E_sum", True) else 0
+    global_cont_dim = (4 if use_cond else 0) + e_sum_dim
+    point_cont_dim = getattr(args, "point_cont_dim", 9)
+    coord_dim = getattr(args, "coord_dim", 2)
+    pid_idx = getattr(args, "pid_idx", 4)
+    use_pid = getattr(args, "use_pid", True)
+    # OmniLearned expects X with last dim = ol_num_feat (4) after prepare_batch_omnilearned drops PID.
+    # ViT expects point_cont with last dim = point_cont_dim (9) after prepare_batch drops PID.
+    if getattr(args, "use_omnilearned", None):
+        ol_num_feat = getattr(args, "ol_num_feat", 4)
+        total_feat_dim = ol_num_feat + (1 if use_pid else 0)
+    else:
+        total_feat_dim = point_cont_dim + (1 if use_pid else 0)
+    X = torch.zeros(B, N, total_feat_dim, device=device, dtype=torch.float32)
+    if args.mode == "regression":
+        y = torch.zeros(B, device=device, dtype=torch.float32)
+    else:
+        y = torch.zeros(B, device=device, dtype=torch.long)
+    attention_mask = torch.ones(B, N, device=device, dtype=torch.float32)
+    batch = {"X": X, "y": y, "attention_mask": attention_mask}
+    if use_cond and global_cont_dim > 0:
+        batch["cond"] = torch.zeros(B, 4, device=device, dtype=torch.float32)
+    if e_sum_dim > 0:
+        batch["energy_sums"] = torch.ones(B, 6, device=device, dtype=torch.float32)
+    if getattr(args, "use_omnilearned", None):
+        batch["pid"] = torch.zeros(B, N, device=device, dtype=torch.long)
+        batch["add_info"] = torch.zeros(B, N, getattr(args, "ol_num_add", 5), device=device, dtype=torch.float32)
+    return batch
+
+
+def run_calculate_flops(args):
+    """Use calflops to compute inference FLOPs per batch and approx training FLOPs, then exit."""
+    try:
+        from calflops import calculate_flops
+    except ImportError:
+        raise SystemExit("calflops is required for --calculate-flops. Install with: pip install calflops")
+
+    args.use_cond = not args.no_use_cond
+    if args.cond_only:
+        args.use_cond = True
+    device = torch.device("cpu")
+    task = create_task(args)
+    if args.use_omnilearned:
+        model = create_omnilearned_model(args, task)
+    else:
+        model = create_model(args, task)
+    model = model.to(device)
+    model.eval()
+
+    dummy_batch = _make_dummy_batch(args, device)
+    if args.use_omnilearned:
+        inputs = prepare_batch_omnilearned(
+            dummy_batch, device, args.use_cond, args.use_pid, args.pid_idx,
+            include_E_sum=args.include_E_sum,
+        )
+    else:
+        inputs = prepare_batch(
+            dummy_batch, device, args.use_cond, args.use_pid, args.coord_dim, args.pid_idx,
+            include_E_sum=args.include_E_sum, zero_cond_feature=args.zero_cond_feature,
+        )
+
+    wrapper = _FlopsWrapper(model, args, inputs)
+    wrapper.eval()
+    # One dummy input so calflops runs wrapper.forward(dummy); FLOPs come from the real model inside
+    flops, macs, params = calculate_flops(
+        model=wrapper,
+        input_shape=(1,),
+        output_as_string=False,
+    )
+    # flops is total for one forward (inference) with the given batch size
+    inference_flops = flops
+    training_flops_approx = flops * 3
+    print(f"Batch size: {args.batch_size}, max_particles: {args.max_particles}")
+    print(f"Inference FLOPs per batch: {inference_flops:,}")
+    print(f"Training FLOPs per batch (approx, ×3): {training_flops_approx:,}")
+    print(f"Params: {params:,}")
+    raise SystemExit(0)
 
 
 def forward_model(model, inputs, args):
@@ -738,7 +841,8 @@ def train(args):
     print("Starting training...")
     model.train()
     
-    step = start_step
+    step = start_step  # counts optimizer steps (after grad accumulation)
+    accum_counter = 0  # counts micro-batches since last optimizer step
     train_losses = []
     data_fetch_times = []
     backprop_times = []
@@ -778,10 +882,11 @@ def train(args):
         del diag_batch, diag_inputs, gc, y
 
     print(f"Steps per epoch: {steps_per_epoch}")
-    print(f"Training for {args.max_steps} steps")
+    print(f"Training for {args.max_steps} optimizer steps (grad_accum_steps={args.grad_accum_steps})")
     epoch = 0
     done = False
 
+    optimizer.zero_grad()
     while not done:
         epoch_pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}", leave=True)
         iter_end_time = time.perf_counter()
@@ -797,8 +902,6 @@ def train(args):
                 inputs = prepare_batch(batch, device, args.use_cond, args.use_pid, args.coord_dim, args.pid_idx, include_E_sum=args.include_E_sum, zero_cond_feature=args.zero_cond_feature)
 
             # Forward pass
-            optimizer.zero_grad()
-
             with autocast(enabled=args.use_amp):
                 logits = forward_model(model, inputs, args)
 
@@ -810,25 +913,37 @@ def train(args):
                 else:
                     loss = criterion(logits, inputs["y"])
 
+            # Normalize loss for gradient accumulation
+            loss = loss / args.grad_accum_steps
+
             # Backward pass
             backprop_start_time = time.perf_counter()
             if scaler is not None:
                 scaler.scale(loss).backward()
-                scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
-                scaler.step(optimizer)
-                scaler.update()
             else:
                 loss.backward()
-                torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
-                optimizer.step()
+            accum_counter += 1
+
+            # Only step optimizer after grad_accum_steps micro-batches
+            performed_step = False
+            if accum_counter % args.grad_accum_steps == 0:
+                if scaler is not None:
+                    scaler.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
+                    optimizer.step()
+                optimizer.zero_grad()
+                scheduler.step()
+                step += 1
+                performed_step = True
+
             backprop_times.append(time.perf_counter() - backprop_start_time)
 
-            scheduler.step()
-
             # Track loss
-            train_losses.append(loss.item())
-            step += 1
+            train_losses.append(loss.item() * args.grad_accum_steps)
 
             # Update progress bar with current metrics
             current_lr = scheduler.get_last_lr()[0]
@@ -838,8 +953,8 @@ def train(args):
                 "step": f"{step}/{args.max_steps}",
             })
 
-            # Log training loss
-            if step % args.log_interval == 0:
+            # Log training loss (on optimizer steps)
+            if performed_step and step % args.log_interval == 0:
                 avg_train_loss = np.mean(train_losses)
                 log_dict = {
                     "train_loss": avg_train_loss,
@@ -859,7 +974,7 @@ def train(args):
             iter_end_time = time.perf_counter()
 
             # Evaluation
-            if step % args.eval_interval == 0 or step == 1:
+            if performed_step and (step % args.eval_interval == 0 or step == 1):
                 epoch_pbar.write(f"\nRunning evaluation at step {step}...")
                 eval_metrics = evaluate(model, val_loader, device, args, torch.tensor(task.class_weights, device=device, dtype=torch.float32) if task.type == "classifier" else None, args.use_amp, step)
 
@@ -894,6 +1009,11 @@ def train(args):
 
 def main():
     args = parse_args()
+    if args.calculate_flops:
+        run_calculate_flops(args)
+        return
+    if args.run_name is None:
+        raise SystemExit("--run_name / -name is required unless --calculate-flops is set")
     train(args)
 
 

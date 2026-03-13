@@ -182,19 +182,15 @@ def print_summary(all_results):
     print("\n" + "=" * 80)
     print("PROCESSING SUMMARY")
     print("=" * 80)
-    
     total_files = 0
     total_success = 0
-    total_failed = 0
-    
+    total_failed = 0    
     for playlist in sorted(all_results.keys()):
         result = all_results[playlist]
         _, num_success, num_failed, errors = result
-        
         total_files += (num_success + num_failed)
         total_success += num_success
         total_failed += num_failed
-        
         status = "✓" if num_failed == 0 else "✗"
         print(f"{status} {playlist}: {num_success}/{num_success + num_failed} files succeeded")
         
@@ -209,7 +205,6 @@ def print_summary(all_results):
     print(f"TOTAL: {total_success}/{total_files} files succeeded, {total_failed} failed")
     print("=" * 80)
 
-# python -m src.scripts.preprocess_dataset --output-dir /data/Minerva/20260127_nested --max-workers 1 --max-workers-per-playlist 10 --playlists 1A
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Process MINERvA ROOT files to HDF5 format")
@@ -221,8 +216,8 @@ if __name__ == "__main__":
     parser.add_argument("--playlists", nargs="+", default=None, help="Specific playlists to process (default: all)")
     parser.add_argument("--use-max-blobs-and-prongs", action="store_true", default=False,
                         help="Use max_blobs and max_prongs to aggregate blobs and prongs into a special token.")
-    parser.add_argument("--max-blobs", type=int, default=20,
-                        help="Maximum number of blobs to process (default: 20)")
+    parser.add_argument("--max-blobs", type=int, default=100,
+                        help="Maximum number of blobs to process (default: 100)")
     parser.add_argument("--max-prongs", type=int, default=10,
                         help="Maximum number of prongs to process (default: 10)")
     parser.add_argument("--max-objects", type=int, default=150,

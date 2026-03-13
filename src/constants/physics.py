@@ -1,4 +1,4 @@
-# Storage of physics constants, such as masses, PDG IDs, etc.
+# Storage of constants such as particle masses, PDG IDs, etc.
 
 # PDG particle masses (MeV)
 pdg_masses = {
@@ -30,7 +30,7 @@ pdg_total_energy_no_muon = {22, 11, -11, 111, -111, 211, -211, 321, -321}
 # PDG IDs: muons
 pdg_muons = {13, -13}
 
-
+# PDG IDs of commonly used particles
 NEUTRAL_PION_PDG_ID = 111
 PI_PLUS_PDG_ID = 211
 PI_MINUS_PDG_ID = -211

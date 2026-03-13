@@ -21,15 +21,45 @@ echo "Time:  $(date)"
 echo "CWD:   $(pwd)"
 echo "======================================"
 
-# ---- Environment ----
-module load conda
-conda activate omni
+# ---- Container configuration ----
+IMAGE="docker.io/gkrz/minerva_ml:v0"
+NAME="minerva_ml"
+WORKSPACE="$HOME"
 
-# Verify GPU is available
+
+CONTAINER_CMD=$(cat << 'EOF'
+set -euo pipefail
+export CUDA_VISIBLE_DEVICES=0
+cd /workspace/minerva-data-processing
+
+# Verify GPU is available inside the container
 nvidia-smi
+# Environment variables
+{env_vars}
 
-{env_commands}
+# User commands
 
 {commands}
+EOF
+)
+
+if podman-hpc container exists "$NAME"; then
+    echo "🔁 Container $NAME already exists."
+    if [ "$(podman-hpc inspect -f '{{.State.Running}}' "$NAME")" != "true" ]; then
+        echo "▶️  Starting container..."
+        podman-hpc start "$NAME"
+    fi
+else
+    echo "🚀 Creating new container $NAME ..."
+    podman-hpc run -d --name "$NAME" --shm-size=16g --gpu \
+        -e CUDA_VISIBLE_DEVICES \
+        -v "${{WORKSPACE}}:/workspace" \
+        -v /global/cfs/cdirs/m3246/gregork:/global/cfs/cdirs/m3246/gregork \
+        -v /pscratch/sd/g/gregork:/pscratch/sd/g/gregork \
+        "$IMAGE" tail -f /dev/null
+fi
+
+echo "▶️ Executing job commands in container ..."
+podman-hpc exec -e CUDA_VISIBLE_DEVICES "$NAME" bash -c "$CONTAINER_CMD"
 
 """

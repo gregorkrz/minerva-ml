@@ -412,12 +412,13 @@ def get_global_features(master_ana_dev):
     E_recoil_CCinc = master_ana_dev["MasterAnaDev_hadron_recoil_CCInc"].array().to_numpy()
     E_recoil[E_recoil < 0] = 0
     E_recoil_CCinc[E_recoil_CCinc < 0] = 0
-    # stack them together, so that the shape is (n_events, 4)
-    global_features = np.stack([muon_fuzz_energy, muon_iso_blobs_energy, E_recoil, E_recoil_CCinc], axis=1)
-    # compute log10 of the global features + 1e-5 and store that
+    # Stack them together, so that the shape is (n_events, 4)
+    N_michel = master_ana_dev["improved_nmichel"].array().to_numpy()
+    global_features = np.stack([muon_fuzz_energy, muon_iso_blobs_energy, E_recoil], axis=1)
+    # Compute log10 of the global features + 1e-5 and store that
     global_features = np.log(global_features + 1e-5)
-    return global_features
-
+    # concat n michels to global features
+    return np.concatenate([global_features, N_michel[:,np.newaxis]], axis=1)
 
 def get_n_pions_label(mc_current, mc_part):
     # CC n Pi label
