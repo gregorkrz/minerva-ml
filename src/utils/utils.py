@@ -65,3 +65,32 @@ def get_runs_by_model_and_cap(
             result[model][cap].append(name)
 
     return {model: dict(caps) for model, caps in result.items()}
+
+def get_classification_runs_by_model_and_cap(
+    tag: str, project: str = "minerva-models"
+) -> dict[str, dict[int, list[str]]]:
+    """
+    Build a dict: model_name -> {dataset_cap -> [run_names]}.
+
+    Run name formats (from submit_train_jobs):
+      - OLS:         Run_1203_OLS_classifier_<cap>_seed...
+      - Transformer: Run_1203_classifier_Transformer1_data_cap_<cap>_seed_...
+    dataset_cap is -1 for full 6M dataset, or a positive int for smaller caps.
+    """
+    run_names = fetch_runs_from_wandb(tag, project)
+    # model_name -> dataset_cap -> list of run names
+    result = defaultdict(lambda: defaultdict(list))
+
+    for name in run_names:
+        model, cap = None, None
+        m = re.search(r"_OLS_classifier_(-?\d+)_", name)
+        if m:
+            model, cap = "OLS", int(m.group(1))
+        if model is None:
+            m = re.search(r"_classifier_(Transformer\d+)_data_cap_(-?\d+)_", name)
+            if m:
+                model, cap = m.group(1), int(m.group(2))
+        if model is not None:
+            result[model][cap].append(name)
+
+    return {model: dict(caps) for model, caps in result.items()}
