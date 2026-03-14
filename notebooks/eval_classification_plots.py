@@ -241,6 +241,8 @@ def get_signal_probabilities(
     y_true = np.array([1 if x in signal_set else 0 for x in pid])
     probs = result[playlist]["prediction"]
     y_pred = sum(probs[:, c] for c in signal_classes)
+    # convert nans in y_pred to 0
+    y_pred = np.nan_to_num(y_pred, 0.0)
     return {"ytrue": y_true, "ypred": y_pred}
 
 
@@ -265,6 +267,15 @@ def bin_separation_metrics(
     eval_mask = sig_in_bin | is_background
     y_eval = y_true[eval_mask]
     p_eval = probs[eval_mask]
+
+    # Skip NaNs (sklearn does not accept them)
+    valid = ~(np.isnan(y_eval) | np.isnan(p_eval))
+    y_eval = y_eval[valid]
+    p_eval = p_eval[valid]
+    n_sig = (y_eval == 1).sum()
+    n_bg = (y_eval == 0).sum()
+    if n_sig == 0 or n_bg == 0:
+        return None
 
     prec, rec, _ = precision_recall_curve(y_eval, p_eval)
     auprc_val = auc(rec, prec)
@@ -361,6 +372,9 @@ def compute_binned_metrics_q3(
             bm = bm & event_mask
         y_bin = y_true[bm]
         p_bin = probs[bm]
+        valid = ~(np.isnan(y_bin) | np.isnan(p_bin))
+        y_bin = y_bin[valid]
+        p_bin = p_bin[valid]
         n_sig = (y_bin == 1).sum()
         n_bg = (y_bin == 0).sum()
         if n_sig == 0 or n_bg == 0:

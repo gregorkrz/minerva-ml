@@ -75,7 +75,7 @@ def get_cmds_and_slurm_times():
     return cmds, slurm_times
 
 def get_cmds_and_slurm_times_continue():
-    to_resume = ["Run_1203_OLS_RW_regression_-1_seed42_20260312_211002"]
+    to_resume = ["Run_1203_OLS_RW_classifier_-1_seed42_20260313_011017"]
     CKPT_DIR = "/global/cfs/cdirs/m3246/gregork/checkpoints"
     cmds = []
     slurm_times = []
