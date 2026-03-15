@@ -20,7 +20,7 @@ def generate_cmd(data_cap=-1, seed=42, task="regression", model="Transformer1", 
     if continue_from:
         base = "python -m src.scripts.train --resume {continue_from}"
         return base.format(continue_from=continue_from)
-    base = "python -m src.scripts.train -bs {bs} --mode {task} {detailed_task} -name {name} --d_model 128 --depth 4 --n_heads 8 --dropout 0.0 --attn_dropout 0.0 {cap} --seed {seed} -seed-event-sampler {seed}  --max_steps {max_steps} --grad_accum_steps {grad_accum_steps} {extra}"
+    base = "python -m src.scripts.train -bs {bs} --mode {task} {detailed_task} -name {name} --d_model 128 --depth 4 --n_heads 8 --dropout 0.0 --attn_dropout 0.0 {cap} --seed {seed} -seed-event-sampler {seed}  --max_steps {max_steps} --grad_accum_steps {grad_accum_steps} {extra} --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260313"
     # Model options: "Transformer1", "OLS" (OmniLearned Small), "OLS_RW" (OLS Random Weights)
     # Seed both the event sampler and the whole training with seed
     detailed_task = "-E-available-no-muon" if task == "regression" else "-npi2"
@@ -46,8 +46,8 @@ def get_cmds_and_slurm_times():
     cmds = []
     slurm_times = []
 
-    for seed in [42]:
-        for data_cap in [20000, 50000, 100000, 200000]:
+    for seed in [43, 44, 45]:
+        for data_cap in [-1]:
             for task in ["regression", "classifier"]:
                 for model in ["OLS", "OLS_RW", "Transformer1"]: #["Transformer1", "OLS", "OLS_RW", "OLM"]:
                     if "OL" in model:
@@ -56,9 +56,9 @@ def get_cmds_and_slurm_times():
                         if "OLM" in model:
                             bs = 512
                             grad_accum_steps = 4
-                            slurm_times.append("30:00:00")
+                            slurm_times.append("15:00:00")
                         else:
-                            slurm_times.append("10:00:00")
+                            slurm_times.append("12:00:00")
                     else:
                         bs = 2048
                         grad_accum_steps = 1
@@ -86,28 +86,30 @@ def get_cmds_and_slurm_times_continue():
         slurm_times.append("05:00:00")
     return cmds, slurm_times
 
-cmds, slurm_times = get_cmds_and_slurm_times_continue()
+
+if __name__ == "__main__":
+    cmds, slurm_times = get_cmds_and_slurm_times()
 
 
-for i, cmd in enumerate(cmds):
-    job_name = f"run_{i}_{dt.now().strftime('%Y%m%d_%H%M%S')}"
-    log_dir = f"/global/cfs/cdirs/m3246/gregork/Minerva/logs/run_100326/{job_name}.log"
-    error_dir = f"/global/cfs/cdirs/m3246/gregork/Minerva/logs/run_100326/{job_name}.error.log"
-    slurm_file = f"/global/cfs/cdirs/m3246/gregork/Minerva/slurm/run_100326/{job_name}.slurm"
-    os.makedirs(os.path.dirname(slurm_file), exist_ok=True)
-    os.makedirs(os.path.dirname(log_dir), exist_ok=True)
-    with open(slurm_file, "w") as f:
-        f.write(SLURM_TEMPLATE_GPU.format(
-            queue_name="shared",
-            time=slurm_times[i],
-            cpus_per_task=32,
-            gpus_per_node=1,
-            job_name=job_name,
-            log_dir=log_dir,
-            error_dir=error_dir,
-            commands=cmd,
-            env_vars=get_env_vars(),
-            ))
-    print(f"Saved slurm file to {slurm_file}")
-    os.system(f"sbatch {slurm_file}")
-    print("Job submitted")
+    for i, cmd in enumerate(cmds):
+        job_name = f"run_{i}_{dt.now().strftime('%Y%m%d_%H%M%S')}"
+        log_dir = f"/global/cfs/cdirs/m3246/gregork/Minerva/logs/run_100326/{job_name}.log"
+        error_dir = f"/global/cfs/cdirs/m3246/gregork/Minerva/logs/run_100326/{job_name}.error.log"
+        slurm_file = f"/global/cfs/cdirs/m3246/gregork/Minerva/slurm/run_100326/{job_name}.slurm"
+        os.makedirs(os.path.dirname(slurm_file), exist_ok=True)
+        os.makedirs(os.path.dirname(log_dir), exist_ok=True)
+        with open(slurm_file, "w") as f:
+            f.write(SLURM_TEMPLATE_GPU.format(
+                queue_name="shared",
+                time=slurm_times[i],
+                cpus_per_task=32,
+                gpus_per_node=1,
+                job_name=job_name,
+                log_dir=log_dir,
+                error_dir=error_dir,
+                commands=cmd,
+                env_vars=get_env_vars(),
+                ))
+        print(f"Saved slurm file to {slurm_file}")
+        os.system(f"sbatch {slurm_file}")
+        print("Job submitted")

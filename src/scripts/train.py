@@ -200,6 +200,8 @@ def parse_args():
                         help="Random seed")
     parser.add_argument("--resume", type=str, default=None,
                         help="Path to checkpoint to resume from")
+    parser.add_argument("--resume-run-id", type=str, default=None,
+                        help="Wandb run id to resume (for logging). If not set when resuming, uses id saved in checkpoint.")
     parser.add_argument("--no_wandb", action="store_true",
                         help="Disable wandb logging")
     parser.add_argument("--optimizer", type=str, default="adamw",
@@ -692,7 +694,8 @@ def save_checkpoint(model, optimizer, scheduler, scaler, step, args, best_val_lo
         "scaler_state_dict": scaler.state_dict() if scaler is not None else None,
         "step": step,
         "args": vars(args),
-        "best_val_loss": best_val_loss
+        "best_val_loss": best_val_loss,
+        "wandb_run_id": wandb.run.id if wandb.run else None,
     }
     save_path = os.path.join(args.output_dir, filename)
     torch.save(checkpoint, save_path)
@@ -702,7 +705,7 @@ def save_checkpoint(model, optimizer, scheduler, scaler, step, args, best_val_lo
 
 def load_checkpoint(checkpoint_path, model, optimizer=None, scheduler=None, scaler=None):
     """Load checkpoint."""
-    checkpoint = torch.load(checkpoint_path, map_location="cpu")
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     model.load_state_dict(checkpoint["model_state_dict"])
     
     if optimizer is not None and "optimizer_state_dict" in checkpoint:
@@ -733,15 +736,17 @@ def train(args):
     # If resuming, load saved arguments from the checkpoint and override current ones,
     # so that training continues with the exact same configuration as the original run.
     if args.resume:
-        checkpoint = torch.load(args.resume, map_location="cpu")
+        checkpoint = torch.load(args.resume, map_location="cpu", weights_only=False)
         saved_args = checkpoint.get("args", None)
         if saved_args is not None:
-            # Preserve explicitly provided CLI controls like --resume and --no_wandb.
-            preserve_keys = {"resume", "no_wandb"}
+            # Preserve explicitly provided CLI controls like --resume, --no_wandb, --resume-run-id, --max_steps.
+            preserve_keys = {"resume", "no_wandb", "resume_run_id", "max_steps"}
             for k, v in saved_args.items():
                 if k in preserve_keys:
                     continue
                 setattr(args, k, v)
+        # Use wandb run id from checkpoint for resuming logging (unless --resume-run-id is set).
+        args.wandb_run_id = checkpoint.get("wandb_run_id")
         print(f"Loaded training configuration from checkpoint: {args.resume}")
 
     # Determine run name and output directory
@@ -871,13 +876,19 @@ def train(args):
     # Initialize wandb
     if not args.no_wandb:
         wandb.login()
-        wandb.init(
-            project=args.wandb_project,
-            name=run_name_with_timestamp,
-            config=vars(args),
-            # Always resume the wandb run when a checkpoint path is provided.
-            resume="allow" if args.resume else None,
-        )
+        init_kw = {
+            "project": args.wandb_project,
+            "name": run_name_with_timestamp,
+            "config": vars(args),
+        }
+        if args.resume:
+            wandb_id = args.resume_run_id or getattr(args, "wandb_run_id", None)
+            if wandb_id:
+                init_kw["id"] = wandb_id
+                init_kw["resume"] = "allow"
+            else:
+                init_kw["resume"] = "allow"
+        wandb.init(**init_kw)
         wandb.watch(model, log="all", log_freq=args.log_interval)
     
     # Training loop

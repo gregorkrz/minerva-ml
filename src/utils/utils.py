@@ -37,12 +37,12 @@ def get_runs_by_model_and_cap(
       - OLS:    Run_1203_OLS_regression_<cap>_seed...
       - OLM:    Run_1203_OLM_regression_<cap>_seed...
       - Transformer: Run_1203_regression_Transformer1_data_cap_<cap>_seed_...
+      - MLP: Run_cond_only_full_seed<SEED>_...
     dataset_cap is -1 for full 6M dataset, or a positive int for smaller caps.
     """
     run_names = fetch_runs_from_wandb(tag, project)
     # model_name -> dataset_cap -> list of run names
     result = defaultdict(lambda: defaultdict(list))
-
     for name in run_names:
         model, cap = None, None
         # Match OLS_RW before OLS
@@ -61,9 +61,12 @@ def get_runs_by_model_and_cap(
             m = re.search(r"_regression_(Transformer\d+)_data_cap_(-?\d+)_", name)
             if m:
                 model, cap = m.group(1), int(m.group(2))
+        if model is None:
+            m = re.search(r"_cond_only_full_seed(-?\d+)_", name)
+            if m:
+                model, cap = "MLP", -1
         if model is not None:
             result[model][cap].append(name)
-
     return {model: dict(caps) for model, caps in result.items()}
 
 def get_classification_runs_by_model_and_cap(

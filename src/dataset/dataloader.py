@@ -27,58 +27,54 @@ class Task:
     regress_E_available: bool = field(default=False) # If True, it will regress the available energy of the event
     regress_E_available_no_muon: bool = field(default=False) # If True, it will regress the available energy of the event, without the muon energy
     
+def _pad_or_truncate(tensor, target_len):
+    if tensor.shape[0] == target_len:
+        return tensor
+    if tensor.shape[0] > target_len:
+        return tensor[:target_len]
+    pad_shape = (target_len - tensor.shape[0],) + tuple(tensor.shape[1:])
+    return torch.cat([tensor, tensor.new_zeros(pad_shape)], dim=0)
+
+
 def collate_point_cloud(batch, max_particles=33):
     """
     Collate function for point clouds and labels with truncation performed per batch.
-
-    Args:
-        batch (list of dicts): Each element is a dictionary with keys:
-            - "X" (Tensor): Point cloud of shape (N, F)
-            - "y" (Tensor): Label tensor
-            - "cond" (optional, Tensor): Conditional info
-            - "pid" (optional, Tensor): Particle IDs
-            - "add_info" (optional, Tensor): Extra features
-
-    Returns:
-        Dict[str, torch.Tensor]: Dictionary containing collated tensors:
-            - "X": (B, M, F) Truncated point clouds
-            - "y": (B, num_classes)
-            - "cond", "pid", "add_info" (optional, shape (B, M, ...))
     """
-    def _pad_or_truncate(tensor, target_len):
-        if tensor.shape[0] == target_len:
-            return tensor
-        if tensor.shape[0] > target_len:
-            return tensor[:target_len]
-        pad_shape = (target_len - tensor.shape[0],) + tuple(tensor.shape[1:])
-        padding = tensor.new_zeros(pad_shape)
-        return torch.cat([tensor, padding], dim=0)
-    batch_X = [_pad_or_truncate(item["X"], max_particles) for item in batch]
-    batch_y = [item["y"] for item in batch]
-    batch_attention_mask = [_pad_or_truncate(item["attention_mask"], max_particles) for item in batch]
-    #batch_additional_info = [_pad_or_truncate(item["data_additional_info"], max_particles) for item in batch]
-    point_clouds = torch.stack(batch_X)  # (B, M, F)
-    labels = torch.stack(batch_y)  # (B, num_classes)
-    attention_masks = torch.stack(batch_attention_mask)  # (B, M)
-    #additional_info = torch.stack(batch_additional_info) # (B, M, 5)
-    result = {"X": point_clouds, "y": labels, "attention_mask": attention_masks}#, "data_additional_info": additional_info}
+    B = len(batch)
+    # Fast path: all samples already have exactly max_particles (no pad/truncate)
+    first_X = batch[0]["X"]
+    if all(item["X"].shape[0] == max_particles for item in batch):
+        point_clouds = torch.stack([item["X"] for item in batch])
+        attention_masks = torch.stack([item["attention_mask"] for item in batch])
+    else:
+        point_clouds = torch.stack(
+            [_pad_or_truncate(item["X"], max_particles) for item in batch]
+        )
+        attention_masks = torch.stack(
+            [_pad_or_truncate(item["attention_mask"], max_particles) for item in batch]
+        )
+    labels = torch.stack([item["y"] for item in batch])
+    result = {"X": point_clouds, "y": labels, "attention_mask": attention_masks}
 
-    # Handle optional fields in a loop to reduce code duplication
+    # Optional fields: only stack if present in all items
     optional_fields = ["cond", "pid", "add_info", "data_pid", "vertex_pid", "energy_sums"]
     for field in optional_fields:
-        if all(field in item and item[field] is not None for item in batch):
-            values = [item[field] for item in batch]
-            # Pad per-particle optional tensors to max_particles before stacking.
-            is_particle_aligned = all(
-                torch.is_tensor(v) and v.dim() >= 1 and v.shape[0] == batch[i]["X"].shape[0]
+        if not all(field in item and item[field] is not None for item in batch):
+            result[field] = None
+            continue
+        values = [item[field] for item in batch]
+        v0 = values[0]
+        need_pad = (
+            torch.is_tensor(v0)
+            and v0.dim() >= 1
+            and all(
+                torch.is_tensor(v) and v.shape[0] == batch[i]["X"].shape[0]
                 for i, v in enumerate(values)
             )
-            if is_particle_aligned:
-                values = [_pad_or_truncate(v, max_particles) for v in values]
-            stacked = torch.stack(values)
-            result[field] = stacked
-        else:
-            result[field] = None
+        )
+        if need_pad:
+            values = [_pad_or_truncate(v, max_particles) for v in values]
+        result[field] = torch.stack(values)
     return result
 
 def get_class_counts(class_idx, label_idx_to_class_idx, files_truth_labels, truth_labels_idx):
@@ -176,9 +172,17 @@ class HEPTorchDataset(Dataset):
             self.files_truth_labels = [np.concatenate([file_truth_labels, get_Pi_labels_v2(file_truth_labels).reshape(-1, 1)], axis=1) for file_truth_labels in self.files_truth_labels]
         self.files_global_features = [file["global_features"] for file in self.files]
         self.global_feature_dim = self.files_global_features[0].shape[1]
+        # Flatten truth and global features for single-index access (faster __getitem__)
+        self._truth_flat = np.vstack(
+            [f.numpy() if torch.is_tensor(f) else f for f in self.files_truth_labels]
+        )
+        self._global_flat = torch.cat(self.files_global_features, dim=0)
         self.nevts = int(nevts)
         self.max_particles = max_particles
         self.task = task
+        self._len_full = int(np.sum(self.files_n_events))
+        if self.nevts <= 0:
+            print("Number of events per file", self.files_n_events)
         if self.task.type == "classifier":
             self.class_counts = get_class_counts(self.task.class_idx, self.task.class_idx_map, self.files_truth_labels, self.task.class_label_idx)
             self.class_weights = 1 / (self.class_counts / np.sum(self.class_counts))
@@ -199,35 +203,34 @@ class HEPTorchDataset(Dataset):
         return np.sum(self.files_n_events)
 
     def __getitem__(self, idx):
-        file_idx = np.searchsorted(self.files_n_events_sum, idx, side='right')
+        file_idx = np.searchsorted(self.files_n_events_sum, idx, side="right")
         if file_idx > 0:
             sample_idx = idx - self.files_n_events_sum[file_idx - 1]
         else:
             sample_idx = idx
-        data = self.files_values[file_idx][self.files_offsets[file_idx][sample_idx]:self.files_offsets[file_idx][sample_idx+1]]
-        valid_attention_mask = torch.ones(data.shape[0], dtype=data.dtype)
+        off = self.files_offsets[file_idx]
+        start, end = off[sample_idx].item(), off[sample_idx + 1].item()
+        data = self.files_values[file_idx][start:end]
+        n_pt = data.shape[0]
         sample = {}
 
-        # Handle labels
-
+        # Labels from pre-flattened arrays (single index)
         if self.task.type == "classifier":
-            i = self.task.class_label_idx
-            label = self.files_truth_labels[file_idx][sample_idx, i]
-            label_int = int(label.item()) if torch.is_tensor(label) else int(label)
-            sample["y"] = torch.tensor(self.task.class_idx_map[label_int], dtype=torch.long)
+            label_int = int(self._truth_flat[idx, self.task.class_label_idx])
+            sample["y"] = torch.tensor(
+                self.task.class_idx_map[label_int], dtype=torch.long
+            )
         elif self.task.type == "regression":
             regression_label_idx = 0
             if self.task.regress_E_available or self.task.regress_E_available_no_muon:
                 regression_label_idx = self.task.class_label_idx
-            label = self.files_truth_labels[file_idx][sample_idx, regression_label_idx] / 1000.0
-            label_val = label.item() if torch.is_tensor(label) else label
+            label_val = float(self._truth_flat[idx, regression_label_idx]) / 1000.0
             sample["y"] = torch.tensor(label_val, dtype=torch.float32)
         else:
             raise ValueError("Invalid task type")
-        
-        if self.use_cond: # Use global features
-            cond = self.files_global_features[file_idx][sample_idx]
-            sample["cond"] = cond.clone().detach().float() if torch.is_tensor(cond) else torch.tensor(cond, dtype=torch.float32)
+
+        if self.use_cond:
+            sample["cond"] = self._global_flat[idx].float()
         
         if self.use_pid:
             sample["pid"] = data[:, self.pid_idx].int()
@@ -240,13 +243,15 @@ class HEPTorchDataset(Dataset):
                 sample["add_info"] = data[:, 5:10].float()
         else:
             # Legacy: data (5 cols) + data_additional_info (5 cols)
-            data_additional_info = self.files_values_additional_info[file_idx][self.files_offsets_additional_info[file_idx][sample_idx]:self.files_offsets_additional_info[file_idx][sample_idx+1]]
+            off_add = self.files_offsets_additional_info[file_idx]
+            s, e = off_add[sample_idx].item(), off_add[sample_idx + 1].item()
+            data_additional_info = self.files_values_additional_info[file_idx][s:e]
             if self.concat_additional_info:
                 sample["X"] = torch.cat([data, data_additional_info], dim=1)
             else:
                 sample["X"] = data.float()
                 sample["add_info"] = data_additional_info.float()
-        sample["attention_mask"] = valid_attention_mask
+        sample["attention_mask"] = torch.ones(n_pt, dtype=torch.float32)
 
         if self.use_energy_sums and self.global_feature_dim == 4:
             # Legacy: 4-col global_features; compute energy sums on-the-fly (cols 0-4 are features in both formats)
@@ -322,7 +327,7 @@ def load_data(
             num_workers=num_workers,
             drop_last=False,
             collate_fn=lambda x: collate_point_cloud(x, max_particles=max_particles),
-            prefetch_factor=2 if distributed else None,
+            prefetch_factor=4 if distributed else None,
             persistent_workers=distributed
         )
         if task.type == "classifier":
