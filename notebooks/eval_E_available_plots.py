@@ -37,6 +37,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
+EAVAILABLE_SCALE = 1.17 # The  E_available scale factor for blob recoil energy (https://github.com/MinervaExpt/MAT-MINERvA/blob/main/calculators/LowRecoilFunctions.h)
+DEFAULT_BASELINE_KEY = "blob_recoil_E_scaled"
 
 # ---------------------------------------------------------------------------
 # Data loading
@@ -49,7 +51,8 @@ def load_eval_data(
     baseline_ref: tuple[str, str] | None = None,
     baseline_run: str | None = None,
     verbose: bool = True,
-    transform = None
+    transform = None,
+    suppress_errors: bool = False,
 ) -> dict[str, Any]:
     """Load evaluation results, configs, baselines and derived arrays.
 
@@ -96,6 +99,10 @@ def load_eval_data(
                 elif p2.exists():
                     results[loss][model][playlist] = dict(np.load(p2))
                 else:
+                    if suppress_errors:
+                        if verbose:
+                            print(f"Skipping {run} on playlist {playlist} (no eval results found)")
+                        continue
                     raise FileNotFoundError(
                         f"No results for {run} on playlist {playlist} "
                         f"– checked {p1} and {p2}"
@@ -225,6 +232,11 @@ def load_eval_data(
                 bl = current_baselines[key][test_idx] / 1000
                 bl[bl == 0] = -1
                 Enu_baselines[eval_dataset][key] = bl
+            elif key == "blob_recoil_E":
+                bl_raw = current_baselines[key][test_idx] / 1000
+                bl_scaled = bl_raw * EAVAILABLE_SCALE
+                bl_scaled[bl_raw == 0] = -1
+                Enu_baselines[eval_dataset]["blob_recoil_E_scaled"] = bl_scaled
 
     return {
         "results": results,
@@ -267,12 +279,15 @@ def plot_rms_iqr(
     q3_bins: list[float] | None = None,
     baseline_ref: tuple[str, str] | None = None,
     baseline_run: str | None = None,
+    baseline_key: str = DEFAULT_BASELINE_KEY,
     rms_clip: float = 0.6,
     show_q3_histograms: bool = False,
     verbose: bool = True,
     data: dict | None = None,
-    transform = None
-) -> plt.Figure:
+    transform = None,
+    return_hist_fig: bool = False,
+    suppress_errors: bool = False,
+) -> plt.Figure | tuple[plt.Figure, plt.Figure | None]:
     """Produce the RMS / IQR vs *q3* summary plot.
 
     Parameters
@@ -290,10 +305,12 @@ def plot_rms_iqr(
     baseline_run : standalone run name that has ``settings.json`` /
         ``best_model.pt``, used to load baselines when none of the
         models in *training_names* carry those files.
-    rms_clip : events with ``|reco-true| > rms_clip`` are excluded from
-        the RMS calculation (matches the notebook convention).
-    show_q3_histograms : if *True* also show the per-q3-bin residual
-        histograms (the intermediate diagnostic plot).
+    baseline_key : which baseline to plot.  Default ``"blob_recoil_E_scaled"``
+        (blob_recoil_E × 1.17, MINERvA's official E_available estimator).
+        Pass ``"E_recoil_CCinc_only"`` to use the CCInc hadron recoil instead.
+    rms_clip : unused (kept for backwards compatibility).
+    show_q3_histograms : if *True* also show the per-q3-bin
+        ``E reco / E true`` histograms (the intermediate diagnostic plot).
     verbose : print warnings during data loading.
     data : pre-loaded data dict from :func:`load_eval_data`.  When
         supplied, *CKPT_DIR* and *playlists* are ignored.
@@ -303,7 +320,7 @@ def plot_rms_iqr(
     matplotlib.figure.Figure – the RMS / IQR summary figure.
     """
     if q3_bins is None:
-        q3_bins = [0, 0.3, 0.6, 1.2, 100]
+        q3_bins = [0, 0.3, 0.6, 1.2, 1.8, 2.4, 3.0,100]
 
     datasets = [dataset_to_plot] if isinstance(dataset_to_plot, str) else list(dataset_to_plot)
     if len(datasets) > 1:
@@ -322,6 +339,7 @@ def plot_rms_iqr(
             baseline_run=baseline_run,
             verbose=verbose,
             transform=transform,
+            suppress_errors=suppress_errors,
         )
 
     results = data["results"]
@@ -343,7 +361,7 @@ def plot_rms_iqr(
         return (
             _has_q3(dp)
             and dp in Enu_baselines
-            and "E_recoil_CCinc_only" in Enu_baselines[dp]
+            and baseline_key in Enu_baselines[dp]
         )
 
     datasets_with_q3 = [dp for dp in datasets if _has_q3(dp)]
@@ -357,6 +375,25 @@ def plot_rms_iqr(
     if not datasets_with_q3:
         return plt.figure()
 
+    # -- helper: log1p-style Huber loss (matches training/eval convention) --
+    def _log1p_huber_loss(y_pred: np.ndarray, y_true: np.ndarray) -> float:
+        """Compute mean Huber loss between log1p(y_pred) and log1p(y_true)."""
+        y_pred = np.asarray(y_pred, dtype=float)
+        y_true = np.asarray(y_true, dtype=float)
+        mask_pos = y_true > 0
+        if not np.any(mask_pos):
+            return float("nan")
+        y_pred = y_pred[mask_pos]
+        y_true = y_true[mask_pos]
+        if y_pred.size == 0:
+            return float("nan")
+        lp_pred = np.log1p(y_pred)
+        lp_true = np.log1p(y_true)
+        diff = lp_pred - lp_true
+        abs_diff = np.abs(diff)
+        loss = np.where(abs_diff <= 1.0, 0.5 * diff ** 2, abs_diff - 0.5)
+        return float(loss.mean())
+
     # -- compute RMS / IQR per q3 bin, per dataset --------------------------
     q3_arr = np.asarray(q3_bins)
     n_plot_bins = len(q3_arr) - 2
@@ -365,11 +402,15 @@ def plot_rms_iqr(
     # dp -> loss -> model -> list (or dp -> list for baseline)
     IQR_models_by_dp: dict[str, dict[str, dict[str, list[float]]]] = {}
     RMS_models_by_dp: dict[str, dict[str, dict[str, list[float]]]] = {}
+    PCT_models_by_dp: dict[str, dict[str, dict[str, list[float]]]] = {}
     IQR_baseline_by_dp: dict[str, list[float]] = {}
     RMS_baseline_by_dp: dict[str, list[float]] = {}
+    PCT_baseline_by_dp: dict[str, list[float]] = {}
+    LOG1P_LOSS_models_by_dp: dict[str, dict[str, dict[str, float]]] = {}
+    LOG1P_LOSS_baseline_by_dp: dict[str, float] = {}
 
     hist_fig = None
-    if show_q3_histograms and len(datasets_with_q3) == 1:
+    if show_q3_histograms and datasets_with_q3:
         hist_fig, hist_ax = plt.subplots(2, n_plot_bins, figsize=(14, 7))
         if n_plot_bins == 1:
             hist_ax = hist_ax[:, np.newaxis]
@@ -379,15 +420,45 @@ def plot_rms_iqr(
         mask_filter = Enu_filters[dp]["muon_filter_CC_paper"]
         q3 = Enu_filters[dp]["q3"]
         if has_baselines:
-            mask_reco_bl = Enu_baselines[dp]["E_recoil_CCinc_only"] >= 0
+            mask_reco_bl = Enu_baselines[dp][baseline_key] >= 0
             mask_sel = mask_filter & mask_reco_bl
         else:
             mask_sel = mask_filter
 
         IQR_models_by_dp[dp] = {}
         RMS_models_by_dp[dp] = {}
+        PCT_models_by_dp[dp] = {}
         IQR_baseline_by_dp[dp] = []
         RMS_baseline_by_dp[dp] = []
+        PCT_baseline_by_dp[dp] = []
+        LOG1P_LOSS_models_by_dp[dp] = {}
+        LOG1P_LOSS_baseline_by_dp[dp] = float("nan")
+
+        # -- dataset-level log1p-style loss (same convention as training) ----
+        true_all = mc_E[dp][mask_sel]
+        if has_baselines:
+            baseline_all = Enu_baselines[dp][baseline_key][mask_sel]
+            LOG1P_LOSS_baseline_by_dp[dp] = _log1p_huber_loss(baseline_all, true_all)
+            print(
+                f"[plot_rms_iqr] dp={dp}, baseline log1p-Huber loss = "
+                f"{LOG1P_LOSS_baseline_by_dp[dp]:.6f}"
+            )
+
+        for loss_name in results:
+            LOG1P_LOSS_models_by_dp[dp].setdefault(loss_name, {})
+            for model_name in results[loss_name]:
+                # #region agent log
+                import json as _json; open("/global/homes/g/gregork/.cursor/debug.log","a").write(_json.dumps({"hypothesisId":"H1","location":"eval_E_available_plots.py:450","message":"model iteration check","data":{"dp":dp,"loss":loss_name,"model":model_name,"in_results":bool(results[loss_name][model_name]),"in_E_pred":model_name in E_pred_dict.get(dp,{}).get(loss_name,{})},"timestamp":__import__("time").time()})+"\n")
+                # #endregion
+                if model_name not in E_pred_dict.get(dp, {}).get(loss_name, {}):
+                    continue
+                reco_all = E_pred_dict[dp][loss_name][model_name][mask_sel]
+                lval = _log1p_huber_loss(reco_all, true_all)
+                LOG1P_LOSS_models_by_dp[dp][loss_name][model_name] = lval
+                print(
+                    f"[plot_rms_iqr] dp={dp}, loss={loss_name}, model={model_name}: "
+                    f"log1p-Huber loss = {lval:.6f}"
+                )
 
         for i in range(n_plot_bins):
             mask_q3_orig = (q3 > q3_bins[i]) & (q3 <= q3_bins[i + 1])
@@ -396,47 +467,123 @@ def plot_rms_iqr(
             true = mc_E[dp][mask]
 
             if has_baselines:
-                baseline = Enu_baselines[dp]["E_recoil_CCinc_only"][mask]
-                bl_residual = baseline - true
-                iqr = float(np.percentile(bl_residual, 75) - np.percentile(bl_residual, 25))
-                rms = float(np.sqrt(np.mean(bl_residual[np.abs(bl_residual) < rms_clip] ** 2)))
+                baseline = Enu_baselines[dp][baseline_key][mask]
+                valid_true_bl = true > 0
+                ratio_bl = baseline[valid_true_bl] / true[valid_true_bl]
+                if ratio_bl.size > 0:
+                    in_range_bl = (ratio_bl > 0) & (ratio_bl <= 20)
+                    pct_in_range_bl = float(in_range_bl.sum() / ratio_bl.size * 100.0)
+                    ratio_bl_clipped = ratio_bl[in_range_bl]
+                else:
+                    pct_in_range_bl = float("nan")
+                    ratio_bl_clipped = ratio_bl
+
+                if ratio_bl_clipped.size > 0:
+                    iqr = float(np.percentile(ratio_bl_clipped, 75) - np.percentile(ratio_bl_clipped, 25))
+                    rms = float(np.sqrt(np.mean((ratio_bl_clipped - 1.0) ** 2)))
+                else:
+                    iqr = float("nan")
+                    rms = float("nan")
+
                 IQR_baseline_by_dp[dp].append(iqr)
                 RMS_baseline_by_dp[dp].append(rms)
+                PCT_baseline_by_dp[dp].append(pct_in_range_bl)
 
-                if show_q3_histograms and len(datasets_with_q3) == 1:
-                    bins = np.linspace(-rms_clip, rms_clip, 100)
-                    hist_ax[0, i].hist(bl_residual, bins=bins, histtype="step", label="baseline", color="black")
-                    hist_ax[1, i].hist(bl_residual, bins=bins, histtype="step", label="baseline", color="black")
+                if show_q3_histograms and datasets_with_q3:
+                    bins = np.linspace(0.0, 3.0, 301)
+                    ratio_bl_hist = ratio_bl[(ratio_bl >= 0.0) & (ratio_bl <= 3.0)]
+                    frac_plotted_bl = (
+                        float(ratio_bl_hist.size) / float(ratio_bl_clipped.size) * 100.0
+                        if ratio_bl_clipped.size > 0
+                        else float("nan")
+                    )
+                    label_bl = (
+                        f"baseline (in[0,3]={frac_plotted_bl:.1f}% of IQR sample)"
+                        if not np.isnan(frac_plotted_bl)
+                        else "baseline"
+                    )
+                    hist_ax[0, i].hist(
+                        ratio_bl_hist,
+                        bins=bins,
+                        histtype="step",
+                        label=label_bl,
+                        color="black",
+                    )
+                    hist_ax[1, i].hist(
+                        ratio_bl_hist,
+                        bins=bins,
+                        histtype="step",
+                        label=label_bl,
+                        color="black",
+                    )
 
             for loss in results:
                 IQR_models_by_dp[dp].setdefault(loss, {})
                 RMS_models_by_dp[dp].setdefault(loss, {})
+                PCT_models_by_dp[dp].setdefault(loss, {})
                 for model in results[loss]:
+                    if model not in E_pred_dict.get(dp, {}).get(loss, {}):
+                        continue
                     IQR_models_by_dp[dp][loss].setdefault(model, [])
                     RMS_models_by_dp[dp][loss].setdefault(model, [])
+                    PCT_models_by_dp[dp][loss].setdefault(model, [])
 
                     reco = E_pred_dict[dp][loss][model][mask]
-                    reco_minus_true = reco - true
+                    valid_true = true > 0
+                    ratio = reco[valid_true] / true[valid_true]
+                    if ratio.size > 0:
+                        in_range = (ratio > 0) & (ratio <= 20)
+                        pct_in_range = float(in_range.sum() / ratio.size * 100.0)
+                        ratio_clipped = ratio[in_range]
+                    else:
+                        pct_in_range = float("nan")
+                        ratio_clipped = ratio
 
-                    model_iqr = float(np.percentile(reco_minus_true, 75) - np.percentile(reco_minus_true, 25))
-                    model_rms = float(np.sqrt(np.mean(reco_minus_true[np.abs(reco_minus_true) < rms_clip] ** 2)))
+                    if ratio_clipped.size > 0:
+                        model_iqr = float(np.percentile(ratio_clipped, 75) - np.percentile(ratio_clipped, 25))
+                        model_rms = float(np.sqrt(np.mean((ratio_clipped - 1.0) ** 2)))
+                    else:
+                        model_iqr = float("nan")
+                        model_rms = float("nan")
+
                     IQR_models_by_dp[dp][loss][model].append(model_iqr)
                     RMS_models_by_dp[dp][loss][model].append(model_rms)
+                    PCT_models_by_dp[dp][loss][model].append(pct_in_range)
 
-                    if show_q3_histograms and len(datasets_with_q3) == 1:
-                        bins = np.linspace(-rms_clip, rms_clip, 100)
-                        n_in = int(np.sum(np.abs(reco_minus_true) < rms_clip))
-                        label = f"{model}-{loss} (RMS={model_rms:.2f}, N={n_in})"
-                        hist_ax[0, i].hist(reco_minus_true, bins=bins, histtype="step", label=label)
-                        hist_ax[1, i].hist(reco_minus_true, bins=bins, histtype="step", label=label)
+                    if show_q3_histograms and datasets_with_q3:
+                        bins = np.linspace(0.0, 3.0, 301)
+                        ratio_hist = ratio[(ratio >= 0.0) & (ratio <= 3.0)]
+                        frac_plotted = (
+                            float(ratio_hist.size) / float(ratio_clipped.size) * 100.0
+                            if ratio_clipped.size > 0
+                            else float("nan")
+                        )
+                        label = (
+                            f"{model}-{loss} (RMS={model_rms:.3f}, "
+                            f"plotted={frac_plotted:.1f}% of IQR sample)"
+                            if not np.isnan(frac_plotted)
+                            else f"{model}-{loss} (RMS={model_rms:.3f})"
+                        )
+                        hist_ax[0, i].hist(
+                            ratio_hist,
+                            bins=bins,
+                            histtype="step",
+                            label=label,
+                        )
+                        hist_ax[1, i].hist(
+                            ratio_hist,
+                            bins=bins,
+                            histtype="step",
+                            label=label,
+                        )
 
-            if show_q3_histograms and len(datasets_with_q3) == 1:
+            if show_q3_histograms and datasets_with_q3:
                 q3_label = f"{q3_bins[i]}-{q3_bins[i+1]}"
                 eff_str = f" (eff: {efficiency:.1f}%)" if has_baselines else ""
-                hist_ax[0, i].set(xlabel="E reco − E true", ylabel="Counts",
+                hist_ax[0, i].set(xlabel="E reco / E true", ylabel="Counts",
                                   title=f"q3: {q3_label} GeV{eff_str}")
                 hist_ax[0, i].grid(True)
-                hist_ax[1, i].set(xlabel="E reco − E true", ylabel="Counts",
+                hist_ax[1, i].set(xlabel="E reco / E true", ylabel="Counts",
                                   title=f"q3: {q3_label}")
                 hist_ax[1, i].set_yscale("log")
                 hist_ax[1, i].legend(loc="lower left", fontsize=7)
@@ -461,38 +608,59 @@ def plot_rms_iqr(
                 continue
             rms_vals = np.array(RMS_models_by_dp[dp][loss][model])
             iqr_vals = np.array(IQR_models_by_dp[dp][loss][model])
+            pct_vals = np.array(PCT_models_by_dp[dp][loss][model])
+            pct_mean = np.nanmean(pct_vals) if pct_vals.size > 0 else float("nan")
+            train_loss = LOG1P_LOSS_models_by_dp.get(dp, {}).get(loss, {}).get(model, float("nan"))
             color = color_by_lm[(loss, model)]
             if single_dataset:
                 ls = default_linestyle
-                lab = f"{model}-{loss}"
+                lab = (
+                    f"{model}-{loss} (in(0,3]≈{pct_mean:.1f}%, "
+                    f"log1pHuber={train_loss:.4f})"
+                )
             else:
                 ls = dataset_to_linestyle.get(dp, "-")
-                lab = f"{model}-{loss} ({dp})"
+                lab = (
+                    f"{model}-{loss} ({dp}, in(0,3]≈{pct_mean:.1f}%, "
+                    f"log1pHuber={train_loss:.4f})"
+                )
             ax[0].plot(q3_bin_mids, rms_vals, ls, color=color, label=lab)
             ax[1].plot(q3_bin_mids, iqr_vals, ls, color=color, label=lab)
 
     for dp in datasets_with_q3:
         rms_bl = RMS_baseline_by_dp.get(dp)
         iqr_bl = IQR_baseline_by_dp.get(dp)
-        if not rms_bl or not iqr_bl:
+        pct_bl = PCT_baseline_by_dp.get(dp)
+        if not rms_bl or not iqr_bl or not pct_bl:
             continue
+        pct_bl_arr = np.array(pct_bl)
+        pct_bl_mean = np.nanmean(pct_bl_arr) if pct_bl_arr.size > 0 else float("nan")
+        bl_loss = LOG1P_LOSS_baseline_by_dp.get(dp, float("nan"))
         if single_dataset:
             ls = default_linestyle
-            lab = "baseline"
+            lab = (
+                f"baseline (in(0,3]≈{pct_bl_mean:.1f}%, "
+                f"log1pHuber={bl_loss:.4f})"
+            )
         else:
             ls = dataset_to_linestyle.get(dp, "-")
-            lab = f"baseline ({dp})"
+            lab = (
+                f"baseline ({dp}, in(0,3]≈{pct_bl_mean:.1f}%, "
+                f"log1pHuber={bl_loss:.4f})"
+            )
         ax[0].plot(q3_bin_mids, np.array(rms_bl), ls, label=lab, color="black")
         ax[1].plot(q3_bin_mids, np.array(iqr_bl), ls, label=lab, color="black")
 
     ax[0].legend(fontsize=7)
     ax[1].legend(fontsize=7)
-    ax[0].set(xlabel="Bin middle point $q_3$ [GeV]", ylabel="RMS [GeV]")
-    ax[1].set(xlabel="Bin middle point $q_3$ [GeV]", ylabel="IQR [GeV]")
+    ax[0].set(xlabel="Bin middle point $q_3$ [GeV]", ylabel="RMS of $E_{\\mathrm{reco}}/E_{\\mathrm{true}}$")
+    ax[1].set(xlabel="Bin middle point $q_3$ [GeV]", ylabel="IQR of $E_{\\mathrm{reco}}/E_{\\mathrm{true}}$")
     ax[0].grid(True)
     ax[1].grid(True)
     fig.tight_layout()
 
+    if return_hist_fig:
+        return fig, hist_fig
     return fig
 
 
@@ -504,9 +672,11 @@ def plot_residuals_by_energy(
     energy_bins: list[float] | None = None,
     baseline_ref: tuple[str, str] | None = None,
     baseline_run: str | None = None,
+    baseline_key: str = DEFAULT_BASELINE_KEY,
     verbose: bool = True,
     data: dict | None = None,
-    transform=None
+    transform=None,
+    suppress_errors: bool = False,
 ) -> plt.Figure:
     """Per-energy-bin residual and ratio histograms (notebook cell 9)."""
     if energy_bins is None:
@@ -520,6 +690,7 @@ def plot_residuals_by_energy(
             baseline_run=baseline_run,
             verbose=verbose,
             transform=transform,
+            suppress_errors=suppress_errors,
         )
 
     results = data["results"]
@@ -533,20 +704,21 @@ def plot_residuals_by_energy(
         dp in Enu_filters
         and "muon_filter_CC_paper" in Enu_filters[dp]
         and dp in Enu_baselines
-        and "E_recoil_CCinc_only" in Enu_baselines[dp]
+        and baseline_key in Enu_baselines[dp]
     )
 
     n_cols = len(energy_bins) - 1
-    fig, ax = plt.subplots(2, n_cols, figsize=(4.3 * n_cols, 7))
+    fig, ax = plt.subplots(3, n_cols, figsize=(4.3 * n_cols, 10.5))
     if n_cols == 1:
         ax = ax[:, np.newaxis]
 
     residual_bins_list = [np.linspace(-1, 1, 100), np.linspace(-5, 5, 100), np.linspace(-10, 10, 100), np.linspace(-10, 10, 100)]
-    ratio_bins = np.linspace(0, 2, 100)
+    ratio_bins = np.linspace(0, 3, 300)
+    ratio_bins_wide = np.linspace(0, 10, 300)
 
     if has_baselines:
         mask_filter = Enu_filters[dp]["muon_filter_CC_paper"]
-        mask_reco_bl = Enu_baselines[dp]["E_recoil_CCinc_only"] >= 0
+        mask_reco_bl = Enu_baselines[dp][baseline_key] >= 0
         mask_sel = mask_filter & mask_reco_bl
 
     for i in range(min(n_cols, len(residual_bins_list))):
@@ -555,18 +727,25 @@ def plot_residuals_by_energy(
             mask_e = (mc_E[dp] > elow) & (mc_E[dp] < ehigh)
             mask = mask_e & mask_sel
             true = mc_E[dp][mask]
-            baseline = Enu_baselines[dp]["E_recoil_CCinc_only"][mask]
+            baseline = Enu_baselines[dp][baseline_key][mask]
             valid = true > 0
+            ratio_bl = baseline[valid] / true[valid]
             ax[0, i].hist(baseline - true, bins=residual_bins_list[i], histtype="step", label="baseline")
-            ax[1, i].hist(baseline[valid] / true[valid], bins=ratio_bins, histtype="step", label="baseline")
+            ax[1, i].hist(ratio_bl, bins=ratio_bins, histtype="step", label="baseline")
+            ax[2, i].hist(ratio_bl, bins=ratio_bins_wide, histtype="step", label="baseline")
 
         for loss in results:
             for model in results[loss]:
+                if model not in E_pred_dict.get(dp, {}).get(loss, {}):
+                    continue
                 if has_baselines:
                     reco = E_pred_dict[dp][loss][model][mask]
+                    ratio_model = reco[valid] / true[valid]
                     ax[0, i].hist(reco - true, bins=residual_bins_list[i], histtype="step",
                                   label=f"{model}-{loss}")
-                    ax[1, i].hist(reco[valid] / true[valid], bins=ratio_bins, histtype="step",
+                    ax[1, i].hist(ratio_model, bins=ratio_bins, histtype="step",
+                                  label=f"{model}-{loss}")
+                    ax[2, i].hist(ratio_model, bins=ratio_bins_wide, histtype="step",
                                   label=f"{model}-{loss}")
 
         elabel = f"{elow}-{ehigh}" if ehigh < 100 else f"{elow}+"
@@ -576,6 +755,10 @@ def plot_residuals_by_energy(
         ax[1, i].set(xlabel="E reco / E true", ylabel="Counts", title=f"E true: {elabel} GeV")
         ax[1, i].legend(loc="lower left", fontsize=7)
         ax[1, i].grid(True)
+        ax[2, i].set(xlabel="E reco / E true", ylabel="Counts", title=f"E true: {elabel} GeV (0–10, log)")
+        ax[2, i].set_yscale("log")
+        ax[2, i].legend(loc="lower left", fontsize=7)
+        ax[2, i].grid(True)
         ax[0, i].legend(loc="lower left", fontsize=7)
 
     fig.tight_layout()
@@ -662,12 +845,14 @@ def plot_rms_iqr_with_uncertainty(
     q3_bins: list[float] | None = None,
     baseline_ref: tuple[str, str] | None = None,
     baseline_run: str | None = None,
+    baseline_key: str = DEFAULT_BASELINE_KEY,
     rms_clip: float = 0.6,
     colors: dict[str, Any] | None = None,
     verbose: bool = True,
     data: dict | None = None,
     transform = NONE,
     return_values: bool = False,
+    suppress_errors: bool = False,
 ) -> plt.Figure | tuple[plt.Figure, dict]:
     """RMS / IQR vs *q3* with ±1 std-dev uncertainty bands across seeds.
 
@@ -694,6 +879,7 @@ def plot_rms_iqr_with_uncertainty(
             baseline_run=baseline_run,
             verbose=verbose,
             transform=transform,
+            suppress_errors=suppress_errors,
         )
 
     E_pred_dict = data["E_pred_dict"]
@@ -711,7 +897,7 @@ def plot_rms_iqr_with_uncertainty(
     has_baselines = (
         has_q3
         and dp in Enu_baselines
-        and "E_recoil_CCinc_only" in Enu_baselines[dp]
+        and baseline_key in Enu_baselines[dp]
     )
 
     if not has_q3:
@@ -729,7 +915,7 @@ def plot_rms_iqr_with_uncertainty(
     mask_filter = Enu_filters[dp]["muon_filter_CC_paper"]
     q3 = Enu_filters[dp]["q3"]
     if has_baselines:
-        mask_reco_bl = Enu_baselines[dp]["E_recoil_CCinc_only"] >= 0
+        mask_reco_bl = Enu_baselines[dp][baseline_key] >= 0
         mask_sel = mask_filter & mask_reco_bl
     else:
         mask_sel = mask_filter
@@ -755,7 +941,7 @@ def plot_rms_iqr_with_uncertainty(
         iqr_bl: list[float] = []
         for i in range(n_plot_bins):
             true = mc_E[dp][bin_masks[i]]
-            bl = Enu_baselines[dp]["E_recoil_CCinc_only"][bin_masks[i]]
+            bl = Enu_baselines[dp][baseline_key][bin_masks[i]]
             res = bl - true
             iqr_bl.append(float(np.percentile(res, 75) - np.percentile(res, 25)))
             rms_bl.append(float(np.sqrt(np.mean(res[np.abs(res) < rms_clip] ** 2))))

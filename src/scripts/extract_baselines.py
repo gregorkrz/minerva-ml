@@ -32,8 +32,8 @@ PRONG_KEYS = [
     "prong_part_mass", "prong_part_charge", "prong_part_pid",
     "prong_dEdXMean",
 ]
-CHARGED_PION_PIDS = {8, 9}  # Geant3 codes for pi+, pi-
-
+CHARGED_PION_PIDS = {8, 9}
+MUON_MASS = 105.6583745
 
 def get_muon_kinematics(master_ana_dev):
     """
@@ -67,9 +67,6 @@ def get_muon_filter_CC_paper(muon_kinematics):
 
     muon_theta_cos = pz / pmu
     
-    # Constants (in MeV)
-    proton_mass = 938.2720813505859
-    muon_mass = 105.6583745
     
     is_passing_filter = (muon_theta_cos > np.cos(20 * np.pi / 180)) & \
                 (pmu > 1.5 * 1000) & \
@@ -80,9 +77,8 @@ def get_q0(muon_kinematics, mc_incomingE):
     return mc_incomingE - muon_kinematics['E']
 
 def get_q3(muon_kinematics, mc_incomingE, q0):
-    muon_mass = 105.6583745
     pmu = np.sqrt(muon_kinematics['px']**2 + muon_kinematics['py']**2 + muon_kinematics['pz']**2)
-    Qsquared = 2 * mc_incomingE * (muon_kinematics['E'] - pmu* muon_kinematics['pz'] / pmu) - muon_mass**2
+    Qsquared = 2 * mc_incomingE * (muon_kinematics['E'] - pmu* muon_kinematics['pz'] / pmu) - MUON_MASS**2
     return np.sqrt(Qsquared + q0**2)
 
 
@@ -111,10 +107,9 @@ def compute_ccqe_formula(muon_kinematics):
     
     # Constants (in MeV)
     proton_mass = 938.2720813505859
-    muon_mass = 105.6583745
     
     # CCQE formula
-    E_nu_formula = (2 * proton_mass * Emu - muon_mass * muon_mass) / \
+    E_nu_formula = (2 * proton_mass * Emu - MUON_MASS * MUON_MASS) / \
                    (2 * (proton_mass - Emu + pmu * mu_theta_cos))
     
     # Apply quality cuts: theta < 20 degrees and 1.5 < |p| < 20 GeV
@@ -171,6 +166,7 @@ def compute_enu_baselines(root_file_path):
             - 'E_mu+E_recoil': E_muon + E_recoil
             - 'E_mu+E_recoil_CCinc': E_muon + E_recoil_CCinc
             - 'E_muon': Muon energy (for reference)
+            - 'blob_recoil_E*': blob-based recoil energy components
     """
     with uproot.open(root_file_path) as uf:
         master_ana_dev = uf["MasterAnaDev"]
@@ -265,6 +261,16 @@ def compute_enu_baselines(root_file_path):
             m_sq = np.sum(photon_E)**2 - np.dot(p_total, p_total)
             two_gamma_invariant_mass[ev] = np.sqrt(max(m_sq, 0.0))
 
+        # 11. Blob-based recoil energy components (if present in the tree)
+        # These are expected to be per-event scalar branches analogous to hadron recoil.
+        # If any branch is missing, an informative KeyError will surface, matching existing behavior.
+        blob_recoil_E = master_ana_dev["blob_recoil_E"].array().to_numpy()
+        blob_recoil_E_ecal = master_ana_dev["blob_recoil_E_ecal"].array().to_numpy()
+        blob_recoil_E_tracker = master_ana_dev["blob_recoil_E_tracker"].array().to_numpy()
+        blob_recoil_E_hcal = master_ana_dev["blob_recoil_E_hcal"].array().to_numpy()
+        blob_recoil_E_nucl = master_ana_dev["blob_recoil_E_nucl"].array().to_numpy()
+        blob_recoil_E_od = master_ana_dev["blob_recoil_E_od"].array().to_numpy()
+
         return {
             'CCQE_formula': E_nu_from_formula,
             'Enu_from_muon': E_nu_from_df,
@@ -287,6 +293,12 @@ def compute_enu_baselines(root_file_path):
             "n_charged_prongs": n_charged_prongs,
             "improved_nmichel": improved_nmichel,
             "hadron_endMichel_category": hadron_endMichel_category,
+            "blob_recoil_E": blob_recoil_E,
+            "blob_recoil_E_ecal": blob_recoil_E_ecal,
+            "blob_recoil_E_tracker": blob_recoil_E_tracker,
+            "blob_recoil_E_hcal": blob_recoil_E_hcal,
+            "blob_recoil_E_nucl": blob_recoil_E_nucl,
+            "blob_recoil_E_od": blob_recoil_E_od,
         }
 
 
@@ -332,6 +344,12 @@ def process_playlist(playlist_path, playlist_name):
         "n_charged_prongs": [],
         "improved_nmichel": [],
         "hadron_endMichel_category": [],
+        "blob_recoil_E": [],
+        "blob_recoil_E_ecal": [],
+        "blob_recoil_E_tracker": [],
+        "blob_recoil_E_hcal": [],
+        "blob_recoil_E_nucl": [],
+        "blob_recoil_E_od": [],
     }
     
     # Process each file
