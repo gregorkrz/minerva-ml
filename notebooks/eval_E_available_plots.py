@@ -115,8 +115,8 @@ def load_eval_data(
                     with open(settings_path, "r") as f:
                         configs[loss][model][playlist] = json.load(f)
                 else:
-                    if verbose:
-                        print(f"No settings found for {run} on playlist {playlist}")
+                    #if verbose:
+                    #    print(f"No settings found for {run} on playlist {playlist}")
                     configs[loss][model][playlist] = {}
 
     # --- data_paths from best_model.pt (cell 4) ----------------------------
@@ -642,14 +642,12 @@ def plot_rms_iqr(
             if single_dataset:
                 ls = default_linestyle
                 lab = (
-                    f"{model}-{loss} (in(0,3]≈{pct_mean:.1f}%, "
-                    f"log1pHuber={train_loss:.4f})"
+                    f"{model}"
                 )
             else:
                 ls = dataset_to_linestyle.get(dp, "-")
                 lab = (
-                    f"{model}-{loss} ({dp}, in(0,3]≈{pct_mean:.1f}%, "
-                    f"log1pHuber={train_loss:.4f})"
+                    f"{model}"
                 )
             ax[0].plot(q3_bin_mids, rms_vals, ls, color=color, label=lab)
             ax[1].plot(q3_bin_mids, iqr_vals, ls, color=color, label=lab)
@@ -661,27 +659,21 @@ def plot_rms_iqr(
         if not rms_bl or not iqr_bl or not pct_bl:
             continue
         pct_bl_arr = np.array(pct_bl)
-        pct_bl_mean = np.nanmean(pct_bl_arr) if pct_bl_arr.size > 0 else float("nan")
-        bl_loss = LOG1P_LOSS_baseline_by_dp.get(dp, float("nan"))
+        #pct_bl_mean = np.nanmean(pct_bl_arr) if pct_bl_arr.size > 0 else float("nan")
+        #bl_loss = LOG1P_LOSS_baseline_by_dp.get(dp, float("nan"))
         if single_dataset:
             ls = default_linestyle
-            lab = (
-                f"baseline (in(0,3]≈{pct_bl_mean:.1f}%, "
-                f"log1pHuber={bl_loss:.4f})"
-            )
+            lab = "baseline"
         else:
             ls = dataset_to_linestyle.get(dp, "-")
-            lab = (
-                f"baseline ({dp}, in(0,3]≈{pct_bl_mean:.1f}%, "
-                f"log1pHuber={bl_loss:.4f})"
-            )
+            lab = "baseline"
         ax[0].plot(q3_bin_mids, np.array(rms_bl), ls, label=lab, color="black")
         ax[1].plot(q3_bin_mids, np.array(iqr_bl), ls, label=lab, color="black")
 
     ax[0].legend(fontsize=7)
     ax[1].legend(fontsize=7)
-    ax[0].set(xlabel="Bin middle point $q_3$ [GeV]", ylabel="RMS of $E_{\\mathrm{reco}}/E_{\\mathrm{true}}$")
-    ax[1].set(xlabel="Bin middle point $q_3$ [GeV]", ylabel="IQR of $E_{\\mathrm{reco}}/E_{\\mathrm{true}}$")
+    ax[0].set(xlabel="MC truth $q_3$ [GeV]", ylabel="RMS of $E_{\\mathrm{reco}}/E_{\\mathrm{true}}$")
+    ax[1].set(xlabel="MC truth $q_3$ [GeV]", ylabel="25-75 IQR of $E_{\\mathrm{reco}}/E_{\\mathrm{true}}$")
     ax[0].grid(True)
     ax[1].grid(True)
     fig.tight_layout()
@@ -865,36 +857,93 @@ def load_eval_data_grouped(
 
 def plot_rms_iqr_with_uncertainty(
     CKPT_DIR: str | Path,
-    training_names_grouped: dict[str, dict[str, list[str]]],
+    training_names: dict[str, dict[str, str]] | dict[str, dict[str, list[str]]],
     playlists: list[str] | None = None,
-    dataset_to_plot: str = "1A",
+    dataset_to_plot: str | list[str] = "1A",
+    dataset_to_linestyle: dict[str, str] | None = None,
     q3_bins: list[float] | None = None,
     baseline_ref: tuple[str, str] | None = None,
     baseline_run: str | None = None,
     baseline_key: str = DEFAULT_BASELINE_KEY,
     use_cc_selection: int = 2,
     rms_clip: float = 0.6,
+    show_q3_histograms: bool = False,  # accepted for API parity, ignored
     colors: dict[str, Any] | None = None,
     verbose: bool = True,
     data: dict | None = None,
     transform = NONE,
+    return_hist_fig: bool = False,  # accepted for API parity, ignored
     return_values: bool = False,
     suppress_errors: bool = False,
+    text: str = "",
 ) -> plt.Figure | tuple[plt.Figure, dict]:
     """RMS / IQR vs *q3* with ±1 std-dev uncertainty bands across seeds.
 
     Parameters
     ----------
-    training_names_grouped : ``{loss: {config_label: [run_name, …]}}``
-        Config labels should include a human-readable sample count
-        (e.g. ``"Transformer 6M"``, ``"Transformer 500k"``).
+    training_names : either ``{loss: {model: run_name}}`` (like :func:`plot_rms_iqr`)
+        or a grouped dict ``{loss: {config_label: [run_name, …]}}``.  In the
+        former case each (loss, model) is treated as a single-seed config.
     colors : dict mapping sample-count tokens (e.g. ``"6M"``, ``"500k"``)
         to matplotlib colours.  Each config label is matched to the first
         token found as a substring.  Unmatched labels default to grey.
     return_values : if *True*, return ``(fig, values)`` where *values* is
         a dict with q3 bin midpoints and per-config / baseline arrays.
-    Other parameters match :func:`plot_rms_iqr`.
+    Other parameters match :func:`plot_rms_iqr`.  Only a single
+    ``dataset_to_plot`` is supported; ``dataset_to_linestyle``,
+    ``show_q3_histograms`` and ``return_hist_fig`` are accepted for API
+    compatibility but are ignored.
     """
+    # If multiple datasets / linestyles are requested, fall back to mean-only plot.
+    # We still accept grouped training_names but just flatten them.
+    if isinstance(dataset_to_plot, list):
+        # Flatten grouped form, if present
+        try:
+            flat_training = flatten_grouped_training_names(
+                training_names  # type: ignore[arg-type]
+            )
+        except Exception:
+            flat_training = training_names  # already flat
+        return plot_rms_iqr(
+            CKPT_DIR=CKPT_DIR,
+            training_names=flat_training,  # type: ignore[arg-type]
+            playlists=playlists,
+            dataset_to_plot=dataset_to_plot,
+            dataset_to_linestyle=dataset_to_linestyle,
+            q3_bins=q3_bins,
+            baseline_ref=baseline_ref,
+            baseline_run=baseline_run,
+            baseline_key=baseline_key,
+            use_cc_selection=use_cc_selection,
+            rms_clip=rms_clip,
+            show_q3_histograms=show_q3_histograms,
+            verbose=verbose,
+            data=data,
+            transform=transform,
+            return_hist_fig=return_hist_fig,
+            suppress_errors=suppress_errors,
+        )
+
+    # Normalise training_names to grouped form expected by load_eval_data_grouped
+    training_names_grouped: dict[str, dict[str, list[str]]] = {}
+    for loss, models in training_names.items():
+        training_names_grouped.setdefault(loss, {})
+        for key, val in models.items():
+            if isinstance(val, list):
+                # Already grouped: key is a config label
+                runs = val
+                if not runs:
+                    continue
+                training_names_grouped[loss][key] = runs
+            else:
+                # Flat form: single run per (loss, model) → treat as 1‑seed config
+                run_name = val
+                if run_name is None:
+                    continue
+                config_label = str(key)
+                training_names_grouped[loss].setdefault(config_label, [])
+                training_names_grouped[loss][config_label].append(run_name)
+
     if q3_bins is None:
         q3_bins = [0, 0.3, 0.6, 1.2, 1.8, 2.4, 100]
 
@@ -956,27 +1005,73 @@ def plot_rms_iqr_with_uncertainty(
 
     values: dict[str, Any] = {"q3_bin_mids": q3_bin_mids}
 
-    fig, ax = plt.subplots(1, 2, figsize=(9, 4.5))
+    # Layout: 2×2 – top: RMS/MPV and IQR/MPV; bottom: MPV (duplicated);
+    # bottom row has half the height of the top row.
+    fig, ax = plt.subplots(
+        2,
+        2,
+        figsize=(9, 7),
+        gridspec_kw={"height_ratios": [2, 1]},
+    )
+    ax_top = ax[0]
+    ax_bottom = ax[1]
 
     if has_baselines:
         rms_bl: list[float] = []
         iqr_bl: list[float] = []
+        mpv_bl: list[float] = []
+        pct_bl: list[float] = []
         for i in range(n_plot_bins):
             true = mc_E[dp][bin_masks[i]]
             bl = Enu_baselines[dp][baseline_key][bin_masks[i]]
-            res = bl - true
-            iqr_bl.append(float(np.percentile(res, 75) - np.percentile(res, 25)))
-            rms_bl.append(float(np.sqrt(np.mean(res[np.abs(res) < rms_clip] ** 2))))
-        ax[0].plot(q3_bin_mids, rms_bl, ".--", label="baseline", color="black")
-        ax[1].plot(q3_bin_mids, iqr_bl, ".--", label="baseline", color="black")
-        print(f"  baseline: RMS = {rms_bl}, IQR = {iqr_bl}")
-        values["baseline"] = {"rms": np.array(rms_bl), "iqr": np.array(iqr_bl)}
+            valid = true > 0
+            ratio_bl = bl[valid] / true[valid]
+            if ratio_bl.size > 0:
+                # Global in-range for RMS/IQR
+                in_range_bl = (ratio_bl > 0) & (ratio_bl <= 20)
+                pct_in_range_bl = float(in_range_bl.sum() / ratio_bl.size * 100.0)
+                ratio_bl_clipped = ratio_bl[in_range_bl]
+                # Tighter MPV window (0, 2] for MPV via histogram mode
+                mpv_mask_bl = (ratio_bl > 0) & (ratio_bl <= 2.0)
+                ratio_bl_mpv = ratio_bl[mpv_mask_bl]
+            else:
+                pct_in_range_bl = float("nan")
+                ratio_bl_clipped = ratio_bl
+                ratio_bl_mpv = ratio_bl
+            if ratio_bl_clipped.size > 0:
+                iqr_val = float(
+                    np.percentile(ratio_bl_clipped, 75) - np.percentile(ratio_bl_clipped, 25)
+                )
+                rms_val = float(np.sqrt(np.mean((ratio_bl_clipped - 1.0) ** 2)))
+                if ratio_bl_mpv.size > 0:
+                    hist, edges = np.histogram(ratio_bl_mpv, bins=100, range=(0.0, 2.0))
+                    max_idx = int(np.argmax(hist))
+                    mpv_val = float(0.5 * (edges[max_idx] + edges[max_idx + 1]))
+                else:
+                    mpv_val = float("nan")
+            else:
+                iqr_val = float("nan")
+                rms_val = float("nan")
+                mpv_val = float("nan")
+            iqr_bl.append(iqr_val)
+            rms_bl.append(rms_val)
+            mpv_bl.append(mpv_val)
+            pct_bl.append(pct_in_range_bl)
+
+        print(f"  baseline: RMS = {rms_bl}, IQR = {iqr_bl}, MPV = {mpv_bl}")
+        values["baseline"] = {
+            "rms": np.array(rms_bl),
+            "iqr": np.array(iqr_bl),
+            "mpv": np.array(mpv_bl),
+            "pct_in_range": np.array(pct_bl),
+        }
 
     print(f"E_pred_dict keys for '{dp}': { {l: list(m.keys()) for l, m in E_pred_dict.get(dp, {}).items()} }")
     for loss in training_names_grouped:
         for config_label, runs in training_names_grouped[loss].items():
             seed_rms = np.empty((len(runs), n_plot_bins))
             seed_iqr = np.empty((len(runs), n_plot_bins))
+            seed_mpv = np.empty((len(runs), n_plot_bins))
             for s in range(len(runs)):
                 flat_key = f"{config_label}{_SEED_SEP}{s}"
                 if flat_key not in E_pred_dict.get(dp, {}).get(loss, {}):
@@ -985,52 +1080,150 @@ def plot_rms_iqr_with_uncertainty(
                 for i in range(n_plot_bins):
                     true = mc_E[dp][bin_masks[i]]
                     reco = E_pred_dict[dp][loss][flat_key][bin_masks[i]]
-                    res = reco - true
-                    seed_iqr[s, i] = float(
-                        np.percentile(res, 75) - np.percentile(res, 25)
-                    )
-                    seed_rms[s, i] = float(
-                        np.sqrt(np.mean(res[np.abs(res) < rms_clip] ** 2))
-                    )
+                    valid = true > 0
+                    ratio = reco[valid] / true[valid]
+                    if ratio.size > 0:
+                        # Global in-range for RMS/IQR
+                        in_range = (ratio > 0) & (ratio <= 20)
+                        ratio_clipped = ratio[in_range]
+                        # Tighter MPV window (0, 2] for MPV via histogram mode
+                        mpv_mask = (ratio > 0) & (ratio <= 2.0)
+                        ratio_mpv = ratio[mpv_mask]
+                    else:
+                        ratio_clipped = ratio
+                        ratio_mpv = ratio
+                    if ratio_clipped.size > 0:
+                        seed_iqr[s, i] = float(
+                            np.percentile(ratio_clipped, 75) - np.percentile(ratio_clipped, 25)
+                        )
+                        seed_rms[s, i] = float(
+                            np.sqrt(np.mean((ratio_clipped - 1.0) ** 2))
+                        )
+                        if ratio_mpv.size > 0:
+                            hist, edges = np.histogram(ratio_mpv, bins=100, range=(0.0, 2.0))
+                            max_idx = int(np.argmax(hist))
+                            seed_mpv[s, i] = float(0.5 * (edges[max_idx] + edges[max_idx + 1]))
+                        else:
+                            seed_mpv[s, i] = float("nan")
+                    else:
+                        seed_iqr[s, i] = float("nan")
+                        seed_rms[s, i] = float("nan")
+                        seed_mpv[s, i] = float("nan")
 
             mean_rms = seed_rms.mean(axis=0)
             std_rms = seed_rms.std(axis=0)
             mean_iqr = seed_iqr.mean(axis=0)
             std_iqr = seed_iqr.std(axis=0)
+            mean_mpv = seed_mpv.mean(axis=0)
+            std_mpv = seed_mpv.std(axis=0)
 
             print(f"  {config_label} ({loss}):")
             print(f"    RMS = {mean_rms.tolist()}")
             print(f"    IQR = {mean_iqr.tolist()}")
+            print(f"    MPV = {mean_mpv.tolist()}")
 
             values.setdefault(loss, {})[config_label] = {
                 "rms_mean": mean_rms,
                 "rms_std": std_rms,
                 "iqr_mean": mean_iqr,
                 "iqr_std": std_iqr,
+                "mpv_mean": mean_mpv,
+                "mpv_std": std_mpv,
                 "rms_per_seed": seed_rms,
                 "iqr_per_seed": seed_iqr,
+                "mpv_per_seed": seed_mpv,
             }
 
             color = color_map[config_label]
-            lbl = f"{config_label} ({loss})"
+            lbl = f"{config_label}"
 
-            ax[0].plot(q3_bin_mids, mean_rms, ".--", color=color, label=lbl)
-            ax[0].fill_between(
-                q3_bin_mids, mean_rms - std_rms, mean_rms + std_rms,
-                alpha=0.25, color=color,
+            with np.errstate(divide="ignore", invalid="ignore"):
+                rms_over_mpv = mean_rms / mean_mpv
+                iqr_over_mpv = mean_iqr / mean_mpv
+
+            ax_top[0].plot(q3_bin_mids, rms_over_mpv, ".--", color=color, label=lbl)
+            ax_top[0].fill_between(
+                q3_bin_mids,
+                rms_over_mpv - (std_rms / mean_mpv),
+                rms_over_mpv + (std_rms / mean_mpv),
+                alpha=0.25,
+                color=color,
             )
-            ax[1].plot(q3_bin_mids, mean_iqr, ".--", color=color, label=lbl)
-            ax[1].fill_between(
-                q3_bin_mids, mean_iqr - std_iqr, mean_iqr + std_iqr,
-                alpha=0.25, color=color,
+            ax_top[1].plot(q3_bin_mids, iqr_over_mpv, ".--", color=color, label=lbl)
+            ax_top[1].fill_between(
+                q3_bin_mids,
+                iqr_over_mpv - (std_iqr / mean_mpv),
+                iqr_over_mpv + (std_iqr / mean_mpv),
+                alpha=0.25,
+                color=color,
             )
 
-    ax[0].legend(fontsize=7)
-    ax[1].legend(fontsize=7)
-    ax[0].set(xlabel="Bin middle point $q_3$ [GeV]", ylabel="RMS [GeV]")
-    ax[1].set(xlabel="Bin middle point $q_3$ [GeV]", ylabel="IQR [GeV]")
-    ax[0].grid(True)
-    ax[1].grid(True)
+            # MPV curves with ±1σ bands (bottom row, duplicated on both axes)
+            ax_bottom[0].plot(q3_bin_mids, mean_mpv, ".--", color=color, label=lbl)
+            ax_bottom[0].fill_between(
+                q3_bin_mids,
+                mean_mpv - std_mpv,
+                mean_mpv + std_mpv,
+                alpha=0.25,
+                color=color,
+            )
+            ax_bottom[1].plot(q3_bin_mids, mean_mpv, ".--", color=color, label=lbl)
+            ax_bottom[1].fill_between(
+                q3_bin_mids,
+                mean_mpv - std_mpv,
+                mean_mpv + std_mpv,
+                alpha=0.25,
+                color=color,
+            )
+
+    # Baseline curves for normalised metrics and MPV
+    if "baseline" in values:
+        bl = values["baseline"]
+        bl_rms = bl["rms"]
+        bl_iqr = bl["iqr"]
+        bl_mpv = bl["mpv"]
+        with np.errstate(divide="ignore", invalid="ignore"):
+            bl_rms_over_mpv = bl_rms / bl_mpv
+            bl_iqr_over_mpv = bl_iqr / bl_mpv
+        ax_top[0].plot(q3_bin_mids, bl_rms_over_mpv, ".--", color="black", label="baseline")
+        ax_top[1].plot(q3_bin_mids, bl_iqr_over_mpv, ".--", color="black", label="baseline")
+        ax_bottom[0].plot(q3_bin_mids, bl_mpv, ".--", color="black", label="baseline")
+        ax_bottom[1].plot(q3_bin_mids, bl_mpv, ".--", color="black", label="baseline")
+
+    # Legend placement; optional *text* is used as legend title if provided.
+    # Slightly larger font for better readability in notebook/figures.
+    legend_kwargs: dict[str, Any] = {"fontsize": 9, "loc": "upper right"}
+    if text:
+        legend_kwargs["title"] = text
+        legend_kwargs["title_fontsize"] = 10
+
+    ax_top[0].legend(**legend_kwargs)
+    ax_top[1].legend(**legend_kwargs)
+    ax_bottom[0].legend(fontsize=7)
+    ax_bottom[1].legend(fontsize=7)
+
+    ax_top[0].set(
+        xlabel="MC truth $q_3$ [GeV]",
+        ylabel="RMS / MPV of $E_{\\mathrm{reco}}/E_{\\mathrm{true}}$",
+    )
+    ax_top[1].set(
+        xlabel="MC truth $q_3$ [GeV]",
+        ylabel="IQR / MPV of $E_{\\mathrm{reco}}/E_{\\mathrm{true}}$",
+    )
+    ax_bottom[0].set(
+        xlabel="MC truth $q_3$ [GeV]",
+        ylabel="MPV of $E_{\\mathrm{reco}}/E_{\\mathrm{true}}$",
+    )
+    ax_bottom[1].set(
+        xlabel="MC truth $q_3$ [GeV]",
+        ylabel="MPV of $E_{\\mathrm{reco}}/E_{\\mathrm{true}}$",
+    )
+
+    for a in ax_top:
+        a.grid(True)
+    for a in ax_bottom:
+        a.grid(True)
+
     fig.tight_layout()
 
     if return_values:

@@ -48,23 +48,33 @@ def get_runs_by_model_and_cap(
         # Match OLS_RW before OLS
         m = re.search(r"_OLS_RW_regression_(-?\d+)_", name)
         if m:
-            model, cap = "OLS_RW", int(m.group(1))
+            model, cap = "OmniLearned-small-rw", int(m.group(1))
         if model is None:
             m = re.search(r"_OLS_regression_(-?\d+)_", name)
             if m:
-                model, cap = "OLS", int(m.group(1))
+                model, cap = "OmniLearned-small", int(m.group(1))
         if model is None:
             m = re.search(r"_OLM_regression_(-?\d+)_", name)
             if m:
-                model, cap = "OLM", int(m.group(1))
+                model, cap = "OmniLearned-medium", int(m.group(1))
         if model is None:
             m = re.search(r"_regression_(Transformer\d+)_data_cap_(-?\d+)_", name)
             if m:
                 model, cap = m.group(1), int(m.group(2))
+                model = "Transformer"
         if model is None:
-            m = re.search(r"_cond_only_full_seed(-?\d+)_", name)
+            m = re.search(r"_cond_only_([a-zA-Z0-9]+)_seed(-?\d+)_", name)
             if m:
-                model, cap = "MLP", -1
+                model = "MLP"
+                dscap = m.group(1)
+                # Determine cap: map "full" to -1, else try to interpret as int if possible
+                if dscap == "full":
+                    cap = -1
+                else:
+                    try:
+                        cap = int(dscap)
+                    except ValueError:
+                        cap = dscap  # If not int, just pass the DSCAP string
         if model is not None:
             result[model][cap].append(name)
     return {model: dict(caps) for model, caps in result.items()}
