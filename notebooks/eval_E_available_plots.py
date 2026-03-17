@@ -224,7 +224,7 @@ def load_eval_data(
         print("keys: ", split_idx.keys())
         test_idx = split_idx[eval_dataset]["test_idx"]
         for key in current_baselines:
-            if key in ["muon_filter_CC_paper", "q0", "q3"]:
+            if key in ["muon_filter_CC_paper", "mc_current", "q0", "q3"]:
                 Enu_filters[eval_dataset][key] = current_baselines[key][test_idx]
                 if key in ["q0", "q3"]:
                     Enu_filters[eval_dataset][key] = Enu_filters[eval_dataset][key] / 1000
@@ -267,6 +267,40 @@ def _resolve_baseline_ref(baseline_ref, configs, data_paths, training_names):
 
 
 # ---------------------------------------------------------------------------
+# Event selection
+# ---------------------------------------------------------------------------
+
+def _build_event_mask(
+    dp: str,
+    Enu_filters: dict,
+    Enu_baselines: dict,
+    baseline_key: str,
+    use_cc_selection: int,
+) -> np.ndarray:
+    """Build a boolean event-selection mask.
+
+    Parameters
+    ----------
+    use_cc_selection :
+        0 – only require ``baseline_key >= 0`` (minimal, baseline-only cut).
+        1 – muon_filter_CC_paper only.
+        2 – muon_filter_CC_paper AND ``E_recoil_CCinc_only >= 0`` (default,
+            full CC-inclusive analysis selection).
+    """
+    if use_cc_selection == 0:
+        if dp in Enu_baselines and baseline_key in Enu_baselines[dp]:
+            return Enu_baselines[dp][baseline_key] >= 0
+        n = len(next(iter(Enu_filters[dp].values())))
+        return np.ones(n, dtype=bool)
+
+    mask = Enu_filters[dp]["muon_filter_CC_paper"]
+    if use_cc_selection >= 2:
+        if dp in Enu_baselines and "E_recoil_CCinc_only" in Enu_baselines[dp]:
+            mask = mask & (Enu_baselines[dp]["E_recoil_CCinc_only"] >= 0)
+    return mask
+
+
+# ---------------------------------------------------------------------------
 # Plotting
 # ---------------------------------------------------------------------------
 
@@ -280,6 +314,7 @@ def plot_rms_iqr(
     baseline_ref: tuple[str, str] | None = None,
     baseline_run: str | None = None,
     baseline_key: str = DEFAULT_BASELINE_KEY,
+    use_cc_selection: int = 2,
     rms_clip: float = 0.6,
     show_q3_histograms: bool = False,
     verbose: bool = True,
@@ -417,13 +452,8 @@ def plot_rms_iqr(
 
     for dp in datasets_with_q3:
         has_baselines = _has_baselines(dp)
-        mask_filter = Enu_filters[dp]["muon_filter_CC_paper"]
         q3 = Enu_filters[dp]["q3"]
-        if has_baselines:
-            mask_reco_bl = Enu_baselines[dp][baseline_key] >= 0
-            mask_sel = mask_filter & mask_reco_bl
-        else:
-            mask_sel = mask_filter
+        mask_sel = _build_event_mask(dp, Enu_filters, Enu_baselines, baseline_key, use_cc_selection)
 
         IQR_models_by_dp[dp] = {}
         RMS_models_by_dp[dp] = {}
@@ -447,9 +477,6 @@ def plot_rms_iqr(
         for loss_name in results:
             LOG1P_LOSS_models_by_dp[dp].setdefault(loss_name, {})
             for model_name in results[loss_name]:
-                # #region agent log
-                import json as _json; open("/global/homes/g/gregork/.cursor/debug.log","a").write(_json.dumps({"hypothesisId":"H1","location":"eval_E_available_plots.py:450","message":"model iteration check","data":{"dp":dp,"loss":loss_name,"model":model_name,"in_results":bool(results[loss_name][model_name]),"in_E_pred":model_name in E_pred_dict.get(dp,{}).get(loss_name,{})},"timestamp":__import__("time").time()})+"\n")
-                # #endregion
                 if model_name not in E_pred_dict.get(dp, {}).get(loss_name, {}):
                     continue
                 reco_all = E_pred_dict[dp][loss_name][model_name][mask_sel]
@@ -673,6 +700,7 @@ def plot_residuals_by_energy(
     baseline_ref: tuple[str, str] | None = None,
     baseline_run: str | None = None,
     baseline_key: str = DEFAULT_BASELINE_KEY,
+    use_cc_selection: int = 2,
     verbose: bool = True,
     data: dict | None = None,
     transform=None,
@@ -717,9 +745,7 @@ def plot_residuals_by_energy(
     ratio_bins_wide = np.linspace(0, 10, 300)
 
     if has_baselines:
-        mask_filter = Enu_filters[dp]["muon_filter_CC_paper"]
-        mask_reco_bl = Enu_baselines[dp][baseline_key] >= 0
-        mask_sel = mask_filter & mask_reco_bl
+        mask_sel = _build_event_mask(dp, Enu_filters, Enu_baselines, baseline_key, use_cc_selection)
 
     for i in range(min(n_cols, len(residual_bins_list))):
         elow, ehigh = energy_bins[i], energy_bins[i + 1]
@@ -846,6 +872,7 @@ def plot_rms_iqr_with_uncertainty(
     baseline_ref: tuple[str, str] | None = None,
     baseline_run: str | None = None,
     baseline_key: str = DEFAULT_BASELINE_KEY,
+    use_cc_selection: int = 2,
     rms_clip: float = 0.6,
     colors: dict[str, Any] | None = None,
     verbose: bool = True,
@@ -912,13 +939,8 @@ def plot_rms_iqr_with_uncertainty(
     n_plot_bins = len(q3_arr) - 2
     q3_bin_mids = ((q3_arr[:-1] + q3_arr[1:]) / 2)[:n_plot_bins]
 
-    mask_filter = Enu_filters[dp]["muon_filter_CC_paper"]
     q3 = Enu_filters[dp]["q3"]
-    if has_baselines:
-        mask_reco_bl = Enu_baselines[dp][baseline_key] >= 0
-        mask_sel = mask_filter & mask_reco_bl
-    else:
-        mask_sel = mask_filter
+    mask_sel = _build_event_mask(dp, Enu_filters, Enu_baselines, baseline_key, use_cc_selection)
 
     bin_masks = []
     for i in range(n_plot_bins):
