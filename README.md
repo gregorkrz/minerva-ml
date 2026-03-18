@@ -58,7 +58,7 @@ python -m src.scripts.train \
   -name Run_debug \
   --d_model 128 --depth 4 --n_heads 8 \
   --max_steps 500000 \
-  --data_path /path/to/Minerva/<dataset_version>
+  --data_path <SPLIT_OUTPUT_DIR>
 ```
 
 ### SLURM submission (`src/jobs/submit_train_jobs.py`)
@@ -67,7 +67,7 @@ python -m src.scripts.train \
 
 Current defaults in that script:
 - loops over `seed`, `data_cap`, `task`, and `model`
-- uses `task in {regression, classifier}`
+- uses `task in {regression, classifier}` (these map directly to `--mode` values)
 - supports `model in {Transformer1, OLS, OLS_RW, OLM}`
 - maps each `(data_cap, model)` to a SLURM walltime
 - writes `.slurm`, `.log`, and `.error.log` files under fixed NERSC paths
@@ -75,7 +75,7 @@ Current defaults in that script:
 Before running submission:
 
 1. Create a `.env` file in repo root with environment variables needed in your cluster job.
-2. Update output/log/checkpoint paths in `submit_train_jobs.py` if you are not using the default NERSC layout.
+2. Update hardcoded paths in `submit_train_jobs.py` if you are not using the default NERSC layout (for example `--data_path` in `generate_cmd`, `CKPT_DIR` in resume mode, and the `log_dir` / `error_dir` / `slurm_file` paths in `__main__`).
 3. Optionally edit `get_cmds_and_slurm_times()` to choose your model/task/data-cap sweep.
 
 Then submit:
@@ -94,4 +94,3 @@ python -m src.scripts.make_event_displays \
   --output_dir <PATH_TO_OUTPUT_DIR> \
   --n_events 10
 ```
-

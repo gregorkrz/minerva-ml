@@ -87,10 +87,10 @@ Parameter presets are defined in `src/models/omnilearned/utils.py`:
 - **medium**: base_dim 512, num_heads 16, num_transformers 12
 - **large**: base_dim 1024, num_heads 32, num_transformers 28
 
-Repository job presets currently use:
+In `src/jobs/submit_train_jobs.py`, the `model` identifiers in the `for model in [...]` loop map to CLI flags as:
 
-- `OLS`  -> OmniLearned small + pretrained (`--use-pretrained pretrain_s`)
-- `OLS_RW` -> OmniLearned small from random initialization
+- `OLS` -> OmniLearned small + pretrained (`--use-pretrained pretrain_s`)
+- `OLS_RW` -> OmniLearned small from random initialization (`--use-omnilearned small` with no `--use-pretrained`)
 - `OLM` -> OmniLearned medium + pretrained (`--use-pretrained pretrain_m`)
 
 ## 3) CondOnlyMLP baseline
@@ -125,4 +125,3 @@ $$
 $$
 
 where $z$ is the final CLS/event representation.
-
