@@ -18,3 +18,8 @@ python -m src.scripts.compute_enu_baselines --input-dir /pscratch/sd/g/gregork/M
 
 
 python -m src.scripts.preprocess_dataset --output-dir $DATA_DIR/Minerva/20260313 --max-workers 1 --max-workers-per-playlist 1  --use-max-blobs-and-prongs --max-blobs 20 --max-prongs 10 --playlists 1A 1B
+python -m src.scripts.split_dataset --input-dir $DATA_DIR/Minerva/20260313 --output-dir $DATA_DIR/Minerva/20260313 --playlist 1A
+python -m src.scripts.split_dataset --input-dir $DATA_DIR/Minerva/20260313 --output-dir $DATA_DIR/Minerva/20260313 --playlist 1B --val-ratio 0.005 --test-ratio 0.99
+
+python -m src.scripts.extract_baselines --input-dir /pscratch/sd/g/gregork/MINERvA/raw_data/MediumEnergy_FHC_StandardMC_Playlist --output-dir $DATA_DIR/Minerva/20260311/baselines2 --playlist 1A
+python -m src.scripts.extract_baselines --input-dir /pscratch/sd/g/gregork/MINERvA/raw_data/MediumEnergy_FHC_StandardMC_Playlist --output-dir $DATA_DIR/Minerva/20260313/baselines --playlist 1B
