@@ -6,7 +6,5 @@ wandb
 *.h5
 *.wandb
 *.txt
-*.pdf
 *.sh
-notebooks/out/
 .env
