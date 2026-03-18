@@ -86,8 +86,11 @@ def get_classification_runs_by_model_and_cap(
     Build a dict: model_name -> {dataset_cap -> [run_names]}.
 
     Run name formats (from submit_train_jobs):
-      - OLS:         Run_1203_OLS_classifier_<cap>_seed...
+      - OLS_RW: Run_1203_OLS_RW_classifier_<cap>_seed...
+      - OLS:    Run_1203_OLS_classifier_<cap>_seed...
+      - OLM:    Run_1203_OLS_classifier_<cap>_seed...
       - Transformer: Run_1203_classifier_Transformer1_data_cap_<cap>_seed_...
+      - MLP: Run_class_cond_only_<dscap>_seed<SEED>_...
     dataset_cap is -1 for full 6M dataset, or a positive int for smaller caps.
     """
     run_names = fetch_runs_from_wandb(tag, project)
@@ -96,13 +99,35 @@ def get_classification_runs_by_model_and_cap(
 
     for name in run_names:
         model, cap = None, None
-        m = re.search(r"_OLS_classifier_(-?\d+)_", name)
+        # Match OLS_RW before OLS
+        m = re.search(r"_OLS_RW_classifier_(-?\d+)_", name)
         if m:
-            model, cap = "OLS", int(m.group(1))
+            model, cap = "OmniLearned-small-rw", int(m.group(1))
+        if model is None:
+            m = re.search(r"_OLS_classifier_(-?\d+)_", name)
+            if m:
+                model, cap = "OmniLearned-small", int(m.group(1))
+        if model is None:
+            m = re.search(r"_OLM_classifier_(-?\d+)_", name)
+            if m:
+                model, cap = "OmniLearned-medium", int(m.group(1))
         if model is None:
             m = re.search(r"_classifier_(Transformer\d+)_data_cap_(-?\d+)_", name)
             if m:
                 model, cap = m.group(1), int(m.group(2))
+                model = "Transformer"
+        if model is None:
+            m = re.search(r"_class_cond_only_([a-zA-Z0-9]+)_seed(-?\d+)_", name)
+            if m:
+                model = "MLP"
+                dscap = m.group(1)
+                if dscap == "full":
+                    cap = -1
+                else:
+                    try:
+                        cap = int(dscap)
+                    except ValueError:
+                        cap = dscap
         if model is not None:
             result[model][cap].append(name)
 

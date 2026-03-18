@@ -784,6 +784,140 @@ def plot_residuals_by_energy(
 
 
 # ---------------------------------------------------------------------------
+# (new) Residuals and ratios by q3 bin
+# ---------------------------------------------------------------------------
+
+def plot_residuals_by_q3(
+    CKPT_DIR: str | Path,
+    training_names: dict[str, dict[str, str]],
+    playlists: list[str] | None = None,
+    dataset_to_plot: str = "1A",
+    q3_bins: list[float] | None = None,
+    baseline_ref: tuple[str, str] | None = None,
+    baseline_run: str | None = None,
+    baseline_key: str = DEFAULT_BASELINE_KEY,
+    use_cc_selection: int = 2,
+    verbose: bool = True,
+    data: dict | None = None,
+    transform=None,
+    suppress_errors: bool = False,
+) -> plt.Figure:
+    """Per-q3-bin residual and ratio histograms (E_reco−E_true and E_reco/E_true)."""
+    if q3_bins is None:
+        q3_bins = [0, 0.3, 0.6, 1.2, 1.8, 2.4, 3.0, 100]
+
+    if data is None:
+        data = load_eval_data(
+            CKPT_DIR, training_names,
+            playlists=playlists,
+            baseline_ref=baseline_ref,
+            baseline_run=baseline_run,
+            verbose=verbose,
+            transform=transform,
+            suppress_errors=suppress_errors,
+        )
+
+    results = data["results"]
+    E_pred_dict = data["E_pred_dict"]
+    Enu_baselines = data["Enu_baselines"]
+    Enu_filters = data["Enu_filters"]
+    mc_E = data["mc_E"]
+    dp = dataset_to_plot
+
+    has_baselines = (
+        dp in Enu_filters
+        and "muon_filter_CC_paper" in Enu_filters[dp]
+        and dp in Enu_baselines
+        and baseline_key in Enu_baselines[dp]
+    )
+
+    if not has_baselines:
+        warnings.warn(
+            f"No baselines / filters for dataset '{dp}' – plot_residuals_by_q3 will be empty."
+        )
+
+    q3 = Enu_filters[dp]["q3"] if dp in Enu_filters and "q3" in Enu_filters[dp] else None
+    if q3 is None:
+        warnings.warn(f"No q3 information for dataset '{dp}'.")
+        return plt.figure()
+
+    if has_baselines:
+        mask_sel = _build_event_mask(dp, Enu_filters, Enu_baselines, baseline_key, use_cc_selection)
+    else:
+        # Fallback: just select events with positive truth energy
+        mask_sel = mc_E[dp] > 0
+
+    n_cols = len(q3_bins) - 1
+    fig, ax = plt.subplots(2, n_cols, figsize=(4.3 * n_cols, 7.0))
+    if n_cols == 1:
+        ax = ax[:, np.newaxis]
+
+    residual_bins = np.linspace(-2, 2, 160)
+    ratio_bins = np.linspace(0, 2, 50)
+
+    for i in range(n_cols):
+        qlow, qhigh = q3_bins[i], q3_bins[i + 1]
+        mask_q = (q3 > qlow) & (q3 <= qhigh)
+        mask = mask_q & mask_sel
+
+        true = mc_E[dp][mask]
+        valid = true > 0
+
+        if has_baselines:
+            baseline = Enu_baselines[dp][baseline_key][mask]
+            ratio_bl = baseline[valid] / true[valid]
+            ax[0, i].hist(
+                baseline[valid] - true[valid],
+                bins=residual_bins,
+                histtype="step",
+                label="baseline",
+            )
+            ax[1, i].hist(
+                ratio_bl,
+                bins=ratio_bins,
+                histtype="step",
+                label="baseline",
+            )
+
+        for loss in results:
+            for model in results[loss]:
+                if model not in E_pred_dict.get(dp, {}).get(loss, {}):
+                    continue
+                reco = E_pred_dict[dp][loss][model][mask]
+                ratio_model = reco[valid] / true[valid]
+                ax[0, i].hist(
+                    reco[valid] - true[valid],
+                    bins=residual_bins,
+                    histtype="step",
+                    label=f"{model}-{loss}",
+                )
+                ax[1, i].hist(
+                    ratio_model,
+                    bins=ratio_bins,
+                    histtype="step",
+                    label=f"{model}-{loss}",
+                )
+
+        qlabel = f"{qlow}-{qhigh}" if qhigh < 100 else f"{qlow}+"
+        ax[0, i].set(
+            xlabel="E reco − E true [GeV]",
+            ylabel="Counts",
+            title=f"$q_3$: {qlabel} GeV",
+        )
+        ax[1, i].set(
+            xlabel="E reco / E true",
+            ylabel="Counts",
+            title=f"$q_3$: {qlabel} GeV",
+        )
+        ax[0, i].legend(loc="lower left", fontsize=7)
+        ax[1, i].legend(loc="lower left", fontsize=7)
+        ax[0, i].grid(True)
+        ax[1, i].grid(True)
+
+    fig.tight_layout()
+    return fig
+
+# ---------------------------------------------------------------------------
 # Grouped training_names utilities (seeds as arrays)
 # ---------------------------------------------------------------------------
 
@@ -818,13 +952,9 @@ def _resolve_color_map(
         colors = {}
     out: dict[str, Any] = {}
     for label in config_labels:
-        matched = False
-        for token, colour in colors.items():
-            if token in label:
-                out[label] = colour
-                matched = True
-                break
-        if not matched:
+        if label in colors:
+            out[label] = colors[label]
+        else:
             out[label] = "tab:gray"
     return out
 
@@ -1028,7 +1158,7 @@ def plot_rms_iqr_with_uncertainty(
             ratio_bl = bl[valid] / true[valid]
             if ratio_bl.size > 0:
                 # Global in-range for RMS/IQR
-                in_range_bl = (ratio_bl > 0) & (ratio_bl <= 20)
+                in_range_bl = (ratio_bl >= 0) & (ratio_bl <= 20)
                 pct_in_range_bl = float(in_range_bl.sum() / ratio_bl.size * 100.0)
                 ratio_bl_clipped = ratio_bl[in_range_bl]
                 # Tighter MPV window (0, 2] for MPV via histogram mode
@@ -1044,7 +1174,7 @@ def plot_rms_iqr_with_uncertainty(
                 )
                 rms_val = float(np.sqrt(np.mean((ratio_bl_clipped - 1.0) ** 2)))
                 if ratio_bl_mpv.size > 0:
-                    hist, edges = np.histogram(ratio_bl_mpv, bins=100, range=(0.0, 2.0))
+                    hist, edges = np.histogram(ratio_bl_mpv, bins=50, range=(0.0, 2.0))
                     max_idx = int(np.argmax(hist))
                     mpv_val = float(0.5 * (edges[max_idx] + edges[max_idx + 1]))
                 else:

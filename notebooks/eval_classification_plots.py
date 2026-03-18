@@ -660,6 +660,7 @@ def plot_cc1pi_vs_pion_kinematics(
     uncertainties: bool = False,
     reco_baseline_tpr: dict[str, np.ndarray] | None = None,
     reco_baseline_label: str = "Reco baseline",
+    colors: dict[str, str] | None = None,
 ) -> plt.Figure:
     """2x3 figure: pion E (top row) and pion theta (bottom row).
 
@@ -686,21 +687,22 @@ def plot_cc1pi_vs_pion_kinematics(
     for model_name, metrics in all_metrics.items():
         agg_E = metrics["E"]
         agg_theta = metrics["theta"]
+        clr = {} if colors is None else {"color": colors.get(model_name)}
 
-        _plot_metric_line(axes[0, 0], E_mid, agg_E["auprc"], model_name, uncertainties)
-        _plot_metric_line(axes[1, 0], theta_mid, agg_theta["auprc"], model_name, uncertainties)
-        _plot_metric_line(axes[0, 1], E_mid, agg_E["auroc"], model_name, uncertainties)
-        _plot_metric_line(axes[1, 1], theta_mid, agg_theta["auroc"], model_name, uncertainties)
+        _plot_metric_line(axes[0, 0], E_mid, agg_E["auprc"], model_name, uncertainties, **clr)
+        _plot_metric_line(axes[1, 0], theta_mid, agg_theta["auprc"], model_name, uncertainties, **clr)
+        _plot_metric_line(axes[0, 1], E_mid, agg_E["auroc"], model_name, uncertainties, **clr)
+        _plot_metric_line(axes[1, 1], theta_mid, agg_theta["auroc"], model_name, uncertainties, **clr)
 
         for fpr_val in fixed_fpr:
             key = f"tpr@{fpr_val}"
             _plot_metric_line(
                 axes[0, 2], E_mid, agg_E[key],
-                f"{model_name} (FPR={fpr_val:.0%})", uncertainties,
+                f"{model_name} (FPR={fpr_val:.0%})", uncertainties, **clr,
             )
             _plot_metric_line(
                 axes[1, 2], theta_mid, agg_theta[key],
-                f"{model_name} (FPR={fpr_val:.0%})", uncertainties,
+                f"{model_name} (FPR={fpr_val:.0%})", uncertainties, **clr,
             )
 
     if reco_baseline_tpr is not None:
@@ -739,6 +741,7 @@ def plot_multi_pion_vs_q3(
     uncertainties: bool = False,
     reco_baseline_tpr_q3: np.ndarray | None = None,
     reco_baseline_label: str = "Reco baseline",
+    colors: dict[str, str] | None = None,
 ) -> plt.Figure:
     """1x3 figure: AUPRC / AUROC / TPR@FPR vs q3.
 
@@ -758,13 +761,14 @@ def plot_multi_pion_vs_q3(
     axes[0].plot(q3_mid, baseline_q3, ".--", color="black", label="Random baseline")
 
     for model_name, agg in all_metrics_q3.items():
-        _plot_metric_line(axes[0], q3_mid, agg["auprc"], model_name, uncertainties)
-        _plot_metric_line(axes[1], q3_mid, agg["auroc"], model_name, uncertainties)
+        clr = {} if colors is None else {"color": colors.get(model_name)}
+        _plot_metric_line(axes[0], q3_mid, agg["auprc"], model_name, uncertainties, **clr)
+        _plot_metric_line(axes[1], q3_mid, agg["auroc"], model_name, uncertainties, **clr)
         for fpr_val in fixed_fpr:
             key = f"tpr@{fpr_val}"
             _plot_metric_line(
                 axes[2], q3_mid, agg[key],
-                f"{model_name} (FPR={fpr_val:.0%})", uncertainties,
+                f"{model_name} (FPR={fpr_val:.0%})", uncertainties, **clr,
             )
 
     if reco_baseline_tpr_q3 is not None:
@@ -805,6 +809,7 @@ def plot_binned_by_inttype(
     playlist: str = "1A",
     reco_baseline_pred: np.ndarray | None = None,
     reco_baseline_label: str = "Reco baseline",
+    colors: dict[str, str] | None = None,
 ) -> plt.Figure:
     """One row per interaction type, 4 columns: AUPRC, AUROC, TPR@FPR,
     and an event-count histogram.
@@ -896,13 +901,14 @@ def plot_binned_by_inttype(
         axes[row_idx, 0].plot(x_mid, bl_values, ".--", color="black", label="Random baseline")
 
         for model_name, agg in all_agg.items():
-            _plot_metric_line(axes[row_idx, 0], x_mid, agg["auprc"], model_name, uncertainties)
-            _plot_metric_line(axes[row_idx, 1], x_mid, agg["auroc"], model_name, uncertainties)
+            clr = {} if colors is None else {"color": colors.get(model_name)}
+            _plot_metric_line(axes[row_idx, 0], x_mid, agg["auprc"], model_name, uncertainties, **clr)
+            _plot_metric_line(axes[row_idx, 1], x_mid, agg["auroc"], model_name, uncertainties, **clr)
             for fpr_val in fixed_fpr:
                 key = f"tpr@{fpr_val}"
                 _plot_metric_line(
                     axes[row_idx, 2], x_mid, agg[key],
-                    f"{model_name} (FPR={fpr_val:.0%})", uncertainties,
+                    f"{model_name} (FPR={fpr_val:.0%})", uncertainties, **clr,
                 )
 
         # Reco baseline on TPR panel
@@ -1088,6 +1094,7 @@ def plot_prc_curves(
     playlist: str = "1A",
     uncertainties: bool = False,
     max_threshold: float | None = None,
+    colors: dict[str, str] | None = None,
 ) -> plt.Figure:
     """Plot PRC curves for all models with optional uncertainty bands.
 
@@ -1119,6 +1126,7 @@ def plot_prc_curves(
             label = f"{model_name} (AUPRC={auprc_m:.3f}±{auprc_s:.3f})"
         else:
             label = f"{model_name} (AUPRC={auprc_m:.3f})"
+        clr = {} if colors is None else {"color": colors.get(model_name)}
 
         for ax_idx, ax in enumerate(axes):
             if ax_idx == 1 and max_threshold is not None:
@@ -1127,7 +1135,7 @@ def plot_prc_curves(
             else:
                 r, p, s = rec, prec_mean, prec_std
 
-            line, = ax.plot(r, p, "-", label=label)
+            line, = ax.plot(r, p, "-", label=label, **clr)
             if uncertainties:
                 ax.fill_between(r, p - s, p + s, alpha=0.2, color=line.get_color())
 

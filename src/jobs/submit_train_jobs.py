@@ -20,7 +20,7 @@ def generate_cmd(data_cap=-1, seed=42, task="regression", model="Transformer1", 
     if continue_from:
         base = f"python -m src.scripts.train --resume {continue_from} -name {resume_run_name} --resume-run-id {resume_run_id} --max_steps 1000000"
         return base.format(continue_from=continue_from)
-    base = "python -m src.scripts.train -bs {bs} --mode {task} {detailed_task} -name {name} --d_model 128 --depth 4 --n_heads 8 --dropout 0.0 --attn_dropout 0.0 {cap} --seed {seed} -seed-event-sampler {seed}  --max_steps {max_steps} --grad_accum_steps {grad_accum_steps} {extra} --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260313 --eval-every 50"
+    base = "python -m src.scripts.train -bs {bs} --mode {task} {detailed_task} -name {name} --d_model 128 --depth 4 --n_heads 8 --dropout 0.0 --attn_dropout 0.0 {cap} --seed {seed} -seed-event-sampler {seed}  --max_steps {max_steps} --grad_accum_steps {grad_accum_steps} {extra} --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260313"
     # Model options: "Transformer1", "OLS" (OmniLearned Small), "OLS_RW" (OLS Random Weights)
     # Seed both the event sampler and the whole training with seed
     detailed_task = "-E-available-no-muon" if task == "regression" else "-npi2"
@@ -67,10 +67,10 @@ def get_cmds_and_slurm_times():
     }
     cmds = []
     slurm_times = []
-    for seed in [46, 47, 48, 49, 50]:
-        for data_cap in [20000]:
+    for seed in [46]:
+        for data_cap in [-1]:
             for task in ["regression", "classifier"]:
-                for model in ["Transformer1"]: #["Transformer1", "OLS", "OLS_RW", "OLM"]:
+                for model in ["OLS"]: #["Transformer1", "OLS", "OLS_RW", "OLM"]:
                     if "OL" in model:
                         bs = 2048
                         grad_accum_steps = 1
@@ -135,7 +135,7 @@ def get_cmds_and_slurm_times_continue():
 
 
 if __name__ == "__main__":
-    cmds, slurm_times = get_cmds_and_slurm_times_continue()
+    cmds, slurm_times = get_cmds_and_slurm_times()
     for i, cmd in enumerate(cmds):
         job_name = f"run_{i}_{dt.now().strftime('%Y%m%d_%H%M%S')}"
         log_dir = f"/global/cfs/cdirs/m3246/gregork/Minerva/logs/run_100326/{job_name}.log"
