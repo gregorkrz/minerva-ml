@@ -743,6 +743,7 @@ def plot_multi_pion_vs_q3(
     reco_baseline_tpr_q3: np.ndarray | None = None,
     reco_baseline_label: str = "Reco baseline",
     colors: dict[str, str] | None = None,
+    title: str | None = None,
 ) -> plt.Figure:
     """1x3 figure: AUPRC / AUROC / TPR@FPR vs q3.
 
@@ -752,6 +753,8 @@ def plot_multi_pion_vs_q3(
         reconstruction-level baseline.  Plotted on the rightmost
         (TPR@FPR) panel.
     reco_baseline_label : label for the reco baseline in the legend.
+    title : optional figure super-title.  Defaults to a multi-pion
+        description when *None*.
     """
     if fixed_fpr is None:
         fixed_fpr = DEFAULT_FIXED_FPR
@@ -788,10 +791,9 @@ def plot_multi_pion_vs_q3(
         ax.legend(fontsize=7)
         ax.grid(True)
 
-    fig.suptitle(
-        r"Multi-pion tagging (one or more charged pions) vs. true $q_3$",
-        fontsize=14,
-    )
+    if title is None:
+        title = r"Multi-pion tagging (one or more charged pions) vs. true $q_3$"
+    fig.suptitle(title, fontsize=14)
     return fig
 
 
