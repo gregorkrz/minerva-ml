@@ -330,6 +330,7 @@ def compute_binned_metrics_single(
     theta_bins = data["pion_theta_MC_bins"]
 
     metrics_E = []
+
     for i in range(len(E_bins) - 1):
         bm = has_pion & (pion_E > E_bins[i]) & (pion_E <= E_bins[i + 1])
         metrics_E.append(
@@ -714,7 +715,7 @@ def plot_cc1pi_vs_pion_kinematics(
                             label=reco_baseline_label)
 
     col_labels = ["AUPRC", "AUROC", "Efficiency (TPR)"]
-    for row, kinematic in enumerate(["Pion energy [GeV]", "Pion angle [rad]"]):
+    for row, kinematic in enumerate([r"MC truth $E_\pi$ [GeV]", r"MC truth $\theta_\pi$ [rad]"]):
         for col, metric in enumerate(col_labels):
             ax = axes[row, col]
             ax.set_xlabel(kinematic)
