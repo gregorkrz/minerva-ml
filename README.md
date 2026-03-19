@@ -1,34 +1,96 @@
 # minerva-data-processing
 
-This folder contains lots of duplicate code! Probably the latest notebook version will contain cleanest and most useful info.
-Work in progress.
+This repository contains the data processing and model training code used for ML studies on MINERvA events.
 
-## Download the data
+For detailed data fields and semantics, see **[DATASET.md](DATASET.md)**.  
+For model architecture details, see **[MODELS.md](MODELS.md)**.
 
-First, make sure that the `SCRATCH` environment variable is set.
+## Repository workflow
 
-* To download MC: ```python -m src.scripts.download_data```
-* To download data: ```python -m src.scripts.download_data --prefix MediumEnergy_FHC_Data_Playlist```
+The typical workflow is:
 
-## Preprocess the data
+1. Download raw playlists
+2. Preprocess ROOT files into ML-ready tensors
+3. Split into train/val/test
+4. Train models locally or submit SLURM jobs
 
-```python -m src.scripts.preprocess_dataset --output-dir <OUTPUT_DIR>```
+## 1) Download data
 
-This doesn't do any filtering.
+Set `SCRATCH` first, then run:
 
-## Data selection and split
+```bash
+# Monte Carlo
+python -m src.scripts.download_data
 
-```python -m src.scripts.split_dataset --input-dir /data/Minerva/20260127_nested  --output-dir /data/Minerva/20260127_nested_split```
+# Data playlist
+python -m src.scripts.download_data --prefix MediumEnergy_FHC_Data_Playlist
+```
 
-To investigate the features of the created dataset, look at `notebooks/stats.ipynb`.
+## 2) Preprocess dataset
+
+```bash
+python -m src.scripts.preprocess_dataset --output-dir <OUTPUT_DIR>
+```
+
+This creates `.pb` files with event-wise particle tensors and labels.
+
+## 3) Split into train / val / test
+
+```bash
+python -m src.scripts.split_dataset \
+  --input-dir <PREPROCESSED_DIR> \
+  --output-dir <SPLIT_OUTPUT_DIR>
+```
+
+To inspect created features quickly, see `notebooks/stats.ipynb`.
+
+## 4) Train models
+
+### Direct training command
+
+Use `src/scripts/train.py` for both regression and classification.
+
+```bash
+python -m src.scripts.train \
+  -bs 2048 \
+  --mode regression \
+  -E-available-no-muon \
+  -name Run_debug \
+  --d_model 128 --depth 4 --n_heads 8 \
+  --max_steps 500000 \
+  --data_path <SPLIT_OUTPUT_DIR>
+```
+
+### SLURM submission (`src/jobs/submit_train_jobs.py`)
+
+`src/jobs/submit_train_jobs.py` builds training commands, writes SLURM scripts, and submits them with `sbatch`.
+
+Current defaults in that script:
+- loops over `seed`, `data_cap`, `task`, and `model`
+- uses `task in {regression, classifier}` (these map directly to `--mode` values)
+- supports `model in {Transformer1, OLS, OLS_RW, OLM}`
+- maps each `(data_cap, model)` to a SLURM walltime
+- writes `.slurm`, `.log`, and `.error.log` files under fixed NERSC paths
+
+Before running submission:
+
+1. Create a `.env` file in repo root with environment variables needed in your cluster job.
+2. Update hardcoded paths in `submit_train_jobs.py` if you are not using the default NERSC layout (for example `--data_path` in `generate_cmd`, `CKPT_DIR` in resume mode, and the `log_dir` / `error_dir` / `slurm_file` paths in `__main__`).
+3. Optionally edit `get_cmds_and_slurm_times()` to choose your model/task/data-cap sweep.
+
+Then submit:
+
+```bash
+python src/jobs/submit_train_jobs.py
+```
+
+The script also includes `get_cmds_and_slurm_times_continue()` for checkpoint resume runs.
 
 ## Event displays
 
-The script will plot event displays with directions of the particles in the theta-phi plane. For blobs, we assume the direction from `(0, 0, 0)` to the primary vertex to the blob position.
-
-```python -m src.scripts.make_event_displays --input_file <PATH_TO_ROOT_FILE> --output_dir <PATH_TO_OUTPUT_DIR> --n_events 10```
-
-## Training (OmniLearned repo)
-
-`python -m omnilearned.cli train --dataset minerva_1A --path /data/Minerva/20260127_nested_split --output_dir ./test_run --save_tag "test" --size small --num_feat 4 --use_pid --pid_idx 4 --pid_dim 6 --conditional --num_cond 4 --mode regression_E_nu --num_classes 1 --batch 16 --epoch 2 --lr 5e-5 --num_workers 2 --nevts 1000`
-
+```bash
+python -m src.scripts.make_event_displays \
+  --input_file <PATH_TO_ROOT_FILE> \
+  --output_dir <PATH_TO_OUTPUT_DIR> \
+  --n_events 10
+```
