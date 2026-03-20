@@ -16,14 +16,19 @@ def get_env_vars():
     return env_commands
 
 
-def generate_cmd(data_cap=-1, seed=42, task="regression", model="Transformer1", bs=2048, max_steps=250000, grad_accum_steps=1, continue_from="", resume_run_id="", resume_run_name=""):
+def generate_cmd(data_cap=-1, seed=42, task="regression", model="Transformer1", bs=2048, max_steps=250000, grad_accum_steps=1, continue_from="", resume_run_id="", resume_run_name="", model_n_layers=4):
     if continue_from:
         base = f"python -m src.scripts.train --resume {continue_from} -name {resume_run_name} --resume-run-id {resume_run_id} --max_steps 1000000"
         return base.format(continue_from=continue_from)
-    base = "python -m src.scripts.train -bs {bs} --mode {task} {detailed_task} -name {name} --d_model 128 --depth 4 --n_heads 8 --dropout 0.0 --attn_dropout 0.0 {cap} --seed {seed} -seed-event-sampler {seed}  --max_steps {max_steps} --grad_accum_steps {grad_accum_steps} {extra} --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260313"
+    base = "python -m src.scripts.train -bs {bs} --mode {task} {detailed_task} -name {name} --d_model {model_dim} --depth {model_depth} --n_heads {model_n_heads} --dropout {model_dropout} --attn_dropout {model_attn_dropout} {cap} --seed {seed} -seed-event-sampler {seed}  --max_steps {max_steps} --grad_accum_steps {grad_accum_steps} {extra} --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260313"
     # Model options: "Transformer1", "OLS" (OmniLearned Small), "OLS_RW" (OLS Random Weights)
     # Seed both the event sampler and the whole training with seed
     detailed_task = "-E-available-no-muon" if task == "regression" else "-npi2"
+    model_dim = 128
+    model_depth = 4
+    model_n_heads = 8
+    model_dropout = 0.0
+    model_attn_dropout = 0.0
     if model == "OLS":
         name = f"Run_1703_OLS_{task}_{data_cap}_seed{seed}"
         extra = " --use-omnilearned small --use-pretrained pretrain_s"
@@ -33,13 +38,18 @@ def generate_cmd(data_cap=-1, seed=42, task="regression", model="Transformer1", 
     elif model == "OLM":
         name = f"Run_1703_OLM_{task}_{data_cap}_seed{seed}"
         extra = " --use-omnilearned medium --use-pretrained pretrain_m"
-    elif model == "Transformer1":  # Transformer1
+    elif model == "Transformer1" or model == "Transformer2":  # Transformer1
         name = f"Run_1703_{task}_{model}_data_cap_{data_cap}_seed_{seed}"
         extra = ""
+        if model == "Transformer2":
+            model_n_heads = 12
+            model_dim = 384
+            model_depth = 8
     else:
         raise ValueError(f"Invalid model: {model}")
     cap = f" -cap {data_cap} " if data_cap > 0 else ""
-    return base.format(bs=bs, task=task, detailed_task=detailed_task, name=name, cap=cap, seed=seed, max_steps=max_steps, extra=extra, grad_accum_steps=grad_accum_steps)
+    return base.format(bs=bs, task=task, detailed_task=detailed_task, name=name, cap=cap, seed=seed, max_steps=max_steps, extra=extra, grad_accum_steps=grad_accum_steps,
+    model_dim=model_dim, model_depth=model_depth, model_n_heads=model_n_heads, model_dropout=model_dropout, model_attn_dropout=model_attn_dropout, model_n_layers=model_n_layers)
 
 
 def get_cmds_and_slurm_times():
@@ -67,10 +77,10 @@ def get_cmds_and_slurm_times():
     }
     cmds = []
     slurm_times = []
-    for seed in [46]:
+    for seed in [46, 47, 48, 49]:
         for data_cap in [-1]:
             for task in ["regression", "classifier"]:
-                for model in ["OLS"]: #["Transformer1", "OLS", "OLS_RW", "OLM"]:
+                for model in ["Transformer2"]: #["Transformer1", "OLS", "OLS_RW", "OLM"]:
                     if "OL" in model:
                         bs = 2048
                         grad_accum_steps = 1
