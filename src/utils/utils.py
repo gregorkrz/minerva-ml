@@ -61,7 +61,9 @@ def get_runs_by_model_and_cap(
             m = re.search(r"_regression_(Transformer\d+)_data_cap_(-?\d+)_", name)
             if m:
                 model, cap = m.group(1), int(m.group(2))
-                model = "Transformer"
+                if model == "Transformer1":
+                    model = "Transformer"
+                # otherwise, just keep transformer 2
         if model is None:
             m = re.search(r"_cond_only_([a-zA-Z0-9]+)_seed(-?\d+)_", name)
             if m:

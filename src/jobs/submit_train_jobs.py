@@ -21,7 +21,7 @@ def generate_cmd(data_cap=-1, seed=42, task="regression", model="Transformer1", 
         base = f"python -m src.scripts.train --resume {continue_from} -name {resume_run_name} --resume-run-id {resume_run_id} --max_steps 1000000"
         return base.format(continue_from=continue_from)
     base = "python -m src.scripts.train -bs {bs} --mode {task} {detailed_task} -name {name} --d_model {model_dim} --depth {model_depth} --n_heads {model_n_heads} --dropout {model_dropout} --attn_dropout {model_attn_dropout} {cap} --seed {seed} -seed-event-sampler {seed}  --max_steps {max_steps} --grad_accum_steps {grad_accum_steps} {extra} --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260313"
-    # Model options: "Transformer1", "OLS" (OmniLearned Small), "OLS_RW" (OLS Random Weights)
+    # Model options: "Transformer1", "Transformer1NR" (no E_recoil: --zero-cond-feature 2), "Transformer2", "Transformer3", "OLS", "OLS_RW", "OLM"
     # Seed both the event sampler and the whole training with seed
     detailed_task = "-E-available-no-muon" if task == "regression" else "-npi2"
     model_dim = 128
@@ -38,13 +38,19 @@ def generate_cmd(data_cap=-1, seed=42, task="regression", model="Transformer1", 
     elif model == "OLM":
         name = f"Run_1703_OLM_{task}_{data_cap}_seed{seed}"
         extra = " --use-omnilearned medium --use-pretrained pretrain_m"
-    elif model == "Transformer1" or model == "Transformer2":  # Transformer1
+    elif model in ("Transformer1", "Transformer1NR", "Transformer2", "Transformer3"):
         name = f"Run_1703_{task}_{model}_data_cap_{data_cap}_seed_{seed}"
         extra = ""
-        if model == "Transformer2":
+        if model == "Transformer1NR":
+            extra = " --zero-cond-feature 2 "
+        elif model == "Transformer2":
             model_n_heads = 12
             model_dim = 384
             model_depth = 8
+        elif model == "Transformer3":
+            model_dim = 184
+            model_depth = 7
+            model_n_heads = 8
     else:
         raise ValueError(f"Invalid model: {model}")
     cap = f" -cap {data_cap} " if data_cap > 0 else ""
@@ -58,21 +64,25 @@ def get_cmds_and_slurm_times():
             "OLS_RW": "01:30:00",
             "OLS": "00:50:00",
             "Transformer1": "00:20:00",
+            "Transformer1NR": "00:20:00",
         },
         "50000": {
             "OLS_RW": "03:00:00",
             "OLS": "01:00:00",
             "Transformer1": "00:20:00",
+            "Transformer1NR": "00:20:00",
         },
         "100000":{
             "OLS_RW": "04:00:00",
             "Transformer1": "00:20:00",
+            "Transformer1NR": "00:20:00",
             "OLS": "01:00:00"
         },
         "200000": {
             "OLS_RW": "05:00:00",
             "OLS": "01:30:00",
             "Transformer1": "00:20:00",
+            "Transformer1NR": "00:20:00",
         }
     }
     cmds = []
@@ -80,7 +90,7 @@ def get_cmds_and_slurm_times():
     for seed in [46, 47, 48, 49]:
         for data_cap in [-1]:
             for task in ["regression", "classifier"]:
-                for model in ["Transformer2"]: #["Transformer1", "OLS", "OLS_RW", "OLM"]:
+                for model in ["Transformer1NR"]: #["Transformer1", "OLS", "OLS_RW", "OLM"]:
                     if "OL" in model:
                         bs = 2048
                         grad_accum_steps = 1
@@ -101,7 +111,7 @@ def get_cmds_and_slurm_times():
                         grad_accum_steps = 1
                         if task == "regression":
                             if data_cap == -1:
-                                slurm_times.append("05:00:00")
+                                slurm_times.append("08:00:00")
                             else:
                                 slurm_times.append(times_data_cap[str(data_cap)][model])
                         else:
@@ -168,3 +178,4 @@ if __name__ == "__main__":
         print(f"Saved slurm file to {slurm_file}")
         os.system(f"sbatch {slurm_file}")
         print("Job submitted")
+
