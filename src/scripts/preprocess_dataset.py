@@ -7,7 +7,17 @@ import uproot
 import awkward as ak
 from concurrent.futures import ThreadPoolExecutor, as_completed
 #from src.dataset.resolution_tools import find_narrowest_interval
-from src.dataset.preprocessing import get_event_repr_nested_tensor, get_muons, get_photons, get_dense, remove_overflows, get_global_features, get_event_labels, preprocess_dEdX
+from src.dataset.preprocessing import (
+    get_event_repr_nested_tensor,
+    get_muons,
+    get_photons,
+    get_dense,
+    remove_overflows,
+    get_global_features,
+    compute_extra_global_features,
+    get_event_labels,
+    preprocess_dEdX,
+)
 import argparse
 import time
 import traceback
@@ -52,6 +62,9 @@ def process_single_root_file(playlist, root_file, dataset_path, output_dir, use_
             photons.data[:, -1] = preprocess_dEdX(photons.data[:, -1])
             muons = remove_overflows(muons)
             global_features = get_global_features(master_ana_dev)
+            global_features = np.concatenate(
+                [global_features, compute_extra_global_features(muons, photons, prongs)], axis=1
+            )
             mc_part = get_dense(mc_part_keys, master_ana_dev)
             truth_labels = get_event_labels(master_ana_dev, mc_part)
             max_blobs = max_blobs if use_max_blobs_and_prongs else -1

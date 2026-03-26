@@ -24,6 +24,7 @@ from src.dataset.dataloader import load_data
 from src.models.vit import PointGlobalMixedViT, PointGlobalMixedViTConfig
 from src.models.omnilearned import PET2, get_model_parameters
 from src.scripts.train import set_seed, prepare_batch, prepare_batch_omnilearned, create_task, CondOnlyMLP
+from src.constants.dataset import GLOBAL_COND_BASE_DIM
 from types import SimpleNamespace
 
 
@@ -85,7 +86,7 @@ def create_model_from_checkpoint(checkpoint_path, device):
     elif args_dict.get("cond_only", False):
         e_sum_dim = 6 if args_dict.get("include_E_sum", False) else 0
         model = CondOnlyMLP(
-            input_dim=4 + e_sum_dim,
+            input_dim=GLOBAL_COND_BASE_DIM + e_sum_dim,
             hidden_dim=args_dict.get("d_model", 128),
             output_dim=num_classes,
             n_layers=args_dict.get("mlp_layers", 3),
@@ -96,7 +97,7 @@ def create_model_from_checkpoint(checkpoint_path, device):
         e_sum_dim = 6 if args_dict.get("include_E_sum", False) else 0
         point_cat_num_classes = [8] if args_dict.get("use_pid", True) else []
         global_cat_num_classes = []
-        global_cont_dim = (4 if args_dict.get("use_cond", False) else 0) + e_sum_dim
+        global_cont_dim = (GLOBAL_COND_BASE_DIM if args_dict.get("use_cond", False) else 0) + e_sum_dim
         use_event_token = args_dict.get("use_cond", False) or args_dict.get("include_E_sum", False)
         
         cfg = PointGlobalMixedViTConfig(

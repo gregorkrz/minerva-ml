@@ -429,6 +429,46 @@ def get_global_features(master_ana_dev):
     # concat n michels to global features
     return np.concatenate([global_features, N_michel[:,np.newaxis]], axis=1)
 
+
+def _dense_column_offset(dense: DenseCollection, key: str) -> int:
+    """Byte offset of column `key` in dense.data (stacked feature matrix)."""
+    off = 0
+    for i, k in enumerate(dense.keys):
+        if k == key:
+            return off
+        off += dense.column_widths[i]
+    raise KeyError(f"{key!r} not in dense.keys {dense.keys}")
+
+
+def compute_extra_global_features(muons: DenseCollection, photons: DenseCollection, prongs: DenseCollection) -> np.ndarray:
+    """
+    Three extra global features per event (use after remove_overflows on muons):
+      0 — reconstructed muon present (0 or 1; MINOS-matched count clipped to 1)
+      1 — invariant mass of the two photons if exactly two reco photons, else 0 (MeV, from px,py,pz,E)
+      2 — number of charged prongs (|charge| > 1e-6)
+    """
+    n_events = len(muons.n)
+    if not (n_events == len(photons.n) == len(prongs.n)):
+        raise ValueError("muons, photons, prongs must have the same number of events")
+    out = np.zeros((n_events, 3), dtype=np.float32)
+    out[:, 0] = np.clip(muons.n.astype(np.float32), 0.0, 1.0)
+
+    charge_col = _dense_column_offset(prongs, "prong_part_charge")
+    for i in range(n_events):
+        n_ph = int(photons.n[i])
+        if n_ph == 2:
+            p = photons.data[photons.bounds[i] : photons.bounds[i + 1], :4]  # px, py, pz, E
+            s = p[0] + p[1]
+            px, py, pz, E = float(s[0]), float(s[1]), float(s[2]), float(s[3])
+            m2 = E * E - px * px - py * py - pz * pz
+            out[i, 1] = np.sqrt(max(0.0, m2))
+
+        sl = slice(prongs.bounds[i], prongs.bounds[i + 1])
+        ch = prongs.data[sl, charge_col]
+        out[i, 2] = float(np.sum(np.abs(ch) > 1e-6))
+    return out
+
+
 def get_n_pions_label(mc_current, mc_part):
     # CC n Pi label
     n_pi_plus = []

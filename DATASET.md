@@ -17,7 +17,7 @@ Each split is stored as a PyTorch file (`.pb`) containing a dictionary with thre
 |---|---|---|
 | `data` | `torch.nested.nested_tensor` (jagged) | `(N_events, variable N_particles, 10)` |
 | `truth_labels` | `numpy.ndarray` | `(N_events, 15)` |
-| `global_features` | `numpy.ndarray` | `(N_events, 10)` |
+| `global_features` | `numpy.ndarray` | `(N_events, 13)` |
 
 The dataset is split into `train/`, `val/`, and `test/` directories (default 80/10/10 split, stratified by interaction type). Only events with interaction types in {1, 2, 3, 4, 8} are kept; all others are filtered out.
 
@@ -125,7 +125,7 @@ If there are more than 10 prongs, the top 9 by energy are kept individually and 
 
 ## Global Features (`global_features`)
 
-A 10-dimensional vector per event providing event-level context.
+A 13-dimensional vector per event providing event-level context.
 
 ### Columns 0–3: Calorimetric and muon-related
 
@@ -136,18 +136,26 @@ A 10-dimensional vector per event providing event-level context.
 | 2 | Hadronic recoil energy | `log(MasterAnaDev_hadron_recoil + 1e-5)` (negative values clipped to 0 before log) |
 | 3 | Number of Michel electrons | Raw integer count from `improved_nmichel` |
 
-### Columns 4–9: Energy sums by particle type
+### Columns 4–6: Reconstruction summaries (from point-cloud inputs)
+
+| Index | Name | Description |
+|---|---|---|
+| 4 | Reconstructed muon flag | `1` if at least one MINOS-matched muon after overflow cleaning, else `0` (same selection as the muon token in `data`) |
+| 5 | γγ invariant mass | If exactly two reconstructed photons (`gamma1` / `gamma2` with `E > 1e-5`), invariant mass in MeV from `(px, py, pz, E)`; else `0` |
+| 6 | Charged prong count | Number of prongs with `|prong_part_charge| > 1e-6` (after prong filtering) |
+
+### Columns 7–12: Energy sums by particle type
 
 These are the total energy deposited per node type, log-transformed: `log(Σ E + 1e-3)`, where E is computed as `exp(log_E_feature)` for all particles of that type in the event.
 
 | Index | PID summed | Description |
 |---|---|---|
-| 4 | 2 | Total blob energy |
-| 5 | 3 | Total prong (pion hypothesis) energy |
-| 6 | 4 | Total prong (EM shower hypothesis) energy |
-| 7 | 5 | Total prong (muon-like hypothesis) energy |
-| 8 | 6 | Aggregated blob energy |
-| 9 | 7 | Aggregated prong energy |
+| 7 | 2 | Total blob energy |
+| 8 | 3 | Total prong (pion hypothesis) energy |
+| 9 | 4 | Total prong (EM shower hypothesis) energy |
+| 10 | 5 | Total prong (muon-like hypothesis) energy |
+| 11 | 6 | Aggregated blob energy |
+| 12 | 7 | Aggregated prong energy |
 
 ---
 

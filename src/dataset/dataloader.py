@@ -263,7 +263,7 @@ class HEPTorchDataset(Dataset):
                 mask = pid == pid_val
                 energy_sums[i] = E[mask].sum()
             sample["energy_sums"] = energy_sums
-        # When global_feature_dim == 10, cond already includes the 6 log(energy_sum+1e-3) columns
+        # When global_feature_dim is 10 (legacy) or 13 (7 base + 6 log energy sums), cond is complete
 
         return sample
 
