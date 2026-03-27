@@ -17,7 +17,7 @@ Each split is stored as a PyTorch file (`.pb`) containing a dictionary with thre
 |---|---|---|
 | `data` | `torch.nested.nested_tensor` (jagged) | `(N_events, variable N_particles, 10)` |
 | `truth_labels` | `numpy.ndarray` | `(N_events, 15)` |
-| `global_features` | `numpy.ndarray` | `(N_events, 13)` |
+| `global_features` | `numpy.ndarray` | `(N_events, 16)` |
 
 The dataset is split into `train/`, `val/`, and `test/` directories (default 80/10/10 split, stratified by interaction type). Only events with interaction types in {1, 2, 3, 4, 8} are kept; all others are filtered out.
 
@@ -125,37 +125,52 @@ If there are more than 10 prongs, the top 9 by energy are kept individually and 
 
 ## Global Features (`global_features`)
 
-A 13-dimensional vector per event providing event-level context.
+A 16-dimensional vector per event providing event-level context.
 
-### Columns 0–3: Calorimetric and muon-related
+### Columns 0–2: Calorimetric (log)
 
 | Index | Name | Transform |
 |---|---|---|
 | 0 | Muon fuzz energy | `log(muon_fuzz_energy + 1e-5)` (negative values clipped to 0 before log) |
 | 1 | Muon isolated blobs energy | `log(muon_iso_blobs_energy + 1e-5)` (negative values clipped to 0 before log) |
 | 2 | Hadronic recoil energy | `log(MasterAnaDev_hadron_recoil + 1e-5)` (negative values clipped to 0 before log) |
-| 3 | Number of Michel electrons | Raw integer count from `improved_nmichel` |
 
-### Columns 4–6: Reconstruction summaries (from point-cloud inputs)
+### Columns 3–5: Passive recoil (log)
+
+Scaled by `/10000` from `part_response_total_recoil_passive_allNonMuonClusters_*`, then `log(value + 1e-3)` (negative values clipped to 0 before log).
+
+| Index | Name | Source |
+|---|---|---|
+| 3 | Passive recoil (ID) | `part_response_total_recoil_passive_allNonMuonClusters_id` |
+| 4 | Passive recoil (OD) | `part_response_total_recoil_passive_allNonMuonClusters_od` |
+| 5 | Passive recoil (ID+OD) | Sum of the two scaled branches |
+
+### Column 6: Michel count
 
 | Index | Name | Description |
 |---|---|---|
-| 4 | Reconstructed muon flag | `1` if at least one MINOS-matched muon after overflow cleaning, else `0` (same selection as the muon token in `data`) |
-| 5 | γγ invariant mass | If exactly two reconstructed photons (`gamma1` / `gamma2` with `E > 1e-5`), invariant mass in MeV from `(px, py, pz, E)`; else `0` |
-| 6 | Charged prong count | Number of prongs with `|prong_part_charge| > 1e-6` (after prong filtering) |
+| 6 | Number of Michel electrons | Raw integer count from `improved_nmichel` |
 
-### Columns 7–12: Energy sums by particle type
+### Columns 7–9: Reconstruction summaries (from point-cloud inputs)
+
+| Index | Name | Description |
+|---|---|---|
+| 7 | Reconstructed muon flag | `1` if at least one MINOS-matched muon after overflow cleaning, else `0` (same selection as the muon token in `data`) |
+| 8 | γγ invariant mass | If exactly two reconstructed photons (`gamma1` / `gamma2` with `E > 1e-5`), invariant mass in MeV from `(px, py, pz, E)`; else `0` |
+| 9 | Charged-pion prong count | Number of prongs with `prong_part_pid ∈ {8, 9}` (MINERvA charged-pion hypotheses; same as `CHARGED_PION_PIDS` in `extract_baselines.py`) |
+
+### Columns 10–15: Energy sums by particle type
 
 These are the total energy deposited per node type, log-transformed: `log(Σ E + 1e-3)`, where E is computed as `exp(log_E_feature)` for all particles of that type in the event.
 
 | Index | PID summed | Description |
 |---|---|---|
-| 7 | 2 | Total blob energy |
-| 8 | 3 | Total prong (pion hypothesis) energy |
-| 9 | 4 | Total prong (EM shower hypothesis) energy |
-| 10 | 5 | Total prong (muon-like hypothesis) energy |
-| 11 | 6 | Aggregated blob energy |
-| 12 | 7 | Aggregated prong energy |
+| 10 | 2 | Total blob energy |
+| 11 | 3 | Total prong (pion hypothesis) energy |
+| 12 | 4 | Total prong (EM shower hypothesis) energy |
+| 13 | 5 | Total prong (muon-like hypothesis) energy |
+| 14 | 6 | Aggregated blob energy |
+| 15 | 7 | Aggregated prong energy |
 
 ---
 

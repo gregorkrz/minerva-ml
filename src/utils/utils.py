@@ -37,6 +37,7 @@ def get_runs_by_model_and_cap(
       - OLS:    Run_1203_OLS_regression_<cap>_seed...
       - OLM:    Run_1203_OLM_regression_<cap>_seed...
       - Transformer: Run_1203_regression_Transformer1_data_cap_<cap>_seed_...
+      - Transformer1NR: Run_*_regression_Transformer1NR_data_cap_<cap>_seed_...
       - MLP: Run_cond_only_full_seed<SEED>_...
     dataset_cap is -1 for full 6M dataset, or a positive int for smaller caps.
     """
@@ -58,12 +59,15 @@ def get_runs_by_model_and_cap(
             if m:
                 model, cap = "OmniLearned-medium", int(m.group(1))
         if model is None:
-            m = re.search(r"_regression_(Transformer\d+)_data_cap_(-?\d+)_", name)
+            m = re.search(r"_regression_(Transformer[^_]+)_data_cap_(-?\d+)_", name)
             if m:
-                model, cap = m.group(1), int(m.group(2))
-                if model == "Transformer1":
+                raw, cap = m.group(1), int(m.group(2))
+                if raw == "Transformer1":
                     model = "Transformer"
-                # otherwise, just keep transformer 2
+                elif raw == "Transformer1NR":
+                    model = "Transformer1NR"
+                else:
+                    model = raw
         if model is None:
             m = re.search(r"_cond_only_([a-zA-Z0-9]+)_seed(-?\d+)_", name)
             if m:
@@ -92,6 +96,7 @@ def get_classification_runs_by_model_and_cap(
       - OLS:    Run_1203_OLS_classifier_<cap>_seed...
       - OLM:    Run_1203_OLS_classifier_<cap>_seed...
       - Transformer: Run_1203_classifier_Transformer1_data_cap_<cap>_seed_...
+      - Transformer1NR: Run_*_classifier_Transformer1NR_data_cap_<cap>_seed_...
       - MLP: Run_class_cond_only_<dscap>_seed<SEED>_...
     dataset_cap is -1 for full 6M dataset, or a positive int for smaller caps.
     """
@@ -114,10 +119,15 @@ def get_classification_runs_by_model_and_cap(
             if m:
                 model, cap = "OmniLearned-medium", int(m.group(1))
         if model is None:
-            m = re.search(r"_classifier_(Transformer\d+)_data_cap_(-?\d+)_", name)
+            m = re.search(r"_classifier_(Transformer[^_]+)_data_cap_(-?\d+)_", name)
             if m:
-                model, cap = m.group(1), int(m.group(2))
-                model = "Transformer"
+                raw, cap = m.group(1), int(m.group(2))
+                if raw == "Transformer1":
+                    model = "Transformer"
+                elif raw == "Transformer1NR":
+                    model = "Transformer1NR"
+                else:
+                    model = raw
         if model is None:
             m = re.search(r"_class_cond_only_([a-zA-Z0-9]+)_seed(-?\d+)_", name)
             if m:

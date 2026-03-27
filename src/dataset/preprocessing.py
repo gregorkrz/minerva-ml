@@ -412,22 +412,41 @@ def get_event_repr_nested_tensor(muons, photons, blobs, prongs, global_features,
     return N_events
 
 def get_global_features(master_ana_dev):
-    # Get the global features: muon fuzz energy, muon iso blobs energy, E_recoil, E_recoil_CCinc
+    # Get the global features: muon fuzz energy, muon iso blobs energy, E_recoil;
+    # plus passive recoil (ID / OD / sum) from part_response branches (see data_exploration_2.ipynb).
     muon_fuzz_energy = master_ana_dev["muon_fuzz_energy"].array().to_numpy()
     muon_iso_blobs_energy = master_ana_dev["muon_iso_blobs_energy"].array().to_numpy()
     muon_fuzz_energy[muon_fuzz_energy < 0] = 0
     muon_iso_blobs_energy[muon_iso_blobs_energy < 0] = 0
     E_recoil = master_ana_dev["MasterAnaDev_hadron_recoil"].array().to_numpy()
-    E_recoil_CCinc = master_ana_dev["MasterAnaDev_hadron_recoil_CCInc"].array().to_numpy()
     E_recoil[E_recoil < 0] = 0
-    E_recoil_CCinc[E_recoil_CCinc < 0] = 0
-    # Stack them together, so that the shape is (n_events, 4)
     N_michel = master_ana_dev["improved_nmichel"].array().to_numpy()
     global_features = np.stack([muon_fuzz_energy, muon_iso_blobs_energy, E_recoil], axis=1)
-    # Compute log10 of the global features + 1e-5 and store that
     global_features = np.log(global_features + 1e-5)
-    # concat n michels to global features
-    return np.concatenate([global_features, N_michel[:,np.newaxis]], axis=1)
+
+    passive_id = (
+        master_ana_dev["part_response_total_recoil_passive_allNonMuonClusters_id"].array().to_numpy().astype(np.float64)
+        / 10000.0
+    )
+    passive_od = (
+        master_ana_dev["part_response_total_recoil_passive_allNonMuonClusters_od"].array().to_numpy().astype(np.float64)
+        / 10000.0
+    )
+    passive_id[passive_id < 0] = 0
+    passive_od[passive_od < 0] = 0
+    passive_sum = passive_id + passive_od
+    passive_log = np.stack(
+        [
+            np.log(passive_id + 1e-3),
+            np.log(passive_od + 1e-3),
+            np.log(passive_sum + 1e-3),
+        ],
+        axis=1,
+    ).astype(np.float32)
+    out = np.concatenate(
+        [global_features.astype(np.float32), passive_log, N_michel[:, np.newaxis].astype(np.float32)], axis=1
+    )
+    return out
 
 
 def _dense_column_offset(dense: DenseCollection, key: str) -> int:
@@ -440,12 +459,16 @@ def _dense_column_offset(dense: DenseCollection, key: str) -> int:
     raise KeyError(f"{key!r} not in dense.keys {dense.keys}")
 
 
+# MINERvA reco prong_part_pid codes for charged pions (same as extract_baselines.CHARGED_PION_PIDS)
+CHARGED_PION_PRONG_PIDS = frozenset({8, 9})
+
+
 def compute_extra_global_features(muons: DenseCollection, photons: DenseCollection, prongs: DenseCollection) -> np.ndarray:
     """
     Three extra global features per event (use after remove_overflows on muons):
       0 — reconstructed muon present (0 or 1; MINOS-matched count clipped to 1)
       1 — invariant mass of the two photons if exactly two reco photons, else 0 (MeV, from px,py,pz,E)
-      2 — number of charged prongs (|charge| > 1e-6)
+      2 — number of charged-pion prongs (prong_part_pid in {8, 9}, classical baseline / extract_baselines)
     """
     n_events = len(muons.n)
     if not (n_events == len(photons.n) == len(prongs.n)):
@@ -453,7 +476,7 @@ def compute_extra_global_features(muons: DenseCollection, photons: DenseCollecti
     out = np.zeros((n_events, 3), dtype=np.float32)
     out[:, 0] = np.clip(muons.n.astype(np.float32), 0.0, 1.0)
 
-    charge_col = _dense_column_offset(prongs, "prong_part_charge")
+    pid_col = _dense_column_offset(prongs, "prong_part_pid")
     for i in range(n_events):
         n_ph = int(photons.n[i])
         if n_ph == 2:
@@ -464,8 +487,8 @@ def compute_extra_global_features(muons: DenseCollection, photons: DenseCollecti
             out[i, 1] = np.sqrt(max(0.0, m2))
 
         sl = slice(prongs.bounds[i], prongs.bounds[i + 1])
-        ch = prongs.data[sl, charge_col]
-        out[i, 2] = float(np.sum(np.abs(ch) > 1e-6))
+        pids = prongs.data[sl, pid_col].astype(np.int32)
+        out[i, 2] = float(np.sum(np.isin(pids, list(CHARGED_PION_PRONG_PIDS))))
     return out
 
 

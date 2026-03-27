@@ -1,5 +1,5 @@
 """
-Training script for PointGlobalMixedViT or OmniLearned on HEP data.
+Training script for PointGlobalMixedViT, OmniLearned, or a BERT baseline on HEP data.
 
 # Energy regression training:
 ## ViT-like transformer training:
@@ -25,6 +25,10 @@ python -m src.scripts.train -bs 10 --mode classifier -npi2 -name DEBUG --max_ste
 ## OmniLearned Small random weights training:
 python -m src.scripts.train -bs 10 --mode classifier -npi2 -name DEBUG --max_steps 100000 --use-omnilearned small  [-cap {data_cap} -seed-event-sampler {seed} --seed {seed}]
 
+
+## BERT-style baseline (HF pretrained; same particle features as OmniLearned):
+python -m src.scripts.train -bs 10 --mode regression -E-available-no-muon -name DEBUG --max_steps 250000 --use-bert small [-cap {data_cap} -seed-event-sampler {seed} --seed {seed}]
+
 """
 
 import argparse
@@ -43,11 +47,59 @@ from tqdm import tqdm
 import numpy as np
 
 from src.dataset.dataloader import load_data, Task
+from src.constants.dataset import GLOBAL_COND_BASE_DIM
 from src.models.vit import PointGlobalMixedViT, PointGlobalMixedViTConfig
 from src.models.omnilearned import PET2, get_model_parameters, load_pretrained_omnilearned
 
 # print CUDA_VISIBLE_DEVICES
 print(f"CUDA_VISIBLE_DEVICES: {os.environ.get('CUDA_VISIBLE_DEVICES')}")
+
+# Hugging Face model ids for --use-bert (requires: pip install transformers)
+BERT_PRESETS = {
+    "small": "prajjwal1/bert-tiny",
+    "tiny": "prajjwal1/bert-tiny",
+    "distil": "distilbert-base-uncased",
+}
+
+
+def _load_hf_sequence_encoder(pretrained_model_name_or_path: str):
+    """Load BERT or DistilBERT by class name — not AutoModel.
+
+    `prajjwal1/bert-tiny` ships a minimal config.json without `model_type`, which breaks
+    `AutoModel.from_pretrained` on recent `transformers` versions.
+    """
+    try:
+        from transformers import BertModel, DistilBertModel
+    except ImportError as e:
+        raise ImportError(
+            "BertBaseline requires the `transformers` package. Install with: pip install transformers"
+        ) from e
+    name = pretrained_model_name_or_path.lower()
+    if "distilbert" in name:
+        return DistilBertModel.from_pretrained(pretrained_model_name_or_path)
+    return BertModel.from_pretrained(pretrained_model_name_or_path)
+
+
+class BertBaseline(nn.Module):
+    """Pretrained BERT over per-particle embeddings (inputs_embeds), mean-pool, linear head."""
+
+    def __init__(self, input_dim, output_dim, pretrained_model_name_or_path: str):
+        super().__init__()
+        self.bert = _load_hf_sequence_encoder(pretrained_model_name_or_path)
+        hidden = int(self.bert.config.hidden_size)
+        self.proj = nn.Linear(input_dim, hidden)
+        self.head = nn.Linear(hidden, output_dim)
+
+    def forward(self, x, mask):
+        # x: [B, N, input_dim], mask: [B, N] (1 = valid, 0 = pad)
+        x = self.proj(x)
+        attn = mask.to(dtype=torch.long)
+        out = self.bert(inputs_embeds=x, attention_mask=attn)
+        hs = out.last_hidden_state
+        w = mask.unsqueeze(-1).to(dtype=hs.dtype)
+        pooled = (hs * w).sum(dim=1) / w.sum(dim=1).clamp(min=1e-6)
+        return self.head(pooled)
+
 
 class ResidualBlock(nn.Module):
     """Pre-norm residual block with SiLU (smooth, good for regression)."""
@@ -215,14 +267,19 @@ def parse_args():
     parser.add_argument("--use-omnilearned", type=str, default=None,
                         choices=["small", "medium", "large"],
                         help="Use OmniLearned PET2 model of given size instead of ViT")
+    parser.add_argument("--use-bert", type=str, nargs="?", const="small", default=None,
+                        choices=["tiny", "small", "distil"],
+                        metavar="SIZE",
+                        help="Use pretrained BERT-style encoder on particle features (same layout as OmniLearned). "
+                             "Pass --use-bert alone for preset 'small' (bert-tiny). Requires `transformers`.")
     parser.add_argument("--use-pretrained", type=str, default=None,
                         help="Load pretrained OmniLearned checkpoint (e.g. pretrain_s, pretrain_m)")
     parser.add_argument("--ol-num-feat", type=int, default=4,
                         help="Number of kinematic input features for PET2 (excluding PID)")
     parser.add_argument("--ol-num-add", type=int, default=5,
                         help="Number of additional features for PET2 add_info input")
-    parser.add_argument("--ol-num-cond", type=int, default=4,
-                        help="Number of global conditioning features for PET2")
+    parser.add_argument("--ol-num-cond", type=int, default=10,
+                        help="Number of global conditioning features for PET2 (must match global_features width before energy-sum cols)")
     parser.add_argument("--ol-pid-dim", type=int, default=8,
                         help="Number of unique PID classes for PET2 embedding")
     parser.add_argument("--ol-interaction", action="store_true", default=False,
@@ -308,7 +365,7 @@ def create_model(args, task: Task):
     e_sum_dim = 6 if args.include_E_sum else 0
 
     if args.cond_only:
-        global_cont_dim = 4 + e_sum_dim
+        global_cont_dim = GLOBAL_COND_BASE_DIM + e_sum_dim
         model = CondOnlyMLP(
             input_dim=global_cont_dim,
             hidden_dim=args.d_model,
@@ -326,7 +383,7 @@ def create_model(args, task: Task):
     global_cat_num_classes = []
     
     # Global continuous dimension
-    global_cont_dim = (4 if args.use_cond else 0) + e_sum_dim
+    global_cont_dim = (GLOBAL_COND_BASE_DIM if args.use_cond else 0) + e_sum_dim
     use_event_token = args.use_cond or args.include_E_sum
     
     cfg = PointGlobalMixedViTConfig(
@@ -396,6 +453,37 @@ def create_omnilearned_model(args, task):
     return model
 
 
+def _bert_input_dim(args):
+    """Particle feature width after optional PID strip (matches OmniLearned PET2)."""
+    return args.ol_num_feat if args.use_pid else (args.ol_num_feat + 1)
+
+
+def create_bert_model(args, task):
+    """Create BertBaseline with HF pretrained weights."""
+    if task.type == "classifier":
+        num_classes = len(task.class_idx)
+    elif task.type == "regression":
+        num_classes = 1
+    else:
+        raise ValueError("Invalid task type")
+    pretrained_name = BERT_PRESETS[args.use_bert]
+    return BertBaseline(
+        input_dim=_bert_input_dim(args),
+        output_dim=num_classes,
+        pretrained_model_name_or_path=pretrained_name,
+    )
+
+
+def prepare_batch_bert(batch, device, use_pid=False, pid_idx=4):
+    """Prepare batch for BertBaseline (particle tokens + padding mask)."""
+    X = batch["X"].to(device, dtype=torch.float32)
+    y = batch["y"].to(device)
+    mask = batch["attention_mask"].to(device, dtype=torch.float32)
+    if use_pid and batch.get("pid") is not None:
+        X = torch.cat([X[:, :, :pid_idx], X[:, :, pid_idx + 1:]], dim=2)
+    return {"X": X, "y": y, "attention_mask": mask}
+
+
 def prepare_batch_omnilearned(batch, device, use_cond=False, use_pid=False, pid_idx=4,
                               include_E_sum=False):
     """Prepare batch for OmniLearned PET2 model input."""
@@ -420,8 +508,8 @@ def prepare_batch_omnilearned(batch, device, use_cond=False, use_pid=False, pid_
                 cond = torch.cat([cond, e_sums], dim=1)
             else:
                 cond = e_sums
-        elif cond is not None and cond.shape[1] == 10:
-            # New: cond already has 10 cols (4 base + 6 log energy sums); use as-is
+        elif cond is not None and cond.shape[1] in (10, 13, 16):
+            # Cond already includes log energy sums (e.g. 4+6, 7+6, or 10+6); use as-is
             pass
 
     add_info = None
@@ -451,14 +539,14 @@ def _make_dummy_batch(args, device):
     if getattr(args, "cond_only", False):
         use_cond = True
     e_sum_dim = 6 if getattr(args, "include_E_sum", True) else 0
-    global_cont_dim = (4 if use_cond else 0) + e_sum_dim
+    global_cont_dim = (GLOBAL_COND_BASE_DIM if use_cond else 0) + e_sum_dim
     point_cont_dim = getattr(args, "point_cont_dim", 9)
     coord_dim = getattr(args, "coord_dim", 2)
     pid_idx = getattr(args, "pid_idx", 4)
     use_pid = getattr(args, "use_pid", True)
-    # OmniLearned expects X with last dim = ol_num_feat (4) after prepare_batch_omnilearned drops PID.
+    # OmniLearned / BERT expect X with last dim = ol_num_feat (4) after prepare_batch drops PID.
     # ViT expects point_cont with last dim = point_cont_dim (9) after prepare_batch drops PID.
-    if getattr(args, "use_omnilearned", None):
+    if getattr(args, "use_omnilearned", None) or getattr(args, "use_bert", None):
         ol_num_feat = getattr(args, "ol_num_feat", 4)
         total_feat_dim = ol_num_feat + (1 if use_pid else 0)
     else:
@@ -471,12 +559,14 @@ def _make_dummy_batch(args, device):
     attention_mask = torch.ones(B, N, device=device, dtype=torch.float32)
     batch = {"X": X, "y": y, "attention_mask": attention_mask}
     if use_cond and global_cont_dim > 0:
-        batch["cond"] = torch.zeros(B, 4, device=device, dtype=torch.float32)
+        batch["cond"] = torch.zeros(B, GLOBAL_COND_BASE_DIM, device=device, dtype=torch.float32)
     if e_sum_dim > 0:
         batch["energy_sums"] = torch.ones(B, 6, device=device, dtype=torch.float32)
     if getattr(args, "use_omnilearned", None):
         batch["pid"] = torch.zeros(B, N, device=device, dtype=torch.long)
         batch["add_info"] = torch.zeros(B, N, getattr(args, "ol_num_add", 5), device=device, dtype=torch.float32)
+    elif getattr(args, "use_bert", None) and use_pid:
+        batch["pid"] = torch.zeros(B, N, device=device, dtype=torch.long)
     return batch
 
 
@@ -494,6 +584,8 @@ def run_calculate_flops(args):
     task = create_task(args)
     if args.use_omnilearned:
         model = create_omnilearned_model(args, task)
+    elif getattr(args, "use_bert", None):
+        model = create_bert_model(args, task)
     else:
         model = create_model(args, task)
     model = model.to(device)
@@ -505,6 +597,8 @@ def run_calculate_flops(args):
             dummy_batch, device, args.use_cond, args.use_pid, args.pid_idx,
             include_E_sum=args.include_E_sum,
         )
+    elif getattr(args, "use_bert", None):
+        inputs = prepare_batch_bert(dummy_batch, device, args.use_pid, args.pid_idx)
     else:
         inputs = prepare_batch(
             dummy_batch, device, args.use_cond, args.use_pid, args.coord_dim, args.pid_idx,
@@ -530,7 +624,9 @@ def run_calculate_flops(args):
 
 
 def forward_model(model, inputs, args):
-    """Run forward pass for either ViT or PET2, returns logits."""
+    """Run forward pass for ViT, PET2, or BertBaseline; returns logits."""
+    if getattr(args, "use_bert", None):
+        return model(inputs["X"], inputs["attention_mask"])
     if args.use_omnilearned:
         outputs = model(
             inputs["X"], inputs["y"],
@@ -586,8 +682,8 @@ def prepare_batch(batch, device, use_cond=False, use_pid=False, coord_dim=2, pid
                 global_cont = torch.cat([global_cont, e_sums], dim=1)
             else:
                 global_cont = e_sums
-        elif global_cont is not None and global_cont.shape[1] == 10:
-            # New: cond already has 10 cols (4 base + 6 log energy sums); use as-is
+        elif global_cont is not None and global_cont.shape[1] in (10, 13, 16):
+            # Cond already includes log energy sums; use as-is
             pass
 
     if zero_cond_feature is not None and global_cont is not None:
@@ -664,6 +760,8 @@ def evaluate(model, dataloader, device, args, class_weights, use_amp=False, step
         if args.use_omnilearned:
             inputs = prepare_batch_omnilearned(batch, device, args.use_cond, args.use_pid, args.pid_idx,
                                               include_E_sum=args.include_E_sum)
+        elif getattr(args, "use_bert", None):
+            inputs = prepare_batch_bert(batch, device, args.use_pid, args.pid_idx)
         else:
             inputs = prepare_batch(batch, device, args.use_cond, args.use_pid, args.coord_dim, args.pid_idx, include_E_sum=args.include_E_sum, zero_cond_feature=args.zero_cond_feature)
         with autocast(enabled=use_amp):
@@ -768,6 +866,11 @@ def train(args):
     args.use_cond = not args.no_use_cond
     if args.cond_only:
         args.use_cond = True
+    if getattr(args, "use_bert", None):
+        if args.use_omnilearned:
+            raise ValueError("Cannot use --use-bert together with --use-omnilearned")
+        if args.cond_only:
+            raise ValueError("Cannot use --use-bert together with --cond-only")
     # Set seed
     if args.seed is not None:
         set_seed(args.seed)
@@ -779,7 +882,7 @@ def train(args):
     # Create dataloaders
     print("Creating dataloaders...")
     task = create_task(args)
-    concat_additional_info = not bool(args.use_omnilearned)
+    concat_additional_info = not (bool(args.use_omnilearned) or bool(getattr(args, "use_bert", None)))
     train_loader, class_weights = load_data(
         dataset_name=args.dataset_name,
         path=args.data_path,
@@ -827,6 +930,8 @@ def train(args):
     print("Creating model...")
     if args.use_omnilearned:
         model = create_omnilearned_model(args, task)
+    elif getattr(args, "use_bert", None):
+        model = create_bert_model(args, task)
     else:
         model = create_model(args, task)
     model = model.to(device)
@@ -920,18 +1025,26 @@ def train(args):
                 col = gc[:, fi]
                 print(f"    feat[{fi}]: {col.min().item():+.4f} / {col.mean().item():+.4f} / {col.max().item():+.4f} / {col.std().item():.4f}")
             print(f"  target (y) shape: {y.shape}  dtype: {y.dtype}")
-            print(f"  target stats: min={y.min().item():.4f}  mean={y.mean().item():.4f}  max={y.max().item():.4f}  std={y.std().item():.4f}")
-            if args.log1p_loss:
-                y_log = torch.log1p(y)
-                print(f"  log1p(target) stats: min={y_log.min().item():.4f}  mean={y_log.mean().item():.4f}  max={y_log.max().item():.4f}  std={y_log.std().item():.4f}")
+            if args.mode == "regression":
+                print(f"  target stats: min={y.min().item():.4f}  mean={y.mean().item():.4f}  max={y.max().item():.4f}  std={y.std().item():.4f}")
+                if args.log1p_loss:
+                    y_log = torch.log1p(y)
+                    print(f"  log1p(target) stats: min={y_log.min().item():.4f}  mean={y_log.mean().item():.4f}  max={y_log.max().item():.4f}  std={y_log.std().item():.4f}")
+            else:
+                print(f"  class labels (int): min={y.min().item()}  max={y.max().item()}")
+                for c in torch.sort(y.unique())[0]:
+                    print(f"    class {c.item()}: count {(y == c).sum().item()} (this batch)")
             with torch.no_grad():
                 pred0 = model(gc)
                 print(f"  model output (untrained) shape: {pred0.shape}")
                 print(f"  model output stats: min={pred0.min().item():.4f}  mean={pred0.mean().item():.4f}  max={pred0.max().item():.4f}  std={pred0.std().item():.4f}")
-            corr_matrix = torch.corrcoef(torch.cat([gc.T, y.unsqueeze(0)], dim=0))
-            print(f"  Pearson correlation of each cond feature with target:")
-            for fi in range(gc.shape[1]):
-                print(f"    feat[{fi}] <-> y: {corr_matrix[fi, -1].item():+.4f}")
+            if args.mode == "regression":
+                corr_matrix = torch.corrcoef(torch.cat([gc.T, y.unsqueeze(0)], dim=0))
+                print(f"  Pearson correlation of each cond feature with target:")
+                for fi in range(gc.shape[1]):
+                    print(f"    feat[{fi}] <-> y: {corr_matrix[fi, -1].item():+.4f}")
+            else:
+                print("  (Pearson correlation skipped for classification — labels are discrete.)")
         print("=" * 60)
         del diag_batch, diag_inputs, gc, y
 
@@ -952,6 +1065,8 @@ def train(args):
             if args.use_omnilearned:
                 inputs = prepare_batch_omnilearned(batch, device, args.use_cond, args.use_pid, args.pid_idx,
                                                   include_E_sum=args.include_E_sum)
+            elif getattr(args, "use_bert", None):
+                inputs = prepare_batch_bert(batch, device, args.use_pid, args.pid_idx)
             else:
                 inputs = prepare_batch(batch, device, args.use_cond, args.use_pid, args.coord_dim, args.pid_idx, include_E_sum=args.include_E_sum, zero_cond_feature=args.zero_cond_feature)
 

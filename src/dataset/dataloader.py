@@ -263,7 +263,7 @@ class HEPTorchDataset(Dataset):
                 mask = pid == pid_val
                 energy_sums[i] = E[mask].sum()
             sample["energy_sums"] = energy_sums
-        # When global_feature_dim is 10 (legacy) or 13 (7 base + 6 log energy sums), cond is complete
+        # When global_feature_dim is 10 (legacy), 13 (7 base + 6), or 16 (10 base + 6), cond is complete
 
         return sample
 
@@ -331,7 +331,8 @@ def load_data(
             persistent_workers=distributed
         )
         if task.type == "classifier":
-            return loader, data.class_weights
+            base_ds = data.dataset if isinstance(data, Subset) else data
+            return loader, base_ds.class_weights
         else:
             return loader, None
     else:

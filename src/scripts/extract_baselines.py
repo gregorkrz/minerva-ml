@@ -236,7 +236,6 @@ def compute_enu_baselines(root_file_path):
         has_muon_and_2gamma = (muons_coll.n == 1) & (photons_coll.n == 2)
 
         prong_pids = prongs_coll.data[:, -2].astype(int)
-        prong_charges = prongs_coll.data[:, -3]
         is_pion = np.isin(prong_pids, list(CHARGED_PION_PIDS))
         no_pion_prong = np.ones(n_events, dtype=bool)
         n_muons = muons_coll.n.copy()
@@ -245,7 +244,8 @@ def compute_enu_baselines(root_file_path):
             start, end = prongs_coll.bounds[ev], prongs_coll.bounds[ev + 1]
             if np.any(is_pion[start:end]):
                 no_pion_prong[ev] = False
-            n_charged_prongs[ev] = np.count_nonzero(prong_charges[start:end])
+            # Charged-prong count = prongs with charged-pion PID (not raw charge)
+            n_charged_prongs[ev] = np.count_nonzero(is_pion[start:end])
 
         # 0 = background, 1 = muon + 2 gamma, 2 = additionally no charged-pion prong
         is_pizero_signal = np.zeros(n_events, dtype=np.int32)
