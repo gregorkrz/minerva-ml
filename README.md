@@ -13,6 +13,7 @@ The typical workflow is:
 2. Preprocess ROOT files into ML-ready tensors
 3. Split into train/val/test
 4. Train models locally or submit SLURM jobs
+5. Run test evaluation (`eval`) on checkpoints, then analyze with notebooks
 
 ## 1) Download data
 
@@ -94,13 +95,25 @@ python src/jobs/submit_train_jobs.py
 
 The script also includes `get_cmds_and_slurm_times_continue()` for checkpoint resume runs.
 
-## 5) Analysis (evaluation notebooks)
+## 5) Analysis (test eval + notebooks)
 
-After training, group the runs you want to compare in [Weights & Biases](https://wandb.ai) by assigning the **same tag** to each run (in the run’s overview or via the API). The evaluation notebooks fetch runs from the `fcc_ml/minerva-models` project by that tag.
+After training, group the runs you want to compare in [Weights & Biases](https://wandb.ai) by assigning the **same tag** to each run (in the run’s overview or via the API). The tools below use that tag against the `minerva-models` project under your W&B entity (set `WANDB_ENTITY` and use `wandb login` as needed).
+
+### Test evaluation (`eval`)
+
+Generate the `python -m src.scripts.eval ...` commands for checkpoints that still need `test_results` (skipped if an `.npz` for that dataset already exists):
+
+```bash
+python -m src.scripts.print_eval_commands --wandb-flag <TAG>
+```
+
+`--wandb-flag` only lists runs whose checkpoint folder name matches a wandb run name with that tag; omit it to consider every run under `--ckpt-dir` (default: see `--help`). Run each printed line locally. **Evaluation is very small and fast**—it is fine to run on **login nodes** without a GPU job.
+
+### Notebooks
 
 1. Open `notebooks/Eval_Classification.ipynb` or `notebooks/Eval_Regression.ipynb`.
 2. Set the `WANDB_TAG` variable at the top to match your tag (both notebooks use this to query runs).
-3. Run all cells. Ensure you are logged in (`wandb login`) and, if needed, set `WANDB_ENTITY` so the API can resolve your entity.
+3. Run all cells.
 
 Classification evaluation covers tagging and related metrics; regression evaluation covers energy-scale and scaling plots. Figures and PDFs are written under paths configured in each notebook (typically under `out/`).
 
