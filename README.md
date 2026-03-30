@@ -94,7 +94,17 @@ python src/jobs/submit_train_jobs.py
 
 The script also includes `get_cmds_and_slurm_times_continue()` for checkpoint resume runs.
 
-## Event displays
+## 5) Analysis (evaluation notebooks)
+
+After training, group the runs you want to compare in [Weights & Biases](https://wandb.ai) by assigning the **same tag** to each run (in the run’s overview or via the API). The evaluation notebooks fetch runs from the `fcc_ml/minerva-models` project by that tag.
+
+1. Open `notebooks/Eval_Classification.ipynb` or `notebooks/Eval_Regression.ipynb`.
+2. Set the `WANDB_TAG` variable at the top to match your tag (both notebooks use this to query runs).
+3. Run all cells. Ensure you are logged in (`wandb login`) and, if needed, set `WANDB_ENTITY` so the API can resolve your entity.
+
+Classification evaluation covers tagging and related metrics; regression evaluation covers energy-scale and scaling plots. Figures and PDFs are written under paths configured in each notebook (typically under `out/`).
+
+## 6) Event displays
 
 ```bash
 python -m src.scripts.make_event_displays \
