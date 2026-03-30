@@ -36,6 +36,39 @@ import os
 import time
 from pathlib import Path
 from datetime import datetime
+
+
+def _load_project_env() -> None:
+    """Load KEY=VALUE lines from the repository root `.env` into `os.environ`.
+
+    Does not override variables already set in the environment (same default as python-dotenv).
+    """
+    env_path = Path(__file__).resolve().parent.parent.parent / ".env"
+    if not env_path.is_file():
+        return
+    try:
+        text = env_path.read_text(encoding="utf-8")
+    except OSError:
+        return
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[7:].strip()
+        if "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        if not key:
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        os.environ.setdefault(key, value)
+
+
+_load_project_env()
 import torch
 import torch.nn as nn
 import torch.nn.functional as F

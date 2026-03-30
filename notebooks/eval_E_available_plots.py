@@ -1089,6 +1089,7 @@ def plot_rms_iqr_with_uncertainty(
         )
 
     E_pred_dict = data["E_pred_dict"]
+    E_true_dict = data["E_true_dict"]
     Enu_baselines = data["Enu_baselines"]
     Enu_filters = data["Enu_filters"]
     mc_E = data["mc_E"]
@@ -1207,9 +1208,23 @@ def plot_rms_iqr_with_uncertainty(
                 if flat_key not in E_pred_dict.get(dp, {}).get(loss, {}):
                     print(f"  WARNING: '{flat_key}' not found in E_pred_dict['{dp}']['{loss}']")
                     continue
+                # Use per-run truth (same NPZ as predictions). Using global mc_E[dp] here
+                # caused IndexError when another run had a different #events than the first
+                # model used to build mc_E.
+                true_vec = E_true_dict[dp][loss][flat_key]
+                pred_vec = E_pred_dict[dp][loss][flat_key]
+                n_ref = len(bin_masks[0])
+                if len(true_vec) != n_ref or len(pred_vec) != n_ref:
+                    raise ValueError(
+                        f"Event count mismatch for {dp}/{loss}/{flat_key}: "
+                        f"len(truth)={len(true_vec)}, len(pred)={len(pred_vec)}, "
+                        f"but q3 / bin masks length is {n_ref} (from baseline split). "
+                        f"Re-evaluate all models on the same playlist or use runs trained "
+                        f"on the same data split."
+                    )
                 for i in range(n_plot_bins):
-                    true = mc_E[dp][bin_masks[i]]
-                    reco = E_pred_dict[dp][loss][flat_key][bin_masks[i]]
+                    true = true_vec[bin_masks[i]]
+                    reco = pred_vec[bin_masks[i]]
                     valid = true > 0
                     ratio = reco[valid] / true[valid]
                     if ratio.size > 0:

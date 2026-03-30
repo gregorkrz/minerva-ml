@@ -39,6 +39,10 @@ def get_runs_by_model_and_cap(
       - Transformer: Run_1203_regression_Transformer1_data_cap_<cap>_seed_...
       - Transformer1NR: Run_*_regression_Transformer1NR_data_cap_<cap>_seed_...
       - MLP: Run_cond_only_full_seed<SEED>_...
+      - MLP (NR full): names containing _cond_only_NR_full_seed<SEED>_ (regression template in
+          generate_cond_only_jobs.py). Same global ablation as Transformer1NR (--zero-cond-feature 2).
+          cap is always -1. Names with _cond_only_classifier_NR_full_ are classification jobs and
+          are excluded here so regression eval only sees regression MLP runs.
     dataset_cap is -1 for full 6M dataset, or a positive int for smaller caps.
     """
     run_names = fetch_runs_from_wandb(tag, project)
@@ -69,6 +73,11 @@ def get_runs_by_model_and_cap(
                 else:
                     model = raw
         if model is None:
+            # Regression NR-full only; do not match _cond_only_classifier_NR_full_ (classification).
+            m = re.search(r"_cond_only_(?!classifier_)NR_full_seed(-?\d+)_", name)
+            if m:
+                model, cap = "MLP", -1
+        if model is None:
             m = re.search(r"_cond_only_([a-zA-Z0-9]+)_seed(-?\d+)_", name)
             if m:
                 model = "MLP"
@@ -97,7 +106,13 @@ def get_classification_runs_by_model_and_cap(
       - OLM:    Run_1203_OLS_classifier_<cap>_seed...
       - Transformer: Run_1203_classifier_Transformer1_data_cap_<cap>_seed_...
       - Transformer1NR: Run_*_classifier_Transformer1NR_data_cap_<cap>_seed_...
-      - MLP: Run_class_cond_only_<dscap>_seed<SEED>_...
+      - MLP (standard): substring _class_cond_only_<dscap>_seed<SEED>_
+          e.g. Run_*_class_cond_only_full_seed42_...  -> cap -1 when dscap is "full"
+      - MLP (NR full): substring _cond_only_(classifier_)NR_full_seed<SEED>_ — the word
+          classifier is optional so both Run_*_cond_only_NR_full_seed... and
+          Run_*_cond_only_classifier_NR_full_seed... (classifier job template) match.
+          "NR" matches training with --zero-cond-feature 2 (same global ablation as
+          Transformer1NR; see generate_cond_only_jobs.py). cap is always -1.
     dataset_cap is -1 for full 6M dataset, or a positive int for smaller caps.
     """
     run_names = fetch_runs_from_wandb(tag, project)
@@ -125,9 +140,13 @@ def get_classification_runs_by_model_and_cap(
                 if raw == "Transformer1":
                     model = "Transformer"
                 elif raw == "Transformer1NR":
-                    model = "Transformer1NR"
+                    model = "Transformer" # Use the label 'Transformer' for the latest results (without the E_recoil event-level feature)
                 else:
                     model = raw
+        if model is None:
+            m = re.search(r"_cond_only_classifier_NR_full_seed(-?\d+)_", name)
+            if m:
+                model, cap = "MLP", -1
         if model is None:
             m = re.search(r"_class_cond_only_([a-zA-Z0-9]+)_seed(-?\d+)_", name)
             if m:

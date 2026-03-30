@@ -5,13 +5,23 @@ from datetime import datetime as dt
 
 
 def get_env_vars():
-    # Read .env
+    """Build `export` lines from `.env` for SLURM, excluding WANDB_* (no API key in job files).
+
+    Training loads repo-root `.env` at runtime via `src.scripts.train`.
+    """
     env_commands = ""
     with open(".env", "r") as f:
         for line in f:
-            if line.startswith("="):
+            line = line.strip()
+            if not line or line.startswith("#"):
                 continue
-            key, value = line.strip().split("=")
+            if "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key = key.strip()
+            if key.startswith("WANDB_"):
+                continue
+            value = value.strip()
             env_commands += f"export {key}={value}\n"
     return env_commands
 
@@ -148,20 +158,18 @@ def get_cmds_and_slurm_times():
     return cmds, slurm_times
 
 def get_cmds_and_slurm_times_continue():
+    # Use this to continue runs that were cut short. TODO: change run names and wandb IDs
     to_resume = [
-        "Run_1203_OLS_RW_classifier_-1_seed45_20260316_030245",
-        "Run_1203_OLS_RW_classifier_-1_seed44_20260316_004946",
-        "Run_1203_OLS_RW_classifier_-1_seed43_20260315_211843",
+        "Run_1703_OLM_regression_-1_seed50_20260328_115708",
+        "Run_1703_OLS_RW_regression_-1_seed50_20260327_174607"
     ]
     names = [
-        "Run_1203_OLS_RW_classifier_20000_seed45",
-        "Run_1203_OLS_RW_classifier_20000_seed44",
-        "Run_1203_OLS_RW_classifier_20000_seed43",
+        "Run_1703_OLM_regression_-1_seed50",
+        "Run_1703_OLS_RW_regression_-1_seed50"
     ]
     run_ids = [
-        "opvc11vm",
-        "1frfc5nc",
-        "w2fz4etl",
+        "ofpk105k",
+        "rd9azt5b"
     ]
     CKPT_DIR = "/global/cfs/cdirs/m3246/gregork/checkpoints"
     cmds = []
@@ -175,7 +183,7 @@ def get_cmds_and_slurm_times_continue():
 
 
 if __name__ == "__main__":
-    cmds, slurm_times = get_cmds_and_slurm_times()
+    cmds, slurm_times = get_cmds_and_slurm_times_continue()
     for i, cmd in enumerate(cmds):
         job_name = f"run_{i}_{dt.now().strftime('%Y%m%d_%H%M%S')}"
         log_dir = f"/global/cfs/cdirs/m3246/gregork/Minerva/logs/run_100326/{job_name}.log"

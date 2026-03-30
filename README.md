@@ -2,7 +2,7 @@
 
 This repository contains the data processing and model training code used for ML studies on MINERvA events.
 
-For detailed data fields and semantics, see **[DATASET.md](DATASET.md)**.  
+For detailed data fields and semantics, see **[DATASET.md](DATASET.md)**.
 For model architecture details, see **[MODELS.md](MODELS.md)**.
 
 ## Repository workflow
@@ -19,20 +19,28 @@ The typical workflow is:
 Set `SCRATCH` first, then run:
 
 ```bash
-# Monte Carlo
+# Monte Carlo playlists
 python -m src.scripts.download_data
 
-# Data playlist
+# Recorded data playlists
 python -m src.scripts.download_data --prefix MediumEnergy_FHC_Data_Playlist
 ```
 
 ## 2) Preprocess dataset
 
+Minimal invocation (creates `.pb` files with event-wise particle tensors and labels):
+
 ```bash
 python -m src.scripts.preprocess_dataset --output-dir <OUTPUT_DIR>
 ```
 
-This creates `.pb` files with event-wise particle tensors and labels.
+For a full pipeline on this project’s layout—preprocess, split playlists `1A` / `1B`, and extract baselines—edit paths in the script if needed, then run:
+
+```bash
+bash src/scripts/preprocess.sh
+```
+
+`src/scripts/preprocess.sh` sets `DATA_DIR`, runs `preprocess_dataset` with blob/prong limits and playlist selection, runs `split_dataset` per playlist (with different val/test ratios for `1B` vs `1A`), and runs `extract_baselines` against the raw playlist directories under scratch.
 
 ## 3) Split into train / val / test
 

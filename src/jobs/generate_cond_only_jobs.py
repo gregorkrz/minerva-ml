@@ -1,14 +1,14 @@
 # Regression: available energy (no muon), cond-only MLP
-template_regression = "python -m src.scripts.train -bs 2048 --mode regression -E-available-no-muon -name Run_cond_only_NR_full_seed{seed} --d_model 128 --mlp_layers {nlayers} --dropout 0.0 --cond_only --seed {seed} -seed-event-sampler 42 --max_steps 200000 --grad_accum_steps 1 --lr 1e-3 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260326 --zero-cond-feature 2"
-template_classifier = "python -m src.scripts.train -bs 2048 --mode classifier -npi2 -name Run_cond_only_classifier_NR_full_seed{seed} --d_model 128 --mlp_layers {nlayers} --dropout 0.0 --cond_only --seed {seed} -seed-event-sampler 42 --max_steps 200000 --grad_accum_steps 1 --lr 1e-3 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260326 --zero-cond-feature 2"
+template_regression = "python -m src.scripts.train -bs 2048 --mode regression -E-available-no-muon -name Run_cond_only_NR_full_seed{seed} --d_model 128 --mlp_layers {nlayers} --dropout 0.0 --cond_only --seed {seed} -seed-event-sampler 42 --max_steps 1000000 --grad_accum_steps 1 --lr 1e-3 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260326 --zero-cond-feature 2"
+template_classifier = "python -m src.scripts.train -bs 2048 --mode classifier -npi2 -name Run_cond_only_classifier_NR_full_seed{seed} --d_model 128 --mlp_layers {nlayers} --dropout 0.0 --cond_only --seed {seed} -seed-event-sampler 42 --max_steps 1000000 --grad_accum_steps 1 --lr 1e-3 --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260326 --zero-cond-feature 2"
 
 
-for seed in [43]:
+for seed in [44, 45, 46, 47]:
     for layers in [4]:
         print(template_regression.format(seed=seed, nlayers=layers))
 
 
-for seed in [43]:
+for seed in [44, 45, 46, 47]:
     for layers in [4]:
         print(template_classifier.format(seed=seed, nlayers=layers))
 
