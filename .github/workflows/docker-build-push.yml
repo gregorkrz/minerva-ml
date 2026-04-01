@@ -1,0 +1,50 @@
+name: Build and Push Docker Image
+
+on:
+  push:
+    paths:
+      - 'Dockerfile'
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get latest Docker Hub tag and compute next version
+        id: version
+        run: |
+          # Fetch existing tags from Docker Hub (public API, no auth needed for public repos)
+          TAGS=$(curl -s "https://hub.docker.com/v2/repositories/gkrz/minerva_ml/tags/?page_size=100" \
+            | python3 -c "
+          import sys, json
+          data = json.load(sys.stdin)
+          results = data.get('results', [])
+          versions = []
+          for tag in results:
+              name = tag.get('name', '')
+              if name.startswith('v'):
+                  try:
+                      versions.append(int(name[1:]))
+                  except ValueError:
+                      pass
+          print(max(versions) if versions else 0)
+          ")
+          NEXT=$((TAGS + 1))
+          echo "next_version=v${NEXT}" >> "$GITHUB_OUTPUT"
+          echo "Next version: v${NEXT}"
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: gkrz/minerva_ml:${{ steps.version.outputs.next_version }}
