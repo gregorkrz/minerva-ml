@@ -1,0 +1,63 @@
+name: Build and Push Docker Image
+
+on:
+  push:
+    paths:
+      - 'Dockerfile'
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get latest Docker Hub tag and compute next version
+        id: version
+        run: |
+          # Fetch all vN tags from Docker Hub via paginated public API
+          HIGHEST_VERSION=$(python3 - <<'EOF'
+          import urllib.request, json, sys
+
+          url = "https://hub.docker.com/v2/repositories/gkrz/minerva_ml/tags/?page_size=100"
+          versions = []
+          while url:
+              try:
+                  with urllib.request.urlopen(url) as resp:
+                      if resp.status != 200:
+                          print(0, file=sys.stderr)
+                          break
+                      data = json.load(resp)
+              except Exception as e:
+                  print(f"Warning: failed to fetch tags: {e}", file=sys.stderr)
+                  break
+              for tag in data.get("results", []):
+                  name = tag.get("name", "")
+                  if name.startswith("v"):
+                      try:
+                          versions.append(int(name[1:]))
+                      except ValueError:
+                          pass
+              url = data.get("next")
+          print(max(versions) if versions else 0)
+          EOF
+          )
+          NEXT_VERSION_NUMBER=$((HIGHEST_VERSION + 1))
+          echo "next_version=v${NEXT_VERSION_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "Next version: v${NEXT_VERSION_NUMBER}"
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: gkrz/minerva_ml:${{ steps.version.outputs.next_version }}
