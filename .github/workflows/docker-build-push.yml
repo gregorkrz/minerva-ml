@@ -8,6 +8,8 @@ on:
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout repository
@@ -16,25 +18,36 @@ jobs:
       - name: Get latest Docker Hub tag and compute next version
         id: version
         run: |
-          # Fetch existing tags from Docker Hub (public API, no auth needed for public repos)
-          TAGS=$(curl -s "https://hub.docker.com/v2/repositories/gkrz/minerva_ml/tags/?page_size=100" \
-            | python3 -c "
-          import sys, json
-          data = json.load(sys.stdin)
-          results = data.get('results', [])
+          # Fetch all vN tags from Docker Hub via paginated public API
+          HIGHEST_VERSION=$(python3 - <<'EOF'
+          import urllib.request, json, sys
+
+          url = "https://hub.docker.com/v2/repositories/gkrz/minerva_ml/tags/?page_size=100"
           versions = []
-          for tag in results:
-              name = tag.get('name', '')
-              if name.startswith('v'):
-                  try:
-                      versions.append(int(name[1:]))
-                  except ValueError:
-                      pass
+          while url:
+              try:
+                  with urllib.request.urlopen(url) as resp:
+                      if resp.status != 200:
+                          print(0, file=sys.stderr)
+                          break
+                      data = json.load(resp)
+              except Exception as e:
+                  print(f"Warning: failed to fetch tags: {e}", file=sys.stderr)
+                  break
+              for tag in data.get("results", []):
+                  name = tag.get("name", "")
+                  if name.startswith("v"):
+                      try:
+                          versions.append(int(name[1:]))
+                      except ValueError:
+                          pass
+              url = data.get("next")
           print(max(versions) if versions else 0)
-          ")
-          NEXT=$((TAGS + 1))
-          echo "next_version=v${NEXT}" >> "$GITHUB_OUTPUT"
-          echo "Next version: v${NEXT}"
+          EOF
+          )
+          NEXT_VERSION_NUMBER=$((HIGHEST_VERSION + 1))
+          echo "next_version=v${NEXT_VERSION_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "Next version: v${NEXT_VERSION_NUMBER}"
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
