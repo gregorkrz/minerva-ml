@@ -35,9 +35,9 @@ def get_runs_by_model_and_cap(
     Run name formats (from submit_train_jobs):
       - OLS_RW: Run_1203_OLS_RW_regression_<cap>_seed...
       - OLS:    Run_1203_OLS_regression_<cap>_seed...
-      - OLM:    Run_1203_OLM_regression_<cap>_seed...
-      - Transformer: Run_1203_regression_Transformer1_data_cap_<cap>_seed_...
-      - Transformer1NR: Run_*_regression_Transformer1NR_data_cap_<cap>_seed_...
+      - OLM:    Run_1203_OLM_FB_regression_<cap>_seed... (legacy: _OLM_regression_)
+      - Transformer1 / Transformer1NR: both map to "Transformer-small"
+        (Run_*_regression_Transformer1_data_cap_... and ...Transformer1NR_data_cap_...)
       - MLP: Run_cond_only_full_seed<SEED>_...
       - MLP (NR full): names containing _cond_only_NR_full_seed<SEED>_ (regression template in
           generate_cond_only_jobs.py). Same global ablation as Transformer1NR (--zero-cond-feature 2).
@@ -59,17 +59,17 @@ def get_runs_by_model_and_cap(
             if m:
                 model, cap = "OmniLearned-small", int(m.group(1))
         if model is None:
-            m = re.search(r"_OLM_regression_(-?\d+)_", name)
+            m = re.search(r"_OLM_FB_?regression_(-?\d+)_", name)
             if m:
                 model, cap = "OmniLearned-medium", int(m.group(1))
         if model is None:
             m = re.search(r"_regression_(Transformer[^_]+)_data_cap_(-?\d+)_", name)
             if m:
                 raw, cap = m.group(1), int(m.group(2))
-                if raw == "Transformer1":
-                    model = "Transformer"
-                elif raw == "Transformer1NR":
-                    model = "Transformer1NR"
+                if raw in ("Transformer1", "Transformer1NR"):
+                    model = "Transformer-small"
+                elif raw == "Transformer3NR":
+                    model = "Transformer-large"
                 else:
                     model = raw
         if model is None:
@@ -103,9 +103,9 @@ def get_classification_runs_by_model_and_cap(
     Run name formats (from submit_train_jobs):
       - OLS_RW: Run_1203_OLS_RW_classifier_<cap>_seed...
       - OLS:    Run_1203_OLS_classifier_<cap>_seed...
-      - OLM:    Run_1203_OLS_classifier_<cap>_seed...
-      - Transformer: Run_1203_classifier_Transformer1_data_cap_<cap>_seed_...
-      - Transformer1NR: Run_*_classifier_Transformer1NR_data_cap_<cap>_seed_...
+      - OLM:    Run_1203_OLM_FB_classifier_<cap>_seed... (legacy: _OLM_classifier_)
+      - Transformer1 / Transformer1NR: both map to "Transformer-small"
+        (Run_*_classifier_Transformer1_data_cap_... and ...Transformer1NR_data_cap_...)
       - MLP (standard): substring _class_cond_only_<dscap>_seed<SEED>_
           e.g. Run_*_class_cond_only_full_seed42_...  -> cap -1 when dscap is "full"
       - MLP (NR full): substring _cond_only_(classifier_)NR_full_seed<SEED>_ — the word
@@ -130,17 +130,17 @@ def get_classification_runs_by_model_and_cap(
             if m:
                 model, cap = "OmniLearned-small", int(m.group(1))
         if model is None:
-            m = re.search(r"_OLM_classifier_(-?\d+)_", name)
+            m = re.search(r"_OLM_FB_?classifier_(-?\d+)_", name)
             if m:
                 model, cap = "OmniLearned-medium", int(m.group(1))
         if model is None:
             m = re.search(r"_classifier_(Transformer[^_]+)_data_cap_(-?\d+)_", name)
             if m:
                 raw, cap = m.group(1), int(m.group(2))
-                if raw == "Transformer1":
-                    model = "Transformer"
-                elif raw == "Transformer1NR":
-                    model = "Transformer" # Use the label 'Transformer' for the latest results (without the E_recoil event-level feature)
+                if raw in ("Transformer1", "Transformer1NR"):
+                    model = "Transformer-small"
+                elif raw == "Transformer3NR":
+                    model = "Transformer-large"
                 else:
                     model = raw
         if model is None:

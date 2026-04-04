@@ -22,7 +22,7 @@ echo "CWD:   $(pwd)"
 echo "======================================"
 
 # ---- Container configuration ----
-IMAGE="docker.io/gkrz/minerva_ml:v0"
+IMAGE="{container_image}"
 NAME="minerva_ml"
 WORKSPACE="$HOME"
 

@@ -31,7 +31,7 @@ def generate_cmd(data_cap=-1, seed=42, task="regression", model="Transformer1", 
         base = f"python -m src.scripts.train --resume {continue_from} -name {resume_run_name} --resume-run-id {resume_run_id} --max_steps 1000000"
         return base.format(continue_from=continue_from)
     base = "python -m src.scripts.train -bs {bs} --mode {task} {detailed_task} -name {name} --d_model {model_dim} --depth {model_depth} --n_heads {model_n_heads} --dropout {model_dropout} --attn_dropout {model_attn_dropout} {cap} --seed {seed} -seed-event-sampler {seed}  --max_steps {max_steps} --grad_accum_steps {grad_accum_steps} {extra} --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260326 "
-    # Model options: "Transformer1", "Transformer1NR" (no E_recoil: --zero-cond-feature 2), "Transformer2", "Transformer3", "OLS", "OLS_RW", "OLM", "BERT-tiny"
+    # Model options: ... "OLS", "OLS_RW", "OLM" or "OLM_FB" (medium OmniLearned; run names use OLM_FB_ for both tasks), "BERT-tiny"
     # Seed both the event sampler and the whole training with seed
     detailed_task = "-E-available-no-muon" if task == "regression" else "-npi2"
     model_dim = 128
@@ -45,8 +45,9 @@ def generate_cmd(data_cap=-1, seed=42, task="regression", model="Transformer1", 
     elif model == "OLS_RW":
         name = f"Run_1703_OLS_RW_{task}_{data_cap}_seed{seed}"
         extra = " --use-omnilearned small --zero-cond-feature 2 "
-    elif model == "OLM":
-        name = f"Run_1703_OLM_{task}_{data_cap}_seed{seed}"
+    elif model == "OLM" or model == "OLM_FB":
+        # Medium OmniLearned: unified Run_1703_OLM_FB_{task}_... (classifier uses frozen backbone in train.py).
+        name = f"Run_1703_OLM_FB_{task}_{data_cap}_seed{seed}"
         extra = " --use-omnilearned medium --use-pretrained pretrain_m --zero-cond-feature 2 "
     elif model == "BERT-tiny":
         name = f"Run_1703_BERT_tiny_{task}_{data_cap}_seed{seed}"
@@ -82,6 +83,7 @@ def get_cmds_and_slurm_times():
         "20000": {
             "OLS_RW": "01:30:00",
             "OLS": "00:50:00",
+            "OLM_FB": "00:50:00",
             "BERT-tiny": "00:50:00",
             "Transformer1": "00:20:00",
             "Transformer1NR": "00:20:00"
@@ -89,6 +91,7 @@ def get_cmds_and_slurm_times():
         "50000": {
             "OLS_RW": "03:00:00",
             "OLS": "01:00:00",
+            "OLM_FB": "01:00:00",
             "BERT-tiny": "01:00:00",
             "Transformer1": "00:20:00",
             "Transformer1NR": "00:20:00",
@@ -98,11 +101,13 @@ def get_cmds_and_slurm_times():
             "Transformer1": "00:20:00",
             "Transformer1NR": "00:20:00",
             "OLS": "01:00:00",
+            "OLM_FB": "01:00:00",
             "BERT-tiny": "01:00:00",
         },
         "200000": {
             "OLS_RW": "05:00:00",
             "OLS": "01:30:00",
+            "OLM_FB": "01:30:00",
             "BERT-tiny": "01:30:00",
             "Transformer1": "00:20:00",
             "Transformer1NR": "00:20:00",
@@ -112,12 +117,12 @@ def get_cmds_and_slurm_times():
     slurm_times = []
     for seed in [50, 51, 52, 53]:
         for data_cap in [-1]:
-            for task in ["regression", "classifier"]:
-                for model in ["OLS", "OLS_RW", "OLM", "BERT-tiny","Transformer1NR", "Transformer3NR"]:
+            for task in ["regression"]:
+                for model in ["OLM_FB"]:
                     if "OL" in model:
                         bs = 2048
                         grad_accum_steps = 1
-                        if "OLM" in model:
+                        if "OLM_FB" in model or "OLM" in model:
                             bs = 512
                             grad_accum_steps = 4
                             if data_cap == -1:
@@ -125,6 +130,7 @@ def get_cmds_and_slurm_times():
                             else:
                                 slurm_times.append(times_data_cap[str(data_cap)][model])
                         else:
+
                             if data_cap == -1:
                                 slurm_times.append("12:00:00")
                             else:
@@ -159,7 +165,7 @@ def get_cmds_and_slurm_times():
 
 def get_cmds_and_slurm_times_continue():
     # Use this to continue runs that were cut short. TODO: change run names and wandb IDs
-    to_resume = [
+    '''to_resume = [
         "Run_1703_OLM_regression_-1_seed50_20260328_115708",
         "Run_1703_OLS_RW_regression_-1_seed50_20260327_174607"
     ]
@@ -170,6 +176,33 @@ def get_cmds_and_slurm_times_continue():
     run_ids = [
         "ofpk105k",
         "rd9azt5b"
+    ]'''
+    to_resume = [
+        "Run_1703_OLM_classifier_-1_seed51_20260331_151803","Run_1703_OLS_RW_classifier_-1_seed50_20260329_201841", "Run_1703_OLM_classifier_-1_seed50_20260330_172545",
+        "Run_1703_OLS_RW_regression_-1_seed51_20260330_201339", "Run_1703_OLM_regression_-1_seed51_20260330_220131", "Run_1703_OLS_RW_classifier_-1_seed51_20260330_234443",
+        "Run_1703_OLS_RW_regression_-1_seed52_20260330_235131", "Run_1703_OLS_RW_classifier_-1_seed52_20260331_014742", "Run_1703_OLS_RW_regression_-1_seed53_20260331_022931",
+        "Run_1703_OLM_classifier_-1_seed51_20260331_151803", "Run_1703_OLM_regression_-1_seed52_20260331_164052", "Run_1703_OLM_classifier_-1_seed52_20260401_010518",
+        "Run_1703_OLM_regression_-1_seed53_20260401_033613", "Run_1703_OLS_RW_classifier_-1_seed53_20260401_050053"
+    ]
+    names = [
+        "Run_1703_OLM_classifier_-1_seed51",
+        "Run_1703_OLS_RW_classifier_-1_seed50",
+        "Run_1703_OLM_classifier_-1_seed50",
+        "Run_1703_OLS_RW_regression_-1_seed51",
+        "Run_1703_OLM_regression_-1_seed51",
+        "Run_1703_OLS_RW_classifier_-1_seed51",
+        "Run_1703_OLS_RW_regression_-1_seed52",
+        "Run_1703_OLS_RW_classifier_-1_seed52",
+        "Run_1703_OLM_classifier_-1_seed51",
+        "Run_1703_OLS_RW_classifier_-1_seed53",
+        "Run_1703_OLM_regression_-1_seed53",
+        "Run_1703_OLS_RW_classifier_-1_seed53",
+        "Run_1703_OLM_classifier_-1_seed53",
+        "Run_1703_OLS_RW_classifier_-1_seed53",
+    ]
+    run_ids = [
+        "kdzhg3i3", "kdzhg3i3", "qwmm0fhb", "3vpr9i0q", "3vpr9i0q", "u5zspjc5", "jrb9mx10",
+        "vyb2ys44", "j1fg2w1i", "kdzhg3i3", "45tqa47o", "k6dp4wc1", "2n7dxql3", "fgarftde"
     ]
     CKPT_DIR = "/global/cfs/cdirs/m3246/gregork/checkpoints"
     cmds = []
@@ -182,8 +215,10 @@ def get_cmds_and_slurm_times_continue():
     return cmds, slurm_times
 
 
+CONTAINER_IMAGE = "docker.io/gkrz/minerva_ml:v1"
+
 if __name__ == "__main__":
-    cmds, slurm_times = get_cmds_and_slurm_times_continue()
+    cmds, slurm_times = get_cmds_and_slurm_times()
     for i, cmd in enumerate(cmds):
         job_name = f"run_{i}_{dt.now().strftime('%Y%m%d_%H%M%S')}"
         log_dir = f"/global/cfs/cdirs/m3246/gregork/Minerva/logs/run_100326/{job_name}.log"
@@ -202,6 +237,7 @@ if __name__ == "__main__":
                 error_dir=error_dir,
                 commands=cmd,
                 env_vars=get_env_vars(),
+                container_image=CONTAINER_IMAGE,
                 ))
         print(f"Saved slurm file to {slurm_file}")
         os.system(f"sbatch {slurm_file}")

@@ -115,6 +115,18 @@ python -m src.scripts.print_eval_commands --wandb-flag <TAG>
 2. Set the `WANDB_TAG` variable at the top to match your tag (both notebooks use this to query runs).
 3. Run all cells.
 
+To run the same notebooks headlessly from the repo root (requires `nbconvert`; e.g. `pip install nbconvert`):
+
+```bash
+cd notebooks
+# Execute (updates notebooks in place with fresh outputs)
+jupyter nbconvert --to notebook --execute Eval_Regression.ipynb --inplace
+jupyter nbconvert --to notebook --execute Eval_Classification.ipynb --inplace
+# Export static copies (HTML; use --to pdf instead if pandoc/LaTeX are available, or --to webpdf with Chromium)
+jupyter nbconvert --to html Eval_Regression.ipynb
+jupyter nbconvert --to html Eval_Classification.ipynb
+```
+
 Classification evaluation covers tagging and related metrics; regression evaluation covers energy-scale and scaling plots. Figures and PDFs are written under paths configured in each notebook (typically under `out/`).
 
 ## 6) Event displays

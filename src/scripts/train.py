@@ -17,7 +17,7 @@ python -m src.scripts.train -bs 10 --mode regression -E-available-no-muon -name 
 
 # Event Classification training:
 ## ViT-like transformer training:
-python -m src.scripts.train -bs 10 --mode classifier -npi2 -name DEB    UG --d_model 64 --depth 4 --n_heads 4  --max_steps 100000 [-cap {data_cap} -seed-event-sampler {seed} --seed {seed}]
+python -m src.scripts.train -bs 10 --mode classifier -npi2 -name DEB g   UG --d_model 64 --depth 4 --n_heads 4  --max_steps 100000 [-cap {data_cap} -seed-event-sampler {seed} --seed {seed}]
 
 ## OmniLearned Small training:
 python -m src.scripts.train -bs 10 --mode classifier -npi2 -name DEBUG --max_steps 100000 --use-omnilearned small --use-pretrained pretrain_s [-cap {data_cap} -seed-event-sampler {seed} --seed {seed}]
@@ -484,6 +484,24 @@ def create_omnilearned_model(args, task):
         **model_params,
     )
     return model
+
+
+def _apply_omnilearned_medium_classifier_freeze(model, args):
+    """Freeze PET2 backbone for OmniLearned medium in classifier mode; train classifier head only."""
+    if not getattr(args, "use_omnilearned", None):
+        return
+    if args.use_omnilearned != "medium" or args.mode != "classifier":
+        return
+    if not isinstance(model, PET2):
+        return
+    for p in model.body.parameters():
+        p.requires_grad = False
+    n_train = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    n_frozen = sum(p.numel() for p in model.body.parameters())
+    print(
+        f"OmniLearned medium (classifier): frozen backbone ({n_frozen:,} params), "
+        f"training classifier head only ({n_train:,} trainable params)."
+    )
 
 
 def _bert_input_dim(args):
@@ -975,7 +993,9 @@ def train(args):
             raise ValueError("--use-pretrained requires --use-omnilearned")
         print(f"Loading pretrained weights: {args.use_pretrained}")
         load_pretrained_omnilearned(model, args.use_pretrained, args.output_dir)
-    
+
+    _apply_omnilearned_medium_classifier_freeze(model, args)
+
     # Count parameters
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Model parameters: {n_params:,}")
@@ -993,11 +1013,12 @@ def train(args):
     
     steps_per_epoch = len(train_loader)
 
-    # Setup optimizer and scheduler
+    # Setup optimizer and scheduler (trainable params only; e.g. frozen OmniLearned medium backbone)
+    trainable_params = [p for p in model.parameters() if p.requires_grad]
     if args.optimizer == "adamw":
-        optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+        optimizer = optim.AdamW(trainable_params, lr=args.lr, weight_decay=args.weight_decay)
     elif args.optimizer == "lion":
-        optimizer = Lion(model.parameters(), lr=args.lr, weight_decay=args.weight_decay, betas=(0.95, 0.98))
+        optimizer = Lion(trainable_params, lr=args.lr, weight_decay=args.weight_decay, betas=(0.95, 0.98))
     else:
         raise ValueError(f"Invalid optimizer: {args.optimizer}")
     
