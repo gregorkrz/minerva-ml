@@ -1,4 +1,4 @@
-# minerva-data-processing
+# minerva-ml
 
 This repository contains the data processing and model training code used for ML studies on MINERvA events.
 
