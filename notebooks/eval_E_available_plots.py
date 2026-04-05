@@ -683,6 +683,28 @@ def plot_rms_iqr(
     return fig
 
 
+def _format_bin_edge_for_title(x: float) -> str:
+    if abs(x - round(x)) < 1e-9:
+        return str(int(round(x)))
+    return f"{x:g}"
+
+
+def _q3_bin_title(qlow: float, qhigh: float, upper_threshold: float = 50.0) -> str:
+    lo = _format_bin_edge_for_title(qlow)
+    hi = _format_bin_edge_for_title(qhigh)
+    if qhigh >= upper_threshold:
+        return rf"$q_3 \in [{lo}, \infty)\ \mathrm{{GeV}}$"
+    return rf"$q_3 \in [{lo}, {hi}]\ \mathrm{{GeV}}$"
+
+
+def _Etrue_bin_title(elow: float, ehigh: float, upper_threshold: float = 100.0) -> str:
+    lo = _format_bin_edge_for_title(elow)
+    hi = _format_bin_edge_for_title(ehigh)
+    if ehigh >= upper_threshold:
+        return rf"$E_{{\mathrm{{true}}}} \geq {lo}\ \mathrm{{GeV}}$"
+    return rf"$E_{{\mathrm{{true}}}} \in [{lo}, {hi})\ \mathrm{{GeV}}$"
+
+
 def plot_residuals_by_energy(
     CKPT_DIR: str | Path,
     training_names: dict[str, dict[str, str]],
@@ -741,6 +763,7 @@ def plot_residuals_by_energy(
 
     for i in range(min(n_cols, len(residual_bins_list))):
         elow, ehigh = energy_bins[i], energy_bins[i + 1]
+        bin_title = _Etrue_bin_title(elow, ehigh)
         if has_baselines:
             mask_e = (mc_E[dp] > elow) & (mc_E[dp] < ehigh)
             mask = mask_e & mask_sel
@@ -748,9 +771,9 @@ def plot_residuals_by_energy(
             baseline = Enu_baselines[dp][baseline_key][mask]
             valid = true > 0
             ratio_bl = baseline[valid] / true[valid]
-            ax[0, i].hist(baseline - true, bins=residual_bins_list[i], histtype="step", label="baseline")
-            ax[1, i].hist(ratio_bl, bins=ratio_bins, histtype="step", label="baseline")
-            ax[2, i].hist(ratio_bl, bins=ratio_bins_wide, histtype="step", label="baseline")
+            ax[0, i].hist(baseline - true, bins=residual_bins_list[i], histtype="step", label="Baseline")
+            ax[1, i].hist(ratio_bl, bins=ratio_bins, histtype="step", label="Baseline")
+            ax[2, i].hist(ratio_bl, bins=ratio_bins_wide, histtype="step", label="Baseline")
 
         for loss in results:
             for model in results[loss]:
@@ -759,27 +782,46 @@ def plot_residuals_by_energy(
                 if has_baselines:
                     reco = E_pred_dict[dp][loss][model][mask]
                     ratio_model = reco[valid] / true[valid]
-                    ax[0, i].hist(reco - true, bins=residual_bins_list[i], histtype="step",
-                                  label=f"{model}-{loss}")
-                    ax[1, i].hist(ratio_model, bins=ratio_bins, histtype="step",
-                                  label=f"{model}-{loss}")
-                    ax[2, i].hist(ratio_model, bins=ratio_bins_wide, histtype="step",
-                                  label=f"{model}-{loss}")
+                    mlab = f"{model} ({loss})"
+                    ax[0, i].hist(reco - true, bins=residual_bins_list[i], histtype="step", label=mlab)
+                    ax[1, i].hist(ratio_model, bins=ratio_bins, histtype="step", label=mlab)
+                    ax[2, i].hist(ratio_model, bins=ratio_bins_wide, histtype="step", label=mlab)
 
-        elabel = f"{elow}-{ehigh}" if ehigh < 100 else f"{elow}+"
-        ax[0, i].set(xlabel="E reco − E true", ylabel="Counts", title=f"E true: {elabel} GeV")
-        #ax[0, i].legend(loc="lower left", fontsize=7)
+        ax[0, i].set(
+            xlabel=r"$E_{\mathrm{reco}} - E_{\mathrm{true}}$ [GeV]",
+            ylabel="Counts",
+            title=bin_title,
+        )
         ax[0, i].grid(True)
-        ax[1, i].set(xlabel="E reco / E true", ylabel="Counts", title=f"E true: {elabel} GeV")
-        ax[1, i].legend(loc="lower left", fontsize=7)
+        ax[1, i].set(
+            xlabel=r"$E_{\mathrm{reco}} / E_{\mathrm{true}}$",
+            ylabel="Counts",
+            title=bin_title,
+        )
         ax[1, i].grid(True)
-        ax[2, i].set(xlabel="E reco / E true", ylabel="Counts", title=f"E true: {elabel} GeV (0–10, log)")
+        ax[2, i].set(
+            xlabel=r"$E_{\mathrm{reco}} / E_{\mathrm{true}}$",
+            ylabel="Counts",
+            title=bin_title + r" ($0$–$10$, log)",
+        )
         ax[2, i].set_yscale("log")
-        ax[2, i].legend(loc="lower left", fontsize=7)
         ax[2, i].grid(True)
-        ax[0, i].legend(loc="lower left", fontsize=7)
 
-    fig.tight_layout()
+    fig.tight_layout(rect=(0.0, 0.06, 1.0, 1.0))
+    handles, labels = ax[1, 0].get_legend_handles_labels()
+    if handles:
+        ncol = min(len(handles), 5)
+        fig.legend(
+            handles,
+            labels,
+            loc="lower center",
+            bbox_to_anchor=(0.5, 0.0),
+            ncol=ncol,
+            frameon=False,
+            fontsize=8,
+            handlelength=1.6,
+            columnspacing=1.0,
+        )
     return fig
 
 
@@ -854,6 +896,12 @@ def plot_residuals_by_q3(
 
     residual_bins = np.linspace(-2, 2, 160)
     ratio_bins = np.linspace(0, 2, 50)
+    legend_kw: dict[str, Any] = {
+        "loc": "upper right",
+        "fontsize": 7,
+        "frameon": False,
+        "handlelength": 1.4
+    }
 
     for i in range(n_cols):
         qlow, qhigh = q3_bins[i], q3_bins[i + 1]
@@ -863,6 +911,7 @@ def plot_residuals_by_q3(
         true = mc_E[dp][mask]
         valid = true > 0
 
+        bin_title = _q3_bin_title(qlow, qhigh)
         if has_baselines:
             baseline = Enu_baselines[dp][baseline_key][mask]
             ratio_bl = baseline[valid] / true[valid]
@@ -870,13 +919,13 @@ def plot_residuals_by_q3(
                 baseline[valid] - true[valid],
                 bins=residual_bins,
                 histtype="step",
-                label="baseline",
+                label="Baseline",
             )
             ax[1, i].hist(
                 ratio_bl,
                 bins=ratio_bins,
                 histtype="step",
-                label="baseline",
+                label="Baseline",
             )
 
         for loss in results:
@@ -885,34 +934,35 @@ def plot_residuals_by_q3(
                     continue
                 reco = E_pred_dict[dp][loss][model][mask]
                 ratio_model = reco[valid] / true[valid]
+                mlab = f"{model}"
                 ax[0, i].hist(
                     reco[valid] - true[valid],
                     bins=residual_bins,
                     histtype="step",
-                    label=f"{model}-{loss}",
+                    label=mlab,
                 )
                 ax[1, i].hist(
                     ratio_model,
                     bins=ratio_bins,
                     histtype="step",
-                    label=f"{model}-{loss}",
+                    label=mlab,
                 )
 
-        qlabel = f"{qlow}-{qhigh}" if qhigh < 100 else f"{qlow}+"
         ax[0, i].set(
-            xlabel="E reco − E true [GeV]",
+            xlabel=r"$E_{\mathrm{reco}} - E_{\mathrm{true}}$ [GeV]",
             ylabel="Counts",
-            title=f"$q_3$: {qlabel} GeV",
+            title=bin_title,
         )
         ax[1, i].set(
-            xlabel="E reco / E true",
+            xlabel=r"$E_{\mathrm{reco}} / E_{\mathrm{true}}$",
             ylabel="Counts",
-            title=f"$q_3$: {qlabel} GeV",
+            title=bin_title,
         )
-        ax[0, i].legend(loc="lower left", fontsize=7)
-        ax[1, i].legend(loc="lower left", fontsize=7)
         ax[0, i].grid(True)
         ax[1, i].grid(True)
+        if ax[0, i].get_legend_handles_labels()[0]:
+            ax[0, i].legend(**legend_kw)
+            #ax[1, i].legend(**legend_kw)
 
     fig.tight_layout()
     return fig
@@ -1006,6 +1056,7 @@ def plot_rms_iqr_with_uncertainty(
     return_values: bool = False,
     suppress_errors: bool = False,
     text: str = "",
+    iqr_only: bool = True,
 ) -> plt.Figure | tuple[plt.Figure, dict]:
     """RMS / IQR vs *q3* with ±1 std-dev uncertainty bands across seeds.
 
@@ -1019,6 +1070,10 @@ def plot_rms_iqr_with_uncertainty(
         token found as a substring.  Unmatched labels default to grey.
     return_values : if *True*, return ``(fig, values)`` where *values* is
         a dict with q3 bin midpoints and per-config / baseline arrays.
+    iqr_only : if *True* (default), use a **2×1** column: top = IQR/MPV vs $q_3$,
+        bottom = MPV vs $q_3$ (no left RMS panel).  If *False*, use the full 2×2
+        layout (RMS, IQR, and duplicated MPV row); the MPV row has no legend
+        (paper-style).
     Other parameters match :func:`plot_rms_iqr`.  Only a single
     ``dataset_to_plot`` is supported; ``dataset_to_linestyle``,
     ``show_q3_histograms`` and ``return_hist_fig`` are accepted for API
@@ -1136,16 +1191,32 @@ def plot_rms_iqr_with_uncertainty(
 
     values: dict[str, Any] = {"q3_bin_mids": q3_bin_mids}
 
-    # Layout: 2×2 – top: RMS/MPV and IQR/MPV; bottom: MPV (duplicated);
-    # bottom row has half the height of the top row.
-    fig, ax = plt.subplots(
-        2,
-        2,
-        figsize=(9, 7),
-        gridspec_kw={"height_ratios": [2, 1]},
-    )
-    ax_top = ax[0]
-    ax_bottom = ax[1]
+    ax_mpv_panel: plt.Axes | None = None
+    if iqr_only:
+        # One column: IQR/MPV (top), MPV (bottom); same height ratio as full 2×2 bottom row.
+        fig, axes_col = plt.subplots(
+            2,
+            1,
+            figsize=(4.8, 6.2),
+            gridspec_kw={"height_ratios": [2, 1]},
+        )
+        ax_iqr = axes_col[0]
+        ax_mpv_panel = axes_col[1]
+        ax_rms = None
+        ax_bottom = None
+    else:
+        # 2×2 – top: RMS/MPV and IQR/MPV; bottom: MPV (duplicated);
+        # bottom row has half the height of the top row.
+        fig, ax = plt.subplots(
+            2,
+            2,
+            figsize=(9, 7),
+            gridspec_kw={"height_ratios": [2, 1]},
+        )
+        ax_top = ax[0]
+        ax_bottom = ax[1]
+        ax_rms = ax_top[0]
+        ax_iqr = ax_top[1]
 
     if has_baselines:
         rms_bl: list[float] = []
@@ -1286,16 +1357,17 @@ def plot_rms_iqr_with_uncertainty(
                 rms_over_mpv = mean_rms / mean_mpv
                 iqr_over_mpv = mean_iqr / mean_mpv
 
-            ax_top[0].plot(q3_bin_mids, rms_over_mpv, ".--", color=color, label=lbl)
-            ax_top[0].fill_between(
-                q3_bin_mids,
-                rms_over_mpv - (std_rms / mean_mpv),
-                rms_over_mpv + (std_rms / mean_mpv),
-                alpha=0.25,
-                color=color,
-            )
-            ax_top[1].plot(q3_bin_mids, iqr_over_mpv, ".--", color=color, label=lbl)
-            ax_top[1].fill_between(
+            if not iqr_only:
+                ax_rms.plot(q3_bin_mids, rms_over_mpv, ".--", color=color, label=lbl)
+                ax_rms.fill_between(
+                    q3_bin_mids,
+                    rms_over_mpv - (std_rms / mean_mpv),
+                    rms_over_mpv + (std_rms / mean_mpv),
+                    alpha=0.25,
+                    color=color,
+                )
+            ax_iqr.plot(q3_bin_mids, iqr_over_mpv, ".--", color=color, label=lbl)
+            ax_iqr.fill_between(
                 q3_bin_mids,
                 iqr_over_mpv - (std_iqr / mean_mpv),
                 iqr_over_mpv + (std_iqr / mean_mpv),
@@ -1303,23 +1375,32 @@ def plot_rms_iqr_with_uncertainty(
                 color=color,
             )
 
-            # MPV curves with ±1σ bands (bottom row, duplicated on both axes)
-            ax_bottom[0].plot(q3_bin_mids, mean_mpv, ".--", color=color, label=lbl)
-            ax_bottom[0].fill_between(
-                q3_bin_mids,
-                mean_mpv - std_mpv,
-                mean_mpv + std_mpv,
-                alpha=0.25,
-                color=color,
-            )
-            ax_bottom[1].plot(q3_bin_mids, mean_mpv, ".--", color=color, label=lbl)
-            ax_bottom[1].fill_between(
-                q3_bin_mids,
-                mean_mpv - std_mpv,
-                mean_mpv + std_mpv,
-                alpha=0.25,
-                color=color,
-            )
+            if iqr_only:
+                ax_mpv_panel.plot(q3_bin_mids, mean_mpv, ".--", color=color, label=lbl)
+                ax_mpv_panel.fill_between(
+                    q3_bin_mids,
+                    mean_mpv - std_mpv,
+                    mean_mpv + std_mpv,
+                    alpha=0.25,
+                    color=color,
+                )
+            else:
+                ax_bottom[0].plot(q3_bin_mids, mean_mpv, ".--", color=color, label=lbl)
+                ax_bottom[0].fill_between(
+                    q3_bin_mids,
+                    mean_mpv - std_mpv,
+                    mean_mpv + std_mpv,
+                    alpha=0.25,
+                    color=color,
+                )
+                ax_bottom[1].plot(q3_bin_mids, mean_mpv, ".--", color=color, label=lbl)
+                ax_bottom[1].fill_between(
+                    q3_bin_mids,
+                    mean_mpv - std_mpv,
+                    mean_mpv + std_mpv,
+                    alpha=0.25,
+                    color=color,
+                )
 
     # Baseline curves for normalised metrics and MPV
     if "baseline" in values:
@@ -1330,44 +1411,54 @@ def plot_rms_iqr_with_uncertainty(
         with np.errstate(divide="ignore", invalid="ignore"):
             bl_rms_over_mpv = bl_rms / bl_mpv
             bl_iqr_over_mpv = bl_iqr / bl_mpv
-        ax_top[0].plot(q3_bin_mids, bl_rms_over_mpv, ".--", color="black", label="baseline")
-        ax_top[1].plot(q3_bin_mids, bl_iqr_over_mpv, ".--", color="black", label="baseline")
-        ax_bottom[0].plot(q3_bin_mids, bl_mpv, ".--", color="black", label="baseline")
-        ax_bottom[1].plot(q3_bin_mids, bl_mpv, ".--", color="black", label="baseline")
+        if not iqr_only:
+            ax_rms.plot(q3_bin_mids, bl_rms_over_mpv, ".--", color="black", label="Baseline")
+        ax_iqr.plot(q3_bin_mids, bl_iqr_over_mpv, ".--", color="black", label="Baseline")
+        if iqr_only:
+            ax_mpv_panel.plot(q3_bin_mids, bl_mpv, ".--", color="black", label="Baseline")
+        else:
+            ax_bottom[0].plot(q3_bin_mids, bl_mpv, ".--", color="black", label="Baseline")
+            ax_bottom[1].plot(q3_bin_mids, bl_mpv, ".--", color="black", label="Baseline")
 
     # Legend placement; optional *text* is used as legend title if provided.
-    # Slightly larger font for better readability in notebook/figures.
     legend_kwargs: dict[str, Any] = {"fontsize": 9, "loc": "upper right"}
     if text:
         legend_kwargs["title"] = text
         legend_kwargs["title_fontsize"] = 10
 
-    ax_top[0].legend(**legend_kwargs)
-    ax_top[1].legend(**legend_kwargs)
-    ax_bottom[0].legend(fontsize=7)
-    ax_bottom[1].legend(fontsize=7)
+    if iqr_only:
+        ax_iqr.legend(**legend_kwargs)
+    else:
+        ax_rms.legend(**legend_kwargs)
+        ax_iqr.legend(**legend_kwargs)
 
-    ax_top[0].set(
-        xlabel="MC truth $q_3$ [GeV]",
-        ylabel="RMS / MPV of $E_{\\mathrm{reco}}/E_{\\mathrm{true}}$",
-    )
-    ax_top[1].set(
+    ax_iqr.set(
         xlabel="MC truth $q_3$ [GeV]",
         ylabel="IQR / MPV of $E_{\\mathrm{reco}}/E_{\\mathrm{true}}$",
     )
-    ax_bottom[0].set(
-        xlabel="MC truth $q_3$ [GeV]",
-        ylabel="MPV of $E_{\\mathrm{reco}}/E_{\\mathrm{true}}$",
-    )
-    ax_bottom[1].set(
-        xlabel="MC truth $q_3$ [GeV]",
-        ylabel="MPV of $E_{\\mathrm{reco}}/E_{\\mathrm{true}}$",
-    )
-
-    for a in ax_top:
-        a.grid(True)
-    for a in ax_bottom:
-        a.grid(True)
+    ax_iqr.grid(True)
+    if iqr_only:
+        ax_mpv_panel.set(
+            xlabel="MC truth $q_3$ [GeV]",
+            ylabel="MPV of $E_{\\mathrm{reco}}/E_{\\mathrm{true}}$",
+        )
+        ax_mpv_panel.grid(True)
+    else:
+        ax_rms.set(
+            xlabel="MC truth $q_3$ [GeV]",
+            ylabel="RMS / MPV of $E_{\\mathrm{reco}}/E_{\\mathrm{true}}$",
+        )
+        ax_rms.grid(True)
+        ax_bottom[0].set(
+            xlabel="MC truth $q_3$ [GeV]",
+            ylabel="MPV of $E_{\\mathrm{reco}}/E_{\\mathrm{true}}$",
+        )
+        ax_bottom[1].set(
+            xlabel="MC truth $q_3$ [GeV]",
+            ylabel="MPV of $E_{\\mathrm{reco}}/E_{\\mathrm{true}}$",
+        )
+        ax_bottom[0].grid(True)
+        ax_bottom[1].grid(True)
 
     fig.tight_layout()
 

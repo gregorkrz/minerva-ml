@@ -4,7 +4,6 @@ This repository contains the data processing and model training code used for ML
 
 For detailed data fields and semantics, see **[DATASET.md](DATASET.md)**.
 For model architecture details, see **[MODELS.md](MODELS.md)**.
-
 ## Repository workflow
 
 The typical workflow is:

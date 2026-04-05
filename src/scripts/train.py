@@ -95,42 +95,71 @@ BERT_PRESETS = {
 }
 
 
-def _load_hf_sequence_encoder(pretrained_model_name_or_path: str):
+def _load_hf_sequence_encoder(pretrained_model_name_or_path: str, random_init: bool = False):
     """Load BERT or DistilBERT by class name — not AutoModel.
 
     `prajjwal1/bert-tiny` ships a minimal config.json without `model_type`, which breaks
     `AutoModel.from_pretrained` on recent `transformers` versions.
+
+    If ``random_init``, architecture (and vocab size, etc.) is taken from the hub ``config.json``,
+    but weights are freshly initialized (no checkpoint weights).
     """
     try:
-        from transformers import BertModel, DistilBertModel
+        from transformers import BertConfig, BertModel, DistilBertConfig, DistilBertModel
     except ImportError as e:
         raise ImportError(
             "BertBaseline requires the `transformers` package. Install with: pip install transformers"
         ) from e
     name = pretrained_model_name_or_path.lower()
     if "distilbert" in name:
+        if random_init:
+            cfg = DistilBertConfig.from_pretrained(pretrained_model_name_or_path)
+            return DistilBertModel(cfg)
         return DistilBertModel.from_pretrained(pretrained_model_name_or_path)
+    if random_init:
+        cfg = BertConfig.from_pretrained(pretrained_model_name_or_path)
+        return BertModel(cfg)
     return BertModel.from_pretrained(pretrained_model_name_or_path)
 
 
 class BertBaseline(nn.Module):
-    """Pretrained BERT over per-particle embeddings (inputs_embeds), mean-pool, linear head."""
-
-    def __init__(self, input_dim, output_dim, pretrained_model_name_or_path: str):
+    """Pretrained BERT over per-particle embeddings (inputs_embeds), mean-pool or CLS, linear head."""
+    def __init__(
+        self,
+        input_dim,
+        output_dim,
+        pretrained_model_name_or_path: str,
+        use_cls_token: bool = False,
+        bert_random_init: bool = False,
+    ):
         super().__init__()
-        self.bert = _load_hf_sequence_encoder(pretrained_model_name_or_path)
+        self.use_cls_token = use_cls_token
+        self.bert = _load_hf_sequence_encoder(
+            pretrained_model_name_or_path, random_init=bert_random_init
+        )
         hidden = int(self.bert.config.hidden_size)
         self.proj = nn.Linear(input_dim, hidden)
         self.head = nn.Linear(hidden, output_dim)
+        if use_cls_token:
+            self.cls_token = nn.Parameter(torch.randn(1, 1, hidden) * 0.02)
 
     def forward(self, x, mask):
         # x: [B, N, input_dim], mask: [B, N] (1 = valid, 0 = pad)
         x = self.proj(x)
+        if self.use_cls_token:
+            B = x.shape[0]
+            cls = self.cls_token.expand(B, -1, -1).to(device=x.device, dtype=x.dtype)
+            x = torch.cat([cls, x], dim=1)
+            ones = torch.ones(B, 1, device=mask.device, dtype=mask.dtype)
+            mask = torch.cat([ones, mask], dim=1)
         attn = mask.to(dtype=torch.long)
         out = self.bert(inputs_embeds=x, attention_mask=attn)
         hs = out.last_hidden_state
-        w = mask.unsqueeze(-1).to(dtype=hs.dtype)
-        pooled = (hs * w).sum(dim=1) / w.sum(dim=1).clamp(min=1e-6)
+        if self.use_cls_token:
+            pooled = hs[:, 0]
+        else:
+            w = mask.unsqueeze(-1).to(dtype=hs.dtype)
+            pooled = (hs * w).sum(dim=1) / w.sum(dim=1).clamp(min=1e-6)
         return self.head(pooled)
 
 
@@ -305,6 +334,12 @@ def parse_args():
                         metavar="SIZE",
                         help="Use pretrained BERT-style encoder on particle features (same layout as OmniLearned). "
                              "Pass --use-bert alone for preset 'small' (bert-tiny). Requires `transformers`.")
+    parser.add_argument("--use-cls-token", action="store_true", default=False,
+                        help="With --use-bert: prepend a learnable CLS embedding and use its output (position 0) "
+                             "instead of masked mean pooling over particles.")
+    parser.add_argument("--bert-random-init", action="store_true", default=False,
+                        help="With --use-bert: use hub config for architecture but randomly initialize BERT weights "
+                             "(no pretrained checkpoint).")
     parser.add_argument("--use-pretrained", type=str, default=None,
                         help="Load pretrained OmniLearned checkpoint (e.g. pretrain_s, pretrain_m)")
     parser.add_argument("--ol-num-feat", type=int, default=4,
@@ -510,7 +545,7 @@ def _bert_input_dim(args):
 
 
 def create_bert_model(args, task):
-    """Create BertBaseline with HF pretrained weights."""
+    """Create BertBaseline with HF BERT/DistilBERT (pretrained or random-init per args)."""
     if task.type == "classifier":
         num_classes = len(task.class_idx)
     elif task.type == "regression":
@@ -518,10 +553,15 @@ def create_bert_model(args, task):
     else:
         raise ValueError("Invalid task type")
     pretrained_name = BERT_PRESETS[args.use_bert]
+    ri = bool(getattr(args, "bert_random_init", False))
+    if ri:
+        print("BERT encoder: random weight init (config from preset id, no HF checkpoint weights).")
     return BertBaseline(
         input_dim=_bert_input_dim(args),
         output_dim=num_classes,
         pretrained_model_name_or_path=pretrained_name,
+        use_cls_token=bool(getattr(args, "use_cls_token", False)),
+        bert_random_init=ri,
     )
 
 
@@ -922,6 +962,10 @@ def train(args):
             raise ValueError("Cannot use --use-bert together with --use-omnilearned")
         if args.cond_only:
             raise ValueError("Cannot use --use-bert together with --cond-only")
+    elif getattr(args, "use_cls_token", False):
+        raise ValueError("--use-cls-token requires --use-bert")
+    elif getattr(args, "bert_random_init", False):
+        raise ValueError("--bert-random-init requires --use-bert")
     # Set seed
     if args.seed is not None:
         set_seed(args.seed)

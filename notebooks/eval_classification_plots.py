@@ -715,7 +715,7 @@ def plot_cc1pi_vs_pion_kinematics(
                             label=reco_baseline_label)
 
     col_labels = ["AUPRC", "AUROC", "Efficiency (TPR)"]
-    for row, kinematic in enumerate([r"MC truth $E_\pi$ [GeV]", r"MC truth $\theta_\pi$ [rad]"]):
+    for row, kinematic in enumerate([r"True $E_\pi$ [GeV]", r"$\theta_\pi$ [rad]"]):
         for col, metric in enumerate(col_labels):
             ax = axes[row, col]
             ax.set_xlabel(kinematic)
@@ -782,7 +782,7 @@ def plot_multi_pion_vs_q3(
     col_labels = ["AUPRC", "AUROC", "Efficiency (TPR)"]
     for col, metric in enumerate(col_labels):
         ax = axes[col]
-        ax.set_xlabel(r"True $q_3$ [GeV]")
+        ax.set_xlabel(r"$q_{3}^{\mathrm{true}}$ [GeV]")
         ax.set_ylabel(metric)
         if col < 2:
             ax.set_title(f"{metric} vs. $q_3$")
@@ -792,7 +792,7 @@ def plot_multi_pion_vs_q3(
         ax.grid(True)
 
     if title is None:
-        title = r"Multi-pion tagging (one or more charged pions) vs. true $q_3$"
+        title = r"Multi-pion tagging (one or more charged pions) vs.\ $q_{3}^{\mathrm{true}}$"
     fig.suptitle(title, fontsize=14)
     return fig
 
@@ -1143,8 +1143,8 @@ def plot_prc_curves(
                 ax.fill_between(r, p - s, p + s, alpha=0.2, color=line.get_color())
 
     for ax, scale in zip(axes, ["linear", "log"]):
-        ax.set_xlabel("Recall")
-        ax.set_ylabel("Precision")
+        ax.set_xlabel(r"Recall (TPR)")
+        ax.set_ylabel(r"Precision (purity)")
         ax.set_title(f"{title} ({scale} scale)")
         ax.legend(fontsize=9)
         ax.grid(True)

@@ -132,7 +132,7 @@ def get_classification_runs_by_model_and_cap(
         if model is None:
             m = re.search(r"_OLM_FB_?classifier_(-?\d+)_", name)
             if m:
-                model, cap = "OmniLearned-medium", int(m.group(1))
+                model, cap = "OmniLearned-medium-heads", int(m.group(1))
         if model is None:
             m = re.search(r"_classifier_(Transformer[^_]+)_data_cap_(-?\d+)_", name)
             if m:
