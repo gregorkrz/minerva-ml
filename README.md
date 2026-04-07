@@ -2,6 +2,15 @@
 
 This repository contains the data processing and model training code used for ML studies on MINERvA events.
 
+## Dataset
+
+The processed dataset used by this project is available on Hugging Face:
+
+- [gregorkrzmanc/minerva-ml](https://huggingface.co/datasets/gregorkrzmanc/minerva-ml)
+- It is a preprocessed version of the MINERvA open data release for ML/physics tasks such as available-energy estimation and event tagging.
+- Source data comes from MINERvA open data: [MINERvA Open Data](https://minerva.fnal.gov/opendata/).
+- This is a derived dataset and is not an official MINERvA collaboration product.
+
 For detailed data fields and semantics, see **[DATASET.md](DATASET.md)**.
 For model architecture details, see **[MODELS.md](MODELS.md)**.
 ## Repository workflow
@@ -14,7 +23,14 @@ The typical workflow is:
 4. Train models locally or submit SLURM jobs
 5. Run test evaluation (`eval`) on checkpoints, then analyze with notebooks
 
-## 1) Download data
+## 1) Get the data (two options)
+
+Choose one of the following:
+
+- **Option A (from scratch):** Download raw MINERvA playlists, then preprocess locally.
+- **Option B (quick start):** Download the already preprocessed dataset from Hugging Face and skip local preprocessing.
+
+### Option A: Download raw playlists (from scratch)
 
 Set `SCRATCH` first, then run:
 
@@ -26,7 +42,22 @@ python -m src.scripts.download_data
 python -m src.scripts.download_data --prefix MediumEnergy_FHC_Data_Playlist
 ```
 
+### Option B: Download preprocessed dataset from Hugging Face
+
+If you want to skip raw playlist processing, download the preprocessed dataset snapshot:
+
+```bash
+pip install -U "huggingface_hub[cli]"
+huggingface-cli download gregorkrzmanc/minerva-ml \
+  --repo-type dataset \
+  --local-dir <HF_DATA_DIR>
+```
+
+After download, point your training/splitting commands to the downloaded folder structure.
+
 ## 2) Preprocess dataset
+
+Skip this section if you used **Option B** and already have the preprocessed files you need.
 
 Minimal invocation (creates `.pb` files with event-wise particle tensors and labels):
 

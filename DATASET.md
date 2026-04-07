@@ -135,6 +135,8 @@ A 16-dimensional vector per event providing event-level context.
 | 1 | Muon isolated blobs energy | `log(muon_iso_blobs_energy + 1e-5)` (negative values clipped to 0 before log) |
 | 2 | Hadronic recoil energy | `log(MasterAnaDev_hadron_recoil + 1e-5)` (negative values clipped to 0 before log) |
 
+**Current experiment note:** In the current experiment configuration, this feature (`global_features[:, 2]`, hadronic recoil / `E_recoil`) is intentionally omitted by passing `--zero-cond-feature 2` in job scripts under `jobs/`.
+
 ### Columns 3–5: Passive recoil (log)
 
 Scaled by `/10000` from `part_response_total_recoil_passive_allNonMuonClusters_*`, then `log(value + 1e-3)` (negative values clipped to 0 before log).
