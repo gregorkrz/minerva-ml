@@ -152,12 +152,38 @@ cd notebooks
 # Execute (updates notebooks in place with fresh outputs)
 jupyter nbconvert --to notebook --execute Eval_Regression.ipynb --inplace
 jupyter nbconvert --to notebook --execute Eval_Classification.ipynb --inplace
+jupyter nbconvert --to notebook --execute Eval_Classification_Light.ipynb --inplace
 # Export static copies (HTML; use --to pdf instead if pandoc/LaTeX are available, or --to webpdf with Chromium)
 jupyter nbconvert --to html Eval_Regression.ipynb
 jupyter nbconvert --to html Eval_Classification.ipynb
+jupyter nbconvert --to html Eval_Classification_Light.ipynb
 ```
 
 Classification evaluation covers tagging and related metrics; regression evaluation covers energy-scale and scaling plots. Figures and PDFs are written under paths configured in each notebook (typically under `out/`).
+
+### GitHub Action for eval plot bundles
+
+This repo includes a manual workflow at `.github/workflows/eval-plots.yml` that:
+
+1. Executes:
+   - `notebooks/Eval_Regression.ipynb`
+   - `notebooks/Eval_Classification.ipynb`
+   - `notebooks/Eval_Classification_Light.ipynb`
+2. Exports notebook HTML files.
+3. Zips generated outputs (including `out/`, HTML exports, and executed notebooks).
+4. Uploads the zip as a workflow artifact.
+
+Run it from **GitHub → Actions → Generate Evaluation Plots → Run workflow** and provide:
+
+- `wandb_tag`: the run tag to use as `WANDB_TAG`.
+- `checkpoints_dir`: checkpoint path for `CKPT_DIR` (defaults to the path currently used in notebooks).
+
+Required secret/variable setup:
+
+- Add `WANDB_API_KEY` as a **Repository secret** under:
+  - **Settings → Secrets and variables → Actions → New repository secret**
+- Set `WANDB_ENTITY` as a repository variable (optional if your W&B default entity is configured):
+  - **Settings → Secrets and variables → Actions → Variables**
 
 ## 6) Event displays
 

@@ -1,0 +1,132 @@
+name: Generate Evaluation Plots
+
+on:
+  workflow_dispatch:
+    inputs:
+      wandb_tag:
+        description: "W&B tag used by the eval notebooks (WANDB_TAG)."
+        required: true
+        type: string
+      checkpoints_dir:
+        description: "Checkpoint directory path used by CKPT_DIR in notebooks."
+        required: false
+        default: "/global/cfs/cdirs/m3246/gregork/checkpoints"
+        type: string
+
+jobs:
+  generate-eval-plots:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    env:
+      WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
+      WANDB_ENTITY: ${{ vars.WANDB_ENTITY }}
+      WANDB_TAG: ${{ inputs.wandb_tag }}
+      CHECKPOINTS_DIR: ${{ inputs.checkpoints_dir }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Validate required secrets
+        run: |
+          if [ -z "${WANDB_API_KEY:-}" ]; then
+            echo "::error::WANDB_API_KEY is not set. Add it in Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+
+      - name: Install notebook dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install jupyter nbconvert nbformat ipykernel matplotlib seaborn scikit-learn wandb numpy
+
+      - name: Inject workflow inputs into notebooks
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import os
+          import nbformat
+
+          notebooks = [
+              Path("notebooks/Eval_Regression.ipynb"),
+              Path("notebooks/Eval_Classification.ipynb"),
+              Path("notebooks/Eval_Classification_Light.ipynb"),
+          ]
+
+          wandb_tag = os.environ["WANDB_TAG"]
+          ckpt_dir = os.environ["CHECKPOINTS_DIR"]
+
+          for nb_path in notebooks:
+              nb = nbformat.read(nb_path, as_version=4)
+              updated = False
+              for cell in nb.cells:
+                  if cell.get("cell_type") != "code":
+                      continue
+                  lines = cell.get("source", "").splitlines()
+                  for idx, line in enumerate(lines):
+                      stripped = line.strip()
+                      if stripped.startswith("WANDB_TAG ="):
+                          lines[idx] = f'WANDB_TAG = "{wandb_tag}"  # set by CI workflow'
+                          updated = True
+                      elif stripped.startswith("CKPT_DIR = Path("):
+                          lines[idx] = f'CKPT_DIR = Path(r"{ckpt_dir}")'
+                          updated = True
+                      elif stripped.startswith("arial_path ="):
+                          lines[idx] = 'arial_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"'
+                          updated = True
+                      elif "font_manager.fontManager.addfont(arial_path)" in stripped:
+                          lines[idx] = "if Path(arial_path).exists(): font_manager.fontManager.addfont(arial_path)"
+                          updated = True
+                  cell["source"] = "\n".join(lines)
+              if updated:
+                  nbformat.write(nb, nb_path)
+                  print(f"Updated {nb_path}")
+          PY
+
+      - name: Execute notebooks (README nbconvert flow)
+        run: |
+          cd notebooks
+          jupyter nbconvert --to notebook --execute Eval_Regression.ipynb --inplace --ExecutePreprocessor.timeout=3600
+          jupyter nbconvert --to notebook --execute Eval_Classification.ipynb --inplace --ExecutePreprocessor.timeout=3600
+          jupyter nbconvert --to notebook --execute Eval_Classification_Light.ipynb --inplace --ExecutePreprocessor.timeout=3600
+
+      - name: Export notebook HTML
+        run: |
+          cd notebooks
+          jupyter nbconvert --to html Eval_Regression.ipynb
+          jupyter nbconvert --to html Eval_Classification.ipynb
+          jupyter nbconvert --to html Eval_Classification_Light.ipynb
+
+      - name: Package plots and notebook exports
+        id: package
+        run: |
+          mkdir -p artifacts/notebooks-html artifacts/outputs artifacts/executed-notebooks
+          cp notebooks/Eval_Regression.html artifacts/notebooks-html/
+          cp notebooks/Eval_Classification.html artifacts/notebooks-html/
+          cp notebooks/Eval_Classification_Light.html artifacts/notebooks-html/
+          cp notebooks/Eval_Regression.ipynb artifacts/executed-notebooks/
+          cp notebooks/Eval_Classification.ipynb artifacts/executed-notebooks/
+          cp notebooks/Eval_Classification_Light.ipynb artifacts/executed-notebooks/
+          if [ -d out ]; then
+            cp -R out artifacts/outputs/out
+          fi
+          if [ -d notebooks/figures ]; then
+            cp -R notebooks/figures artifacts/outputs/notebooks-figures
+          fi
+          artifact_zip="eval-plots-${GITHUB_RUN_ID}.zip"
+          (cd artifacts && zip -r "../${artifact_zip}" .)
+          echo "artifact_zip=${artifact_zip}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload zipped plot artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-plots-${{ github.run_number }}
+          path: ${{ steps.package.outputs.artifact_zip }}
+          if-no-files-found: error
