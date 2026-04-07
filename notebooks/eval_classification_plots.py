@@ -48,6 +48,19 @@ MC_INT_TYPE: dict[int, str] = {
     8: "MEC/2p2h",
 }
 
+
+def _default_signal_label(signal_classes: list[int]) -> str:
+    """Short label for the binary signal definition used in classification plots."""
+    key = tuple(sorted(signal_classes))
+    if key == (0,):
+        return r"$CC1\pi^\pm$"
+    if key == (0, 1):
+        return r"CCN$\pi$"
+    if key == (2,):
+        return r"$CC\pi^0$"
+    return "signal"
+
+
 DEFAULT_FIXED_FPR = [0.2]
 DEFAULT_N_BINS = 5
 DEFAULT_Q3_BIN_EDGES = np.array([0, 2.5, 5, 7.5, 10, 12.5, 15, 20, 25])
@@ -86,7 +99,8 @@ def load_results(
         playlists = ["1A"]
 
     all_results: dict[str, list[dict]] = {}
-    for model_name, run_names in training_names.items():
+    for model_name in sorted(training_names.keys()):
+        run_names = training_names[model_name]
         all_results[model_name] = []
         for run_name in run_names:
             run_results: dict[str, dict] = {}
@@ -474,7 +488,7 @@ def compute_all_metrics(
     if fixed_fpr is None:
         fixed_fpr = DEFAULT_FIXED_FPR
     out = {}
-    for model_name, run_list in results.items():
+    for model_name, run_list in sorted(results.items(), key=lambda kv: kv[0]):
         runs_E, runs_theta = [], []
         for run_result in run_list:
             m = compute_binned_metrics_single(
@@ -506,7 +520,7 @@ def compute_all_metrics_q3(
     if fixed_fpr is None:
         fixed_fpr = DEFAULT_FIXED_FPR
     out = {}
-    for model_name, run_list in results.items():
+    for model_name, run_list in sorted(results.items(), key=lambda kv: kv[0]):
         runs = []
         for run_result in run_list:
             runs.append(
@@ -685,7 +699,7 @@ def plot_cc1pi_vs_pion_kinematics(
     axes[0, 0].plot(E_mid, baseline["E"], ".--", color="black", label="Random baseline")
     axes[1, 0].plot(theta_mid, baseline["theta"], ".--", color="black", label="Random baseline")
 
-    for model_name, metrics in all_metrics.items():
+    for model_name, metrics in sorted(all_metrics.items(), key=lambda kv: kv[0]):
         agg_E = metrics["E"]
         agg_theta = metrics["theta"]
         clr = {} if colors is None else {"color": colors.get(model_name)}
@@ -764,7 +778,7 @@ def plot_multi_pion_vs_q3(
 
     axes[0].plot(q3_mid, baseline_q3, ".--", color="black", label="Random baseline")
 
-    for model_name, agg in all_metrics_q3.items():
+    for model_name, agg in sorted(all_metrics_q3.items(), key=lambda kv: kv[0]):
         clr = {} if colors is None else {"color": colors.get(model_name)}
         _plot_metric_line(axes[0], q3_mid, agg["auprc"], model_name, uncertainties, **clr)
         _plot_metric_line(axes[1], q3_mid, agg["auroc"], model_name, uncertainties, **clr)
@@ -813,6 +827,7 @@ def plot_binned_by_inttype(
     reco_baseline_pred: np.ndarray | None = None,
     reco_baseline_label: str = "Reco baseline",
     colors: dict[str, str] | None = None,
+    signal_label: str | None = None,
 ) -> plt.Figure:
     """One row per interaction type, 4 columns: AUPRC, AUROC, TPR@FPR,
     and an event-count histogram.
@@ -824,6 +839,9 @@ def plot_binned_by_inttype(
         test set). When provided, the per-bin recall is overlaid on the
         TPR@FPR panel for each interaction type.
     reco_baseline_label : legend label for the reco baseline.
+    signal_label : optional name for the signal class definition (e.g.
+        ``r"$CC\\pi^0$"``). Used when there are events in an interaction
+        type but no signal positives; defaults from *signal_classes*.
     """
     if fixed_fpr is None:
         fixed_fpr = DEFAULT_FIXED_FPR
@@ -836,11 +854,13 @@ def plot_binned_by_inttype(
     if n_int == 1:
         axes = axes[np.newaxis, :]
 
-    # Pre-compute y_true once for the reco baseline overlay
-    if reco_baseline_pred is not None:
-        first_model = next(iter(results))
-        sig_info = get_signal_probabilities(results[first_model][0], signal_classes, playlist)
-        y_true_reco = sig_info["ytrue"]
+    first_model = next(iter(results))
+    y_true_binary = get_signal_probabilities(
+        results[first_model][0], signal_classes, playlist
+    )["ytrue"]
+    label_for_signal = signal_label if signal_label is not None else _default_signal_label(
+        signal_classes
+    )
 
     has_pion = data["has_pion"]
 
@@ -884,6 +904,57 @@ def plot_binned_by_inttype(
                 axes[row_idx, col].set_title(f"{int_name} (N=0)")
             continue
 
+        n_signal = int(((y_true_binary == 1) & int_mask).sum())
+        no_signal_msg = (
+            f"No {label_for_signal} signal in this interaction type"
+        )
+
+        if n_signal == 0:
+            for col in (0, 1, 2):
+                ax = axes[row_idx, col]
+                ax.set_axis_off()
+                ax.text(
+                    0.5,
+                    0.5,
+                    no_signal_msg,
+                    transform=ax.transAxes,
+                    ha="center",
+                    va="center",
+                    fontsize=11,
+                    color="gray",
+                )
+                ax.set_title(f"{int_name} (N={n_events:,})")
+            # Histogram still shows kinematic counts for this interaction type
+            ax_h = axes[row_idx, 3]
+            counts, _ = np.histogram(hist_var[plot_mask], bins=bin_edges)
+            widths = np.diff(bin_edges)
+            ax_h.bar(
+                bin_edges[:-1],
+                counts,
+                width=widths,
+                align="edge",
+                edgecolor="black",
+                linewidth=0.5,
+                alpha=0.7,
+            )
+            for i, c in enumerate(counts):
+                if c > 0:
+                    ax_h.text(
+                        bin_edges[i] + widths[i] / 2,
+                        c,
+                        str(c),
+                        ha="center",
+                        va="bottom",
+                        fontsize=7,
+                    )
+            ax_h.set_xlabel(xlabel)
+            ax_h.set_ylabel("Events")
+            ax_h.set_title(f"{int_name} (N={n_events:,}) — event counts")
+            ax_h.grid(True, axis="y", alpha=0.3)
+            if log_x:
+                ax_h.set_xscale("log")
+            continue
+
         # Compute baseline
         bl = compute_signal_baseline(results, data, signal_classes, int_mask, playlist)
 
@@ -903,7 +974,7 @@ def plot_binned_by_inttype(
         # Random baseline
         axes[row_idx, 0].plot(x_mid, bl_values, ".--", color="black", label="Random baseline")
 
-        for model_name, agg in all_agg.items():
+        for model_name, agg in sorted(all_agg.items(), key=lambda kv: kv[0]):
             clr = {} if colors is None else {"color": colors.get(model_name)}
             _plot_metric_line(axes[row_idx, 0], x_mid, agg["auprc"], model_name, uncertainties, **clr)
             _plot_metric_line(axes[row_idx, 1], x_mid, agg["auroc"], model_name, uncertainties, **clr)
@@ -916,7 +987,7 @@ def plot_binned_by_inttype(
 
         # Reco baseline on TPR panel
         if reco_baseline_pred is not None:
-            is_signal_masked = (y_true_reco == 1) & int_mask
+            is_signal_masked = (y_true_binary == 1) & int_mask
             if x_var == "q3":
                 reco_bl = compute_reco_baseline_recall_per_bin(
                     reco_baseline_pred, is_signal_masked,
@@ -1061,7 +1132,7 @@ def _compute_prc_curves(
         recall_grid = np.linspace(0, 1, 200)
 
     out = {}
-    for model_name, run_list in results.items():
+    for model_name, run_list in sorted(results.items(), key=lambda kv: kv[0]):
         precisions_interp = []
         thresholds_interp = []
         auprcs = []
@@ -1119,7 +1190,7 @@ def plot_prc_curves(
         ax.axhline(signal_frac, color="black", linestyle="--", linewidth=1,
                     label=f"Random baseline ({signal_frac:.1%} signal)")
 
-    for model_name, c in curves.items():
+    for model_name, c in sorted(curves.items(), key=lambda kv: kv[0]):
         rec = c["recall"]
         prec_mean = c["precision_mean"]
         prec_std = c["precision_std"]

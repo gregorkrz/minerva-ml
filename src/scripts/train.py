@@ -521,11 +521,11 @@ def create_omnilearned_model(args, task):
     return model
 
 
-def _apply_omnilearned_medium_classifier_freeze(model, args):
-    """Freeze PET2 backbone for OmniLearned medium in classifier mode; train classifier head only."""
+def _apply_omnilearned_medium_backbone_freeze(model, args):
+    """Freeze PET2 backbone for OmniLearned medium (OLM) in classifier/regression."""
     if not getattr(args, "use_omnilearned", None):
         return
-    if args.use_omnilearned != "medium" or args.mode != "classifier":
+    if args.use_omnilearned != "medium":
         return
     if not isinstance(model, PET2):
         return
@@ -533,9 +533,10 @@ def _apply_omnilearned_medium_classifier_freeze(model, args):
         p.requires_grad = False
     n_train = sum(p.numel() for p in model.parameters() if p.requires_grad)
     n_frozen = sum(p.numel() for p in model.body.parameters())
+    mode = getattr(args, "mode", "unknown")
     print(
-        f"OmniLearned medium (classifier): frozen backbone ({n_frozen:,} params), "
-        f"training classifier head only ({n_train:,} trainable params)."
+        f"OmniLearned medium ({mode}): frozen backbone ({n_frozen:,} params), "
+        f"training head only ({n_train:,} trainable params)."
     )
 
 
@@ -1038,7 +1039,7 @@ def train(args):
         print(f"Loading pretrained weights: {args.use_pretrained}")
         load_pretrained_omnilearned(model, args.use_pretrained, args.output_dir)
 
-    _apply_omnilearned_medium_classifier_freeze(model, args)
+    _apply_omnilearned_medium_backbone_freeze(model, args)
 
     # Count parameters
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)

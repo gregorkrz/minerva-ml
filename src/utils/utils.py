@@ -38,10 +38,10 @@ def get_runs_by_model_and_cap(
       - OLM:    Run_1203_OLM_FB_regression_<cap>_seed... (legacy: _OLM_regression_)
       - Transformer1 / Transformer1NR: both map to "Transformer-small"
         (Run_*_regression_Transformer1_data_cap_... and ...Transformer1NR_data_cap_...)
-      - MLP: Run_cond_only_full_seed<SEED>_...
-      - MLP (NR full): names containing _cond_only_NR_full_seed<SEED>_ (regression template in
+      - MLP: Run_cond_only_lowLR_full_seed<SEED>_...
+      - MLP (NR full): names containing _cond_only_lowLR_NR_full_seed<SEED>_ (regression template in
           generate_cond_only_jobs.py). Same global ablation as Transformer1NR (--zero-cond-feature 2).
-          cap is always -1. Names with _cond_only_classifier_NR_full_ are classification jobs and
+          cap is always -1. Names with _cond_only_lowLR_classifier_NR_full_ are classification jobs and
           are excluded here so regression eval only sees regression MLP runs.
     dataset_cap is -1 for full 6M dataset, or a positive int for smaller caps.
     """
@@ -73,12 +73,12 @@ def get_runs_by_model_and_cap(
                 else:
                     model = raw
         if model is None:
-            # Regression NR-full only; do not match _cond_only_classifier_NR_full_ (classification).
-            m = re.search(r"_cond_only_(?!classifier_)NR_full_seed(-?\d+)_", name)
+            # Regression NR-full only; do not match _cond_only_lowLR_classifier_NR_full_ (classification).
+            m = re.search(r"_cond_only_lowLR_(?!classifier_)NR_full_seed(-?\d+)_", name)
             if m:
                 model, cap = "MLP", -1
         if model is None:
-            m = re.search(r"_cond_only_([a-zA-Z0-9]+)_seed(-?\d+)_", name)
+            m = re.search(r"_cond_only_lowLR_([a-zA-Z0-9]+)_seed(-?\d+)_", name)
             if m:
                 model = "MLP"
                 dscap = m.group(1)
@@ -106,11 +106,11 @@ def get_classification_runs_by_model_and_cap(
       - OLM:    Run_1203_OLM_FB_classifier_<cap>_seed... (legacy: _OLM_classifier_)
       - Transformer1 / Transformer1NR: both map to "Transformer-small"
         (Run_*_classifier_Transformer1_data_cap_... and ...Transformer1NR_data_cap_...)
-      - MLP (standard): substring _class_cond_only_<dscap>_seed<SEED>_
-          e.g. Run_*_class_cond_only_full_seed42_...  -> cap -1 when dscap is "full"
-      - MLP (NR full): substring _cond_only_(classifier_)NR_full_seed<SEED>_ — the word
-          classifier is optional so both Run_*_cond_only_NR_full_seed... and
-          Run_*_cond_only_classifier_NR_full_seed... (classifier job template) match.
+      - MLP (standard): substring _class_cond_only_lowLR_<dscap>_seed<SEED>_
+          e.g. Run_*_class_cond_only_lowLR_full_seed42_...  -> cap -1 when dscap is "full"
+      - MLP (NR full): substring _cond_only_lowLR_(classifier_)NR_full_seed<SEED>_ — the word
+          classifier is optional so both Run_*_cond_only_lowLR_NR_full_seed... and
+          Run_*_cond_only_lowLR_classifier_NR_full_seed... (classifier job template) match.
           "NR" matches training with --zero-cond-feature 2 (same global ablation as
           Transformer1NR; see generate_cond_only_jobs.py). cap is always -1.
     dataset_cap is -1 for full 6M dataset, or a positive int for smaller caps.
@@ -132,7 +132,7 @@ def get_classification_runs_by_model_and_cap(
         if model is None:
             m = re.search(r"_OLM_FB_?classifier_(-?\d+)_", name)
             if m:
-                model, cap = "OmniLearned-medium-heads", int(m.group(1))
+                model, cap = "OmniLearned-medium", int(m.group(1))
         if model is None:
             m = re.search(r"_classifier_(Transformer[^_]+)_data_cap_(-?\d+)_", name)
             if m:
@@ -144,11 +144,11 @@ def get_classification_runs_by_model_and_cap(
                 else:
                     model = raw
         if model is None:
-            m = re.search(r"_cond_only_classifier_NR_full_seed(-?\d+)_", name)
+            m = re.search(r"_cond_only_lowLR_classifier_NR_full_seed(-?\d+)_", name)
             if m:
                 model, cap = "MLP", -1
         if model is None:
-            m = re.search(r"_class_cond_only_([a-zA-Z0-9]+)_seed(-?\d+)_", name)
+            m = re.search(r"_class_cond_only_lowLR_([a-zA-Z0-9]+)_seed(-?\d+)_", name)
             if m:
                 model = "MLP"
                 dscap = m.group(1)
