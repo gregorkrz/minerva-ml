@@ -839,12 +839,20 @@ def plot_residuals_by_q3(
     baseline_run: str | None = None,
     baseline_key: str = DEFAULT_BASELINE_KEY,
     use_cc_selection: int = 2,
+    legend_title: str | None = None,
     verbose: bool = True,
     data: dict | None = None,
     transform=None,
     suppress_errors: bool = False,
 ) -> plt.Figure:
-    """Per-q3-bin residual and ratio histograms (E_reco−E_true and E_reco/E_true)."""
+    """Per-q3-bin residual and ratio histograms (E_reco−E_true and E_reco/E_true).
+
+    Each column is titled with its :math:`q_3` range; a shared legend sits under
+    the figure suptitle and above the subplot matrix.
+
+    *legend_title* defaults (when *None*) to a paper-style two-line title for
+    ``use_cc_selection >= 2``; pass an empty string to suppress.
+    """
     if q3_bins is None:
         q3_bins = [0, 0.3, 0.6, 1.2, 1.8, 2.4, 3.0, 100]
 
@@ -896,12 +904,12 @@ def plot_residuals_by_q3(
 
     residual_bins = np.linspace(-2, 2, 160)
     ratio_bins = np.linspace(0, 2, 50)
-    legend_kw: dict[str, Any] = {
-        "loc": "upper right",
-        "fontsize": 7,
-        "frameon": False,
-        "handlelength": 1.4
-    }
+    resolved_legend_title = legend_title
+    if resolved_legend_title is None and use_cc_selection >= 2:
+        resolved_legend_title = (
+            f"Minerva Open Data Playlist {dp}\n"
+            "Event selection def. by E_recoil_CCinc"
+        )
 
     for i in range(n_cols):
         qlow, qhigh = q3_bins[i], q3_bins[i + 1]
@@ -911,7 +919,6 @@ def plot_residuals_by_q3(
         true = mc_E[dp][mask]
         valid = true > 0
 
-        bin_title = _q3_bin_title(qlow, qhigh)
         if has_baselines:
             baseline = Enu_baselines[dp][baseline_key][mask]
             ratio_bl = baseline[valid] / true[valid]
@@ -948,23 +955,62 @@ def plot_residuals_by_q3(
                     label=mlab,
                 )
 
+        col_title = _q3_bin_title(qlow, qhigh)
         ax[0, i].set(
             xlabel=r"$E_{\mathrm{reco}} - E_{\mathrm{true}}$ [GeV]",
             ylabel="Counts",
-            title=bin_title,
+            title=col_title,
         )
         ax[1, i].set(
             xlabel=r"$E_{\mathrm{reco}} / E_{\mathrm{true}}$",
             ylabel="Counts",
-            title=bin_title,
         )
         ax[0, i].grid(True)
         ax[1, i].grid(True)
-        if ax[0, i].get_legend_handles_labels()[0]:
-            ax[0, i].legend(**legend_kw)
-            #ax[1, i].legend(**legend_kw)
 
-    fig.tight_layout()
+    fig.suptitle(
+        r"Top: $E_{\mathrm{reco}} - E_{\mathrm{true}}$ [GeV]; "
+        r"bottom: $E_{\mathrm{reco}} / E_{\mathrm{true}}$",
+        fontsize=11,
+        y=0.99,
+    )
+
+    # Reserve upper margin for suptitle + legend; shrink subplot area from the top.
+    fig.tight_layout(rect=[0, 0.03, 1, 0.70])
+
+    # Shared legend from first column (labels match every column); dedupe, keep order.
+    h0, lab0 = ax[0, 0].get_legend_handles_labels()
+    if h0:
+        by_label: dict[str, Any] = {}
+        for h, lab in zip(h0, lab0):
+            if lab not in by_label:
+                by_label[lab] = h
+        n_ent = len(by_label)
+        # Compact grid under the suptitle (not a single wide row).
+        ncol_leg = 3 if n_ent > 4 else min(n_ent, 2)
+        leg_kw: dict[str, Any] = {
+            "handles": list(by_label.values()),
+            "labels": list(by_label.keys()),
+            "loc": "upper center",
+            "bbox_to_anchor": (0.5, 0.88),
+            "ncol": ncol_leg,
+            "fontsize": 8,
+            "frameon": True,
+            "fancybox": False,
+            "edgecolor": "0.75",
+            "facecolor": "1.0",
+            "framealpha": 0.95,
+            "handlelength": 1.8,
+            "handletextpad": 0.6,
+            "columnspacing": 1.2,
+            "borderpad": 0.35,
+            "labelspacing": 0.35,
+        }
+        if resolved_legend_title:
+            leg_kw["title"] = resolved_legend_title
+            leg_kw["title_fontsize"] = 8
+        fig.legend(**leg_kw)
+
     return fig
 
 # ---------------------------------------------------------------------------
@@ -1685,7 +1731,7 @@ def plot_scaling_law(
 
     if "baseline" in values:
         bl_val = values["baseline"][metric][bin_idx]
-        ax.axhline(bl_val, color="black", ls="--", lw=1, label="baseline")
+        ax.axhline(bl_val, color="black", ls="--", lw=1, label="Baseline")
 
     ax.set_xscale("log")
     ax.set_xlabel("Number of training samples")

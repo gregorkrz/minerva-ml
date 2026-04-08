@@ -66,6 +66,17 @@ DEFAULT_FIXED_FPR = [0.2]
 DEFAULT_N_BINS = 5
 DEFAULT_Q3_BIN_EDGES = np.array([0, 2.5, 5, 7.5, 10, 12.5, 15, 20, 25])
 
+# Default legend title on performance plots (pass ``legend_title=None`` to omit).
+CLASSIFICATION_PERFORMANCE_LEGEND_TITLE = "Minerva Open Data Playlist 1A/1B"
+
+
+def _classification_legend_kw(fontsize: int, legend_title: str | None) -> dict[str, Any]:
+    kw: dict[str, Any] = {"fontsize": fontsize}
+    if legend_title:
+        kw["title"] = legend_title
+        kw["title_fontsize"] = 10 if fontsize >= 9 else 8
+    return kw
+
 
 # ---------------------------------------------------------------------------
 # Data loading
@@ -968,8 +979,11 @@ def plot_cc1pi_vs_pion_kinematics(
     fixed_fpr: list[float] | None = None,
     uncertainties: bool = False,
     reco_baseline_tpr: dict[str, np.ndarray] | None = None,
-    reco_baseline_label: str = "Reco baseline",
+    reco_baseline_label: str = "Baseline",
     colors: dict[str, str] | None = None,
+    legend_title: str | None = CLASSIFICATION_PERFORMANCE_LEGEND_TITLE,
+    suptitle: str | None = None,
+    playlist: str = "1A",
 ) -> plt.Figure:
     """2x3 figure: pion E (top row) and pion theta (bottom row).
 
@@ -980,7 +994,11 @@ def plot_cc1pi_vs_pion_kinematics(
     reco_baseline_tpr : optional dict with keys ``"E"`` and ``"theta"``,
         each a per-bin recall array for a reconstruction-level baseline.
         Plotted on the rightmost (TPR@FPR) panels.
-    reco_baseline_label : label for the reco baseline in the legend.
+    reco_baseline_label : label for the reconstruction baseline in the legend.
+    legend_title : optional legend title (e.g. dataset line); ``None`` to omit.
+    suptitle : figure super-title; default
+        ``$CC1\\pi^\\pm$ tagging - Minerva Open Data Playlist {playlist}``.
+    playlist : playlist id for the default *suptitle* only.
     """
     if fixed_fpr is None:
         fixed_fpr = DEFAULT_FIXED_FPR
@@ -989,9 +1007,9 @@ def plot_cc1pi_vs_pion_kinematics(
     E_mid = data["pion_E_MC_bins_mid"]
     theta_mid = data["pion_theta_MC_bins_mid"]
 
-    # Random baseline
-    axes[0, 0].plot(E_mid, baseline["E"], ".--", color="black", label="Random baseline")
-    axes[1, 0].plot(theta_mid, baseline["theta"], ".--", color="black", label="Random baseline")
+    # Random baseline (circle markers like models; dashed + gray to distinguish)
+    axes[0, 0].plot(E_mid, baseline["E"], "o--", color="gray", label="Random baseline")
+    axes[1, 0].plot(theta_mid, baseline["theta"], "o--", color="gray", label="Random baseline")
 
     for model_name, metrics in sorted(all_metrics.items(), key=lambda kv: kv[0]):
         agg_E = metrics["E"]
@@ -1023,22 +1041,26 @@ def plot_cc1pi_vs_pion_kinematics(
                             label=reco_baseline_label)
 
     col_labels = ["AUPRC", "AUROC", "Efficiency (TPR)"]
-    for row, kinematic in enumerate([r"True $E_\pi$ [GeV]", r"$\theta_\pi$ [rad]"]):
+    xlabels = [r"True $E_\pi$ [GeV]", r"True $\theta_\pi$ [rad]"]
+    for row, kinematic in enumerate(xlabels):
         for col, metric in enumerate(col_labels):
             ax = axes[row, col]
             ax.set_xlabel(kinematic)
             ax.set_ylabel(metric)
+            x_short = kinematic.split("[")[0].strip()
             if col < 2:
-                ax.set_title(f"{metric} vs. {kinematic.split('[')[0].strip()}")
+                ax.set_title(f"{metric} vs. {x_short}")
             else:
-                ax.set_title(f"TPR @ fixed FPR vs. {kinematic.split('[')[0].strip()}")
-            ax.legend(fontsize=7)
+                ax.set_title(f"TPR @ fixed FPR vs. {x_short}")
+            ax.legend(**_classification_legend_kw(7, legend_title))
             ax.grid(True)
             if row == 0:
                 ax.set_xlim(E_mid[0] * 0.8, E_mid[-1] * 1.2)
                 ax.set_xscale("log")
 
-    fig.suptitle(r"$CC1\pi^\pm$ event tagging", fontsize=14)
+    if suptitle is None:
+        suptitle = fr"$CC1\pi^\pm$ tagging - Minerva Open Data Playlist {playlist}"
+    fig.suptitle(suptitle, fontsize=14)
     return fig
 
 
@@ -1049,9 +1071,11 @@ def plot_multi_pion_vs_q3(
     fixed_fpr: list[float] | None = None,
     uncertainties: bool = False,
     reco_baseline_tpr_q3: np.ndarray | None = None,
-    reco_baseline_label: str = "Reco baseline",
+    reco_baseline_label: str = "Baseline",
     colors: dict[str, str] | None = None,
     title: str | None = None,
+    legend_title: str | None = CLASSIFICATION_PERFORMANCE_LEGEND_TITLE,
+    playlist: str = "1A",
 ) -> plt.Figure:
     """1x3 figure: AUPRC / AUROC / TPR@FPR vs q3.
 
@@ -1060,9 +1084,10 @@ def plot_multi_pion_vs_q3(
     reco_baseline_tpr_q3 : optional per-bin recall array for a
         reconstruction-level baseline.  Plotted on the rightmost
         (TPR@FPR) panel.
-    reco_baseline_label : label for the reco baseline in the legend.
+    reco_baseline_label : label for the reconstruction baseline in the legend.
     title : optional figure super-title.  Defaults to a multi-pion
         description when *None*.
+    legend_title : optional legend title; ``None`` to omit.
     """
     if fixed_fpr is None:
         fixed_fpr = DEFAULT_FIXED_FPR
@@ -1070,7 +1095,7 @@ def plot_multi_pion_vs_q3(
 
     q3_mid = data["q3_bin_mids"]
 
-    axes[0].plot(q3_mid, baseline_q3, ".--", color="black", label="Random baseline")
+    axes[0].plot(q3_mid, baseline_q3, "o--", color="gray", label="Random baseline")
 
     for model_name, agg in sorted(all_metrics_q3.items(), key=lambda kv: kv[0]):
         clr = {} if colors is None else {"color": colors.get(model_name)}
@@ -1090,17 +1115,20 @@ def plot_multi_pion_vs_q3(
     col_labels = ["AUPRC", "AUROC", "Efficiency (TPR)"]
     for col, metric in enumerate(col_labels):
         ax = axes[col]
-        ax.set_xlabel(r"$q_{3}^{\mathrm{true}}$ [GeV]")
+        ax.set_xlabel(r"True $q_3$ [GeV]")
         ax.set_ylabel(metric)
+        x_short = r"True $q_3$"
         if col < 2:
-            ax.set_title(f"{metric} vs. $q_3$")
+            ax.set_title(f"{metric} vs. {x_short}")
         else:
-            ax.set_title(r"TPR @ fixed FPR vs. $q_3$")
-        ax.legend(fontsize=7)
+            ax.set_title(f"TPR @ fixed FPR vs. {x_short}")
+        ax.legend(**_classification_legend_kw(7, legend_title))
         ax.grid(True)
 
     if title is None:
-        title = r"Multi-pion tagging (one or more charged pions) vs. $q_{3}^{\mathrm{true}}$"
+        title = (
+            fr"$CCN\pi^\pm$ tagging ($N \geq 1$) - Minerva Open Data Playlist {playlist}"
+        )
     fig.suptitle(title, fontsize=14)
     return fig
 
@@ -1119,10 +1147,11 @@ def plot_binned_by_inttype(
     int_types: dict[int, str] | None = None,
     playlist: str = "1A",
     reco_baseline_pred: np.ndarray | None = None,
-    reco_baseline_label: str = "Reco baseline",
+    reco_baseline_label: str = "Baseline",
     colors: dict[str, str] | None = None,
     signal_label: str | None = None,
     pion_bins_require_has_pion: bool = True,
+    legend_title: str | None = CLASSIFICATION_PERFORMANCE_LEGEND_TITLE,
 ) -> plt.Figure:
     """One row per interaction type, 4 columns: AUPRC, AUROC, TPR@FPR,
     and an event-count histogram.
@@ -1133,12 +1162,13 @@ def plot_binned_by_inttype(
     reco_baseline_pred : optional binary prediction array (same length as
         test set). When provided, the per-bin recall is overlaid on the
         TPR@FPR panel for each interaction type.
-    reco_baseline_label : legend label for the reco baseline.
+    reco_baseline_label : legend label for the reconstruction baseline.
     signal_label : optional name for the signal class definition (e.g.
         ``r"$CC\\pi^0$"``). Used when there are events in an interaction
         type but no signal positives; defaults from *signal_classes*.
     pion_bins_require_has_pion : if False, pion E/θ histograms
         and binned metrics include all events (θ requires finite MC angle).
+    legend_title : optional legend title on metric panels; ``None`` to omit.
     """
     if fixed_fpr is None:
         fixed_fpr = DEFAULT_FIXED_FPR
@@ -1285,8 +1315,8 @@ def plot_binned_by_inttype(
             sub_key = {"pion_E": "E", "pion_theta": "theta"}[x_var]
             all_agg = {mn: m[sub_key] for mn, m in all_agg_full.items()}
 
-        # Random baseline
-        axes[row_idx, 0].plot(x_mid, bl_values, ".--", color="black", label="Random baseline")
+        # Random baseline (circle markers like models; dashed + gray to distinguish)
+        axes[row_idx, 0].plot(x_mid, bl_values, "o--", color="gray", label="Random baseline")
 
         for model_name, agg in sorted(all_agg.items(), key=lambda kv: kv[0]):
             clr = {} if colors is None else {"color": colors.get(model_name)}
@@ -1299,7 +1329,7 @@ def plot_binned_by_inttype(
                     f"{model_name} (FPR={fpr_val:.0%})", uncertainties, **clr,
                 )
 
-        # Reco baseline on TPR panel
+        # Reconstruction baseline on TPR panel
         if reco_baseline_pred is not None:
             is_signal_masked = (y_true_binary == 1) & int_mask
             if x_var == "q3":
@@ -1330,7 +1360,7 @@ def plot_binned_by_inttype(
                 ax.set_title(f"{int_name} (N={n_events:,}) — {metric} vs. {xlabel.split('[')[0].strip()}")
             else:
                 ax.set_title(f"{int_name} (N={n_events:,}) — TPR @ fixed FPR vs. {xlabel.split('[')[0].strip()}")
-            ax.legend(fontsize=7)
+            ax.legend(**_classification_legend_kw(7, legend_title))
             ax.grid(True)
             if log_x:
                 ax.set_xlim(x_mid[0] * 0.8, x_mid[-1] * 1.2)
@@ -1491,6 +1521,7 @@ def plot_prc_curves(
     uncertainties: bool = False,
     max_threshold: float | None = None,
     colors: dict[str, str] | None = None,
+    legend_title: str | None = CLASSIFICATION_PERFORMANCE_LEGEND_TITLE,
 ) -> plt.Figure:
     """Plot PRC curves for all models with optional uncertainty bands.
 
@@ -1499,6 +1530,7 @@ def plot_prc_curves(
     max_threshold : if set, the right (log-scale) plot only shows the
         portion of each curve where the mean classification threshold is
         below this value.
+    legend_title : optional legend title; ``None`` to omit.
     """
     curves = _compute_prc_curves(results, signal_classes, playlist)
 
@@ -1509,8 +1541,8 @@ def plot_prc_curves(
     fig, axes = plt.subplots(1, 2, figsize=(16, 7), tight_layout=True)
 
     for ax in axes:
-        ax.axhline(signal_frac, color="black", linestyle="--", linewidth=1,
-                    label=f"Random baseline ({signal_frac:.1%} signal)")
+        ax.axhline(signal_frac, color="gray", linestyle="--", linewidth=1,
+                    label="Random baseline")
 
     for model_name, c in sorted(curves.items(), key=lambda kv: kv[0]):
         rec = c["recall"]
@@ -1539,7 +1571,7 @@ def plot_prc_curves(
         ax.set_xlabel(r"Recall (TPR)")
         ax.set_ylabel(r"Precision (purity)")
         ax.set_title(f"{title} ({scale} scale)")
-        ax.legend(fontsize=9)
+        ax.legend(**_classification_legend_kw(9, legend_title))
         ax.grid(True)
         ax.set_xlim(0, 1)
         if scale == "log":
