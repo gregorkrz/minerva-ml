@@ -132,10 +132,20 @@ def load_truth_and_baselines(
     playlists: list[str] | None = None,
     n_pion_bins: int = DEFAULT_N_BINS,
     q3_bin_edges: np.ndarray | None = None,
+    *,
+    pion_E_bin_edges: np.ndarray | Sequence[float] | None = None,
+    pion_theta_bin_edges: np.ndarray | Sequence[float] | None = None,
 ) -> dict[str, Any]:
     """Load truth labels, baselines and derived kinematic arrays.
 
     Uses the first run of the first model to locate the data path.
+
+    **Pion kinematic bins** default to ``np.quantile`` on events with
+    ``has_pion`` (and :math:`E>0` / finite :math:`\\theta`), with *n_pion_bins*
+    bins. Alternatively pass both *pion_E_bin_edges* and *pion_theta_bin_edges*
+    (strictly increasing, length :math:`N+1` each) to use fixed edges; *n_pion_bins*
+    is then ignored for pion binning. Same validation as
+    :func:`data_with_signal_pion_bins` ``custom`` mode.
 
     Returns
     -------
@@ -211,11 +221,21 @@ def load_truth_and_baselines(
     with np.errstate(divide="ignore", invalid="ignore"):
         pion_theta_MC = np.arccos(pion_fv[:, 2] / pion_p_MC)
 
-    # Pion bins (quantile-based on signal events)
-    pion_E_signal = pion_E_MC[has_pion & (pion_E_MC > 0)]
-    pion_theta_signal = pion_theta_MC[has_pion & np.isfinite(pion_theta_MC)]
-    pion_E_bins = np.quantile(pion_E_signal, np.linspace(0, 1, n_pion_bins + 1))
-    pion_theta_bins = np.quantile(pion_theta_signal, np.linspace(0, 1, n_pion_bins + 1))
+    if (pion_E_bin_edges is None) ^ (pion_theta_bin_edges is None):
+        raise ValueError(
+            "pion_E_bin_edges and pion_theta_bin_edges must both be set or both be None"
+        )
+    if pion_E_bin_edges is not None:
+        pion_E_bins = _as_strictly_increasing_bin_edges(pion_E_bin_edges, "pion_E_bin_edges")
+        pion_theta_bins = _as_strictly_increasing_bin_edges(
+            pion_theta_bin_edges, "pion_theta_bin_edges"
+        )
+    else:
+        # Pion bins (quantile-based on events with a pion)
+        pion_E_signal = pion_E_MC[has_pion & (pion_E_MC > 0)]
+        pion_theta_signal = pion_theta_MC[has_pion & np.isfinite(pion_theta_MC)]
+        pion_E_bins = np.quantile(pion_E_signal, np.linspace(0, 1, n_pion_bins + 1))
+        pion_theta_bins = np.quantile(pion_theta_signal, np.linspace(0, 1, n_pion_bins + 1))
 
     # q3
     q3_GeV = baselines_dict[playlist]["q3"][test_idx] / 1000.0
