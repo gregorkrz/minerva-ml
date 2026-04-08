@@ -29,6 +29,7 @@ import json
 import os
 import pickle
 from pathlib import Path
+from collections.abc import Sequence
 from typing import Any
 
 import matplotlib.pyplot as plt
@@ -240,9 +241,242 @@ def load_truth_and_baselines(
     }
 
 
+def equal_frequency_bin_edges(
+    x: np.ndarray,
+    mask: np.ndarray,
+    n_bins: int,
+) -> np.ndarray:
+    """Histogram edges so **true-signal** rows in *mask* are split ~evenly across bins.
+
+    Sorts finite ``x[mask]`` and places cuts between consecutive blocks of
+    ``~n // n_bins`` sorted signal values. Interior cut between block
+    boundaries is the midpoint of the two adjacent values (ties broken with
+    ``np.nextafter``). ``edges[0]`` and ``edges[-1]`` are the signal min and
+    max so all signal land in some bin under :func:`mc_value_in_bin`.
+
+    All events (signal + background) are then assigned with :func:`mc_value_in_bin`.
+    Background **histogram** counts per bin still vary with kinematics; only
+    **signal** counts are balanced by construction.
+    """
+    vals = np.asarray(x[mask], dtype=float)
+    vals = vals[np.isfinite(vals)]
+    vals.sort()
+    n = len(vals)
+    if n < n_bins:
+        raise ValueError(
+            f"equal_frequency_bin_edges: need at least n_bins={n_bins} "
+            f"finite values under mask, got {n}"
+        )
+    splits = (np.arange(n_bins + 1, dtype=np.int64) * n / n_bins).astype(np.int64)
+    splits[-1] = n
+    for j in range(1, n_bins + 1):
+        splits[j] = max(int(splits[j]), int(splits[j - 1]))
+    splits[0] = 0
+
+    edges = np.empty(n_bins + 1, dtype=np.float64)
+    edges[0] = float(vals[0])
+    edges[-1] = float(vals[-1])
+    for j in range(1, n_bins):
+        sj = int(splits[j])
+        sj = min(max(sj, 1), n - 1)
+        left_max = float(vals[sj - 1])
+        right_min = float(vals[sj])
+        if right_min > left_max:
+            edges[j] = 0.5 * (left_max + right_min)
+        else:
+            edges[j] = float(np.nextafter(left_max, np.inf))
+
+    for j in range(1, n_bins):
+        if edges[j] <= edges[j - 1]:
+            edges[j] = float(np.nextafter(edges[j - 1], np.inf))
+    edges[-1] = float(vals[-1])
+    return edges
+
+
+def _as_strictly_increasing_bin_edges(edges: np.ndarray | Sequence[float], name: str) -> np.ndarray:
+    """Validate user-supplied histogram edges (1-D, finite, strictly increasing)."""
+    arr = np.asarray(edges, dtype=np.float64)
+    if arr.ndim != 1 or arr.size < 2:
+        raise ValueError(f"{name} must be a 1-D sequence with at least 2 edges, got shape {arr.shape}")
+    if not np.all(np.isfinite(arr)):
+        raise ValueError(f"{name} must contain only finite values")
+    if np.any(np.diff(arr) <= 0):
+        raise ValueError(f"{name} must be strictly increasing")
+    return arr
+
+
+def data_with_signal_pion_bins(
+    data: dict[str, Any],
+    pid: np.ndarray,
+    signal_classes: list[int],
+    n_bins: int | None = None,
+    pion_quantile_require_has_pion: bool = True,
+    pion_bin_edge_method: str = "equal_frequency",
+    *,
+    pion_E_bin_edges: np.ndarray | Sequence[float] | None = None,
+    pion_theta_bin_edges: np.ndarray | Sequence[float] | None = None,
+) -> dict[str, Any]:
+    """Shallow copy of *data* with pion E/θ bin edges from **true signal** only.
+
+    **Edge methods** (*pion_bin_edge_method*):
+
+    * ``"equal_frequency"`` (default): edges split sorted signal :math:`E` / θ
+      into nearly equal counts per bin (best-effort with ties).
+    * ``"quantile"``: ``np.quantile`` on the same signal subset (can differ from
+      exact equal counts when there are duplicate values).
+    * ``"custom"``: use keyword arguments *pion_E_bin_edges* and *pion_theta_bin_edges*
+      (each strictly increasing, length :math:`N+1` for :math:`N` bins). *n_bins* is
+      ignored in this mode; :math:`E` and θ may use different bin counts.
+
+    **Masks for which signal rows define edges** (*pion_quantile_require_has_pion*):
+
+    * True (legacy): ``has_pion``, ``E > 0``, finite θ, restricted to signal.
+    * False: ``signal & finite E`` for :math:`E`, ``signal & finite θ`` for θ,
+      matching ``compute_all_metrics(..., pion_bins_require_has_pion=False)``.
+
+    **ROC / AUPRC per bin** (:func:`bin_separation_metrics`): positives are
+    signal in that kinematic bin; **negatives are the full background set**
+    (every non-signal event). So **the same background events — and the same
+    count of negatives — are used for every bin’s curve**; only the in-bin
+    signal positives change.
+
+    **Count histograms** (``N_\\mathrm{total}``, ``N_\\mathrm{signal}``): background
+    per bin is “non-signal whose :math:`E` or θ falls in that bin”; those counts
+    **cannot** all match each other while also using signal-balanced edges,
+    unless signal and background share the same kinematic distribution.
+
+    Use separate calls for CC1π± (e.g. ``[0]``) and CCπ⁰ (e.g. ``[2]``).
+    """
+    if n_bins is None:
+        n_bins = len(data["pion_E_MC_bins"]) - 1
+
+    pid_i = np.asarray(pid).astype(int, copy=False)
+    sig = np.isin(pid_i, np.asarray(signal_classes, dtype=int))
+
+    has_pion = data["has_pion"]
+    pion_E = data["pion_E_MC"]
+    pion_theta = data["pion_theta_MC"]
+
+    if pion_quantile_require_has_pion:
+        m_e = sig & has_pion & (pion_E > 0)
+        m_th = sig & has_pion & np.isfinite(pion_theta)
+    else:
+        m_e = sig & np.isfinite(pion_E)
+        m_th = sig & np.isfinite(pion_theta)
+
+    if m_e.sum() < 2:
+        raise ValueError(
+            f"Too few events for E binning (n={int(m_e.sum())}); "
+            f"signal_classes={signal_classes}"
+        )
+    if m_th.sum() < 2:
+        raise ValueError(
+            f"Too few events for θ binning (n={int(m_th.sum())}); "
+            f"signal_classes={signal_classes}"
+        )
+
+    if pion_bin_edge_method != "custom" and (
+        pion_E_bin_edges is not None or pion_theta_bin_edges is not None
+    ):
+        raise ValueError(
+            "pion_E_bin_edges / pion_theta_bin_edges are only used when "
+            "pion_bin_edge_method='custom'"
+        )
+
+    if pion_bin_edge_method == "quantile":
+        pion_E_bins = np.quantile(pion_E[m_e], np.linspace(0, 1, n_bins + 1))
+        pion_theta_bins = np.quantile(pion_theta[m_th], np.linspace(0, 1, n_bins + 1))
+    elif pion_bin_edge_method == "equal_frequency":
+        pion_E_bins = equal_frequency_bin_edges(pion_E, m_e, n_bins)
+        pion_theta_bins = equal_frequency_bin_edges(pion_theta, m_th, n_bins)
+    elif pion_bin_edge_method == "custom":
+        if pion_E_bin_edges is None or pion_theta_bin_edges is None:
+            raise ValueError(
+                "pion_bin_edge_method='custom' requires keyword arguments "
+                "pion_E_bin_edges and pion_theta_bin_edges"
+            )
+        pion_E_bins = _as_strictly_increasing_bin_edges(pion_E_bin_edges, "pion_E_bin_edges")
+        pion_theta_bins = _as_strictly_increasing_bin_edges(
+            pion_theta_bin_edges, "pion_theta_bin_edges"
+        )
+    else:
+        raise ValueError(
+            f"pion_bin_edge_method must be 'quantile', 'equal_frequency', or 'custom', "
+            f"got {pion_bin_edge_method!r}"
+        )
+
+    out = dict(data)
+    out["pion_E_MC_bins"] = pion_E_bins
+    out["pion_E_MC_bins_mid"] = (pion_E_bins[:-1] + pion_E_bins[1:]) / 2
+    out["pion_theta_MC_bins"] = pion_theta_bins
+    out["pion_theta_MC_bins_mid"] = (pion_theta_bins[:-1] + pion_theta_bins[1:]) / 2
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Metric computation
 # ---------------------------------------------------------------------------
+
+def mc_value_in_bin(
+    x: np.ndarray,
+    edges: np.ndarray,
+    bin_index: int,
+    *,
+    require_finite: bool = False,
+) -> np.ndarray:
+    """Boolean mask: *x* lies in histogram bin *bin_index* for *edges*.
+
+    Uses the same cell convention as :func:`numpy.histogram` with fixed
+    *edges*: interior bins are half-open ``[lo, hi)``, the **last** bin is
+    ``[lo, hi]`` closed on both ends. This avoids dropping events exactly at
+    the minimum quantile (the old ``(lo, hi]`` convention excluded ``x == lo``).
+
+    When *require_finite* is True, non-finite *x* never match any bin.
+    """
+    edges = np.asarray(edges, dtype=float)
+    n_bins = len(edges) - 1
+    if n_bins < 1:
+        raise ValueError("edges must contain at least two points")
+    if bin_index < 0 or bin_index >= n_bins:
+        raise IndexError(f"bin_index {bin_index} out of range for {n_bins} bins")
+
+    if require_finite:
+        ok = np.isfinite(x)
+    else:
+        ok = np.ones(x.shape, dtype=bool)
+
+    lo, hi = float(edges[bin_index]), float(edges[bin_index + 1])
+    if n_bins == 1:
+        in_bin = (x >= lo) & (x <= hi)
+    elif bin_index == n_bins - 1:
+        in_bin = (x >= lo) & (x <= hi)
+    else:
+        in_bin = (x >= lo) & (x < hi)
+    return ok & in_bin
+
+
+def _pion_kinematic_bin_mask(
+    data: dict,
+    *,
+    kind: str,
+    bin_index: int,
+    edges: np.ndarray,
+    require_has_pion: bool,
+) -> np.ndarray:
+    """MC pion E or θ in histogram bin *bin_index*, optionally ``has_pion``."""
+    if kind == "E":
+        x = data["pion_E_MC"]
+        req_fin = False
+    elif kind == "theta":
+        x = data["pion_theta_MC"]
+        req_fin = True
+    else:
+        raise ValueError(f"kind must be 'E' or 'theta', got {kind!r}")
+    bm = mc_value_in_bin(x, edges, bin_index, require_finite=req_fin)
+    if require_has_pion:
+        bm = bm & data["has_pion"]
+    return bm
+
 
 def get_signal_probabilities(
     result: dict,
@@ -269,7 +503,13 @@ def bin_separation_metrics(
     threshold: float = 0.5,
     fixed_fpr: list[float] | None = None,
 ) -> dict | None:
-    """Signal in *bin_mask* vs ALL background: AUPRC, AUROC, TPR@FPR."""
+    """Signal in *bin_mask* vs **the full background sample**: AUPRC, AUROC, TPR@FPR.
+
+    Positives are true signal events that pass *bin_mask* (e.g. in a kinematic
+    bin). Negatives are **every** background event, not only those in the bin.
+    So the **same** background set — and the same number of negative examples —
+    is used for each bin’s ROC/AUPRC; only the in-bin signal positives change.
+    """
     if fixed_fpr is None:
         fixed_fpr = DEFAULT_FIXED_FPR
     sig_in_bin = is_signal & bin_mask
@@ -323,8 +563,14 @@ def compute_binned_metrics_single(
     fixed_fpr: list[float] | None = None,
     event_mask: np.ndarray | None = None,
     playlist: str = "1A",
+    pion_bins_require_has_pion: bool = True,
 ) -> dict[str, list[dict | None]]:
-    """Per-bin metrics for pion E and pion theta (single run)."""
+    """Per-bin metrics for pion E and pion theta (single run).
+
+    If ``pion_bins_require_has_pion`` is False, every event can land in an
+    E bin (by ``pion_E_MC``); θ bins use finite ``pion_theta_MC`` only.
+    Binary signal/background is unchanged (all non-signal remain background).
+    """
     if fixed_fpr is None:
         fixed_fpr = DEFAULT_FIXED_FPR
 
@@ -337,23 +583,32 @@ def compute_binned_metrics_single(
         is_signal = is_signal & event_mask
         is_background = is_background & event_mask
 
-    has_pion = data["has_pion"]
-    pion_E = data["pion_E_MC"]
-    pion_theta = data["pion_theta_MC"]
     E_bins = data["pion_E_MC_bins"]
     theta_bins = data["pion_theta_MC_bins"]
 
     metrics_E = []
 
     for i in range(len(E_bins) - 1):
-        bm = has_pion & (pion_E > E_bins[i]) & (pion_E <= E_bins[i + 1])
+        bm = _pion_kinematic_bin_mask(
+            data,
+            kind="E",
+            bin_index=i,
+            edges=E_bins,
+            require_has_pion=pion_bins_require_has_pion,
+        )
         metrics_E.append(
             bin_separation_metrics(bm, is_signal, is_background, y_true, probs, threshold, fixed_fpr)
         )
 
     metrics_theta = []
     for i in range(len(theta_bins) - 1):
-        bm = has_pion & (pion_theta > theta_bins[i]) & (pion_theta <= theta_bins[i + 1])
+        bm = _pion_kinematic_bin_mask(
+            data,
+            kind="theta",
+            bin_index=i,
+            edges=theta_bins,
+            require_has_pion=pion_bins_require_has_pion,
+        )
         metrics_theta.append(
             bin_separation_metrics(bm, is_signal, is_background, y_true, probs, threshold, fixed_fpr)
         )
@@ -382,7 +637,7 @@ def compute_binned_metrics_q3(
 
     metrics = []
     for i in range(len(edges) - 1):
-        bm = (q3 > edges[i]) & (q3 <= edges[i + 1])
+        bm = mc_value_in_bin(q3, edges, i, require_finite=False)
         if event_mask is not None:
             bm = bm & event_mask
         y_bin = y_true[bm]
@@ -479,6 +734,7 @@ def compute_all_metrics(
     fixed_fpr: list[float] | None = None,
     event_mask: np.ndarray | None = None,
     playlist: str = "1A",
+    pion_bins_require_has_pion: bool = True,
 ) -> dict[str, dict]:
     """Compute aggregated pion-E/theta metrics for all models.
 
@@ -492,7 +748,14 @@ def compute_all_metrics(
         runs_E, runs_theta = [], []
         for run_result in run_list:
             m = compute_binned_metrics_single(
-                run_result, data, signal_classes, threshold, fixed_fpr, event_mask, playlist,
+                run_result,
+                data,
+                signal_classes,
+                threshold,
+                fixed_fpr,
+                event_mask,
+                playlist,
+                pion_bins_require_has_pion=pion_bins_require_has_pion,
             )
             runs_E.append(m["E"])
             runs_theta.append(m["theta"])
@@ -538,6 +801,7 @@ def compute_signal_baseline(
     signal_classes: list[int],
     event_mask: np.ndarray | None = None,
     playlist: str = "1A",
+    pion_bins_require_has_pion: bool = True,
 ) -> dict[str, np.ndarray]:
     """Compute random-classifier baseline (signal fraction) per bin.
 
@@ -558,20 +822,29 @@ def compute_signal_baseline(
 
     # Pion E bins
     E_bins = data["pion_E_MC_bins"]
-    has_pion = data["has_pion"]
-    pion_E = data["pion_E_MC"]
     baseline_E = []
     for i in range(len(E_bins) - 1):
-        bm = has_pion & (pion_E > E_bins[i]) & (pion_E <= E_bins[i + 1])
+        bm = _pion_kinematic_bin_mask(
+            data,
+            kind="E",
+            bin_index=i,
+            edges=E_bins,
+            require_has_pion=pion_bins_require_has_pion,
+        )
         n_sig = (is_signal & bm).sum()
         baseline_E.append(n_sig / (n_sig + n_bg) if n_sig > 0 else np.nan)
 
     # Pion theta bins
     theta_bins = data["pion_theta_MC_bins"]
-    pion_theta = data["pion_theta_MC"]
     baseline_theta = []
     for i in range(len(theta_bins) - 1):
-        bm = has_pion & (pion_theta > theta_bins[i]) & (pion_theta <= theta_bins[i + 1])
+        bm = _pion_kinematic_bin_mask(
+            data,
+            kind="theta",
+            bin_index=i,
+            edges=theta_bins,
+            require_has_pion=pion_bins_require_has_pion,
+        )
         n_sig = (is_signal & bm).sum()
         baseline_theta.append(n_sig / (n_sig + n_bg) if n_sig > 0 else np.nan)
 
@@ -580,7 +853,7 @@ def compute_signal_baseline(
     q3_edges = data["q3_bin_edges"]
     baseline_q3 = []
     for i in range(len(q3_edges) - 1):
-        bm = (q3 > q3_edges[i]) & (q3 <= q3_edges[i + 1])
+        bm = mc_value_in_bin(q3, q3_edges, i, require_finite=False)
         if event_mask is not None:
             bm = bm & event_mask
         n_sig = (y_true[bm] == 1).sum() if bm.sum() > 0 else 0
@@ -603,11 +876,12 @@ def compute_reco_baseline_recall_per_bin(
     bin_var: np.ndarray,
     bin_edges: np.ndarray,
     has_pion: np.ndarray | None = None,
+    finite_bin_var: bool = False,
 ) -> np.ndarray:
     """Per-bin recall of a binary reconstruction-level baseline."""
     recalls = []
     for i in range(len(bin_edges) - 1):
-        bm = (bin_var > bin_edges[i]) & (bin_var <= bin_edges[i + 1])
+        bm = mc_value_in_bin(bin_var, bin_edges, i, require_finite=finite_bin_var)
         if has_pion is not None:
             bm = bm & has_pion
         sig_in_bin = is_signal & bm
@@ -806,7 +1080,7 @@ def plot_multi_pion_vs_q3(
         ax.grid(True)
 
     if title is None:
-        title = r"Multi-pion tagging (one or more charged pions) vs.\ $q_{3}^{\mathrm{true}}$"
+        title = r"Multi-pion tagging (one or more charged pions) vs. $q_{3}^{\mathrm{true}}$"
     fig.suptitle(title, fontsize=14)
     return fig
 
@@ -828,6 +1102,7 @@ def plot_binned_by_inttype(
     reco_baseline_label: str = "Reco baseline",
     colors: dict[str, str] | None = None,
     signal_label: str | None = None,
+    pion_bins_require_has_pion: bool = True,
 ) -> plt.Figure:
     """One row per interaction type, 4 columns: AUPRC, AUROC, TPR@FPR,
     and an event-count histogram.
@@ -842,6 +1117,8 @@ def plot_binned_by_inttype(
     signal_label : optional name for the signal class definition (e.g.
         ``r"$CC\\pi^0$"``). Used when there are events in an interaction
         type but no signal positives; defaults from *signal_classes*.
+    pion_bins_require_has_pion : if False, pion E/θ histograms
+        and binned metrics include all events (θ requires finite MC angle).
     """
     if fixed_fpr is None:
         fixed_fpr = DEFAULT_FIXED_FPR
@@ -872,11 +1149,14 @@ def plot_binned_by_inttype(
     elif x_var == "pion_E":
         hist_var = data["pion_E_MC"]
         bin_edges = data["pion_E_MC_bins"]
-        hist_pion_mask = has_pion
+        hist_pion_mask = has_pion if pion_bins_require_has_pion else np.ones(len(hist_var), dtype=bool)
     elif x_var == "pion_theta":
         hist_var = data["pion_theta_MC"]
         bin_edges = data["pion_theta_MC_bins"]
-        hist_pion_mask = has_pion
+        if pion_bins_require_has_pion:
+            hist_pion_mask = has_pion
+        else:
+            hist_pion_mask = np.isfinite(hist_var)
     else:
         raise ValueError(f"Unknown x_var: {x_var}")
 
@@ -956,7 +1236,14 @@ def plot_binned_by_inttype(
             continue
 
         # Compute baseline
-        bl = compute_signal_baseline(results, data, signal_classes, int_mask, playlist)
+        bl = compute_signal_baseline(
+            results,
+            data,
+            signal_classes,
+            int_mask,
+            playlist,
+            pion_bins_require_has_pion=pion_bins_require_has_pion,
+        )
 
         if x_var == "q3":
             bl_values = bl["q3"]
@@ -966,7 +1253,14 @@ def plot_binned_by_inttype(
         else:
             bl_values = bl[{"pion_E": "E", "pion_theta": "theta"}[x_var]]
             all_agg_full = compute_all_metrics(
-                results, data, signal_classes, threshold, fixed_fpr, int_mask, playlist,
+                results,
+                data,
+                signal_classes,
+                threshold,
+                fixed_fpr,
+                int_mask,
+                playlist,
+                pion_bins_require_has_pion=pion_bins_require_has_pion,
             )
             sub_key = {"pion_E": "E", "pion_theta": "theta"}[x_var]
             all_agg = {mn: m[sub_key] for mn, m in all_agg_full.items()}
@@ -997,9 +1291,11 @@ def plot_binned_by_inttype(
                 var_key = {"pion_E": "pion_E_MC", "pion_theta": "pion_theta_MC"}[x_var]
                 edges_key = {"pion_E": "pion_E_MC_bins", "pion_theta": "pion_theta_MC_bins"}[x_var]
                 reco_bl = compute_reco_baseline_recall_per_bin(
-                    reco_baseline_pred, is_signal_masked,
-                    data[var_key], data[edges_key],
-                    has_pion=data["has_pion"],
+                    reco_baseline_pred,
+                    is_signal_masked,
+                    data[var_key],
+                    data[edges_key],
+                    has_pion=data["has_pion"] if pion_bins_require_has_pion else None,
                 )
             axes[row_idx, 2].plot(x_mid, reco_bl, "s--", color="black",
                                   label=reco_baseline_label)
@@ -1048,6 +1344,7 @@ def plot_event_counts_by_inttype(
     title: str,
     log_x: bool = False,
     int_types: dict[int, str] | None = None,
+    pion_bins_require_has_pion: bool = True,
 ) -> plt.Figure:
     """Histogram of event counts per bin, one row per interaction type.
 
@@ -1057,6 +1354,7 @@ def plot_event_counts_by_inttype(
     Parameters
     ----------
     x_var : ``"pion_E"``, ``"pion_theta"``, or ``"q3"``.
+    pion_bins_require_has_pion : same meaning as in :func:`plot_binned_by_inttype`.
     """
     if int_types is None:
         int_types = MC_INT_TYPE
@@ -1075,7 +1373,12 @@ def plot_event_counts_by_inttype(
     else:
         raise ValueError(f"Unknown x_var: {x_var}")
 
-    has_pion = data["has_pion"] if x_var != "q3" else np.ones(len(var), dtype=bool)
+    if x_var == "q3":
+        kin_mask = np.ones(len(var), dtype=bool)
+    elif x_var == "pion_E":
+        kin_mask = data["has_pion"] if pion_bins_require_has_pion else np.ones(len(var), dtype=bool)
+    else:
+        kin_mask = data["has_pion"] if pion_bins_require_has_pion else np.isfinite(var)
 
     n_int = len(int_types)
     fig, axes = plt.subplots(n_int, 1, figsize=(8, 3.0 * n_int), tight_layout=True)
@@ -1085,9 +1388,8 @@ def plot_event_counts_by_inttype(
     for row_idx, (int_code, int_name) in enumerate(int_types.items()):
         ax = axes[row_idx]
         int_mask = int_type_arr == int_code
-        n_events = int_mask.sum()
 
-        mask = int_mask & has_pion
+        mask = int_mask & kin_mask
         counts, _ = np.histogram(var[mask], bins=bin_edges)
         n_plotted = int(counts.sum())
 

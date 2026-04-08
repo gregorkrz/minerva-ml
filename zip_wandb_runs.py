@@ -2,8 +2,8 @@
 """Zip all checkpoint folders tagged with a given wandb tag.
 
 Usage:
-    python zip_wandb_runs.py                          # defaults: tag=Run_1203, output=Run_1203_checkpoints.tar.gz
-    python zip_wandb_runs.py --tag Run_1203 -o runs.tar.gz
+    python zip_wandb_runs.py                          # defaults: tag=Run_2703, output=Run_2703_checkpoints.tar.gz
+    python zip_wandb_runs.py --tag Run_2703 -o runs.tar.gz
     python zip_wandb_runs.py --dry-run                # just list matching folders
 """
 
@@ -20,7 +20,7 @@ CKPT_DIR = Path("/global/cfs/cdirs/m3246/gregork/checkpoints")
 
 def main():
     parser = argparse.ArgumentParser(description="Zip wandb-tagged checkpoint folders.")
-    parser.add_argument("--tag", default="Run_1203", help="Wandb tag to filter runs (default: Run_1203)")
+    parser.add_argument("--tag", default="Run_1203", help="Wandb tag to filter runs (default: Run_2703)")
     parser.add_argument("--project", default="minerva-models", help="Wandb project name")
     parser.add_argument("--ckpt-dir", type=Path, default=CKPT_DIR, help="Checkpoint root directory")
     parser.add_argument("-o", "--output", type=str, default=None, help="Output archive path (default: <tag>_checkpoints.tar.gz)")
