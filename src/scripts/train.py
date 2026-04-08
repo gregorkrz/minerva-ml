@@ -32,6 +32,7 @@ python -m src.scripts.train -bs 10 --mode regression -E-available-no-muon -name 
 """
 
 import argparse
+import json
 import os
 import time
 from pathlib import Path
@@ -921,6 +922,46 @@ def make_log_loss(criterion):
     return loss
 
 
+# region agent log
+_AGENT_DEBUG_LOG_PATH = "/global/homes/g/gregork/.cursor/debug-781e93.log"
+
+
+def _agent_debug_log(hypothesis_id, location, message, data, run_id="pre-fix"):
+    try:
+        payload = {
+            "sessionId": "781e93",
+            "runId": run_id,
+            "hypothesisId": hypothesis_id,
+            "location": location,
+            "message": message,
+            "data": data,
+            "timestamp": int(time.time() * 1000),
+        }
+        with open(_AGENT_DEBUG_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(json.dumps(payload) + "\n")
+    except Exception:
+        pass
+
+
+def _body_l1_fp(model):
+    if not hasattr(model, "body"):
+        return None
+    with torch.no_grad():
+        return float(sum(p.float().abs().sum().item() for p in model.body.parameters()))
+
+
+def _optimizer_trainable_alignment(optimizer, model):
+    trainable = [p for p in model.parameters() if p.requires_grad]
+    n_train = len(trainable)
+    st = optimizer.state_dict().get("state", {})
+    n_state = len(st)
+    mism = n_state != n_train
+    return {"n_trainable_tensors": n_train, "n_optimizer_state_entries": n_state, "mismatch": mism}
+
+
+# endregion
+
+
 def train(args):
     """Main training function."""
     # If resuming, load saved arguments from the checkpoint and override current ones,
@@ -1041,6 +1082,20 @@ def train(args):
 
     _apply_omnilearned_medium_backbone_freeze(model, args)
 
+    # region agent log
+    _agent_debug_log(
+        "H1",
+        "train.py:post_freeze",
+        "body fingerprint after pretrained+freeze (before optimizer/resume)",
+        {
+            "body_l1": _body_l1_fp(model),
+            "use_pretrained": bool(args.use_pretrained),
+            "resume": bool(args.resume),
+            "omnilearned_size": getattr(args, "use_omnilearned", None),
+        },
+    )
+    # endregion
+
     # Count parameters
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Model parameters: {n_params:,}")
@@ -1076,7 +1131,51 @@ def train(args):
     start_step = 0
     if args.resume:
         start_step = load_checkpoint(args.resume, model, optimizer, scheduler, scaler)
-    
+
+    # region agent log
+    opt_lr0 = optimizer.param_groups[0]["lr"] if optimizer.param_groups else None
+    sched_last = getattr(scheduler, "last_epoch", None)
+    sched_lr = scheduler.get_last_lr()[0] if scheduler is not None else None
+    align = _optimizer_trainable_alignment(optimizer, model)
+    scaler_scale = float(scaler.get_scale()) if scaler is not None else None
+    _agent_debug_log(
+        "H2",
+        "train.py:post_resume_or_init",
+        "scheduler vs optimizer lr; step alignment after resume",
+        {
+            "start_step": start_step,
+            "scheduler_last_epoch": sched_last,
+            "optimizer_param_group_lr0": opt_lr0,
+            "scheduler_get_last_lr0": sched_lr,
+            "lr_mismatch": (
+                opt_lr0 is not None
+                and sched_lr is not None
+                and abs(float(opt_lr0) - float(sched_lr)) > 1e-12
+            ),
+            "warmup_steps": args.warmup_steps,
+            "max_steps": args.max_steps,
+        },
+    )
+    _agent_debug_log(
+        "H3",
+        "train.py:post_resume_or_init",
+        "optimizer state vs trainable tensors",
+        align,
+    )
+    _agent_debug_log(
+        "H3",
+        "train.py:post_resume_or_init",
+        "body fingerprint after checkpoint load (if any)",
+        {"body_l1": _body_l1_fp(model), "resume": bool(args.resume)},
+    )
+    _agent_debug_log(
+        "H4",
+        "train.py:post_resume_or_init",
+        "AMP scaler after resume",
+        {"scaler_scale": scaler_scale, "use_amp": bool(args.use_amp)},
+    )
+    # endregion
+
     # Initialize wandb
     if not args.no_wandb:
         wandb.login()
@@ -1207,6 +1306,23 @@ def train(args):
                 scheduler.step()
                 step += 1
                 performed_step = True
+                # region agent log
+                if start_step > 0 and step == start_step + 1:
+                    opt_lr_after = optimizer.param_groups[0]["lr"] if optimizer.param_groups else None
+                    sched_lr_after = scheduler.get_last_lr()[0] if scheduler is not None else None
+                    _agent_debug_log(
+                        "H5",
+                        "train.py:first_step_after_resume",
+                        "first optimizer step after resume",
+                        {
+                            "step": step,
+                            "train_loss_unscaled": float(loss.item() * args.grad_accum_steps),
+                            "lr_optimizer_pg0": opt_lr_after,
+                            "lr_scheduler_get_last": sched_lr_after,
+                            "scheduler_last_epoch_after_step": getattr(scheduler, "last_epoch", None),
+                        },
+                    )
+                # endregion
                 # Print 5 example y_pred vs y_true for cond_only regression every 100 steps
                 if args.cond_only and args.mode == "regression" and step % 100 == 0:
                     pred = logits.squeeze(-1).detach().cpu()

@@ -24,7 +24,7 @@ REGRESSION_COPIES = [
     ("regression_eval_1/log_flops_vs_val_loss.pdf", "flops_regression.pdf"),
     ("regression_eval_1/log_steps_vs_val_loss.pdf", "steps_regression.pdf"),
     (
-        "regression_eval_1/residuals_by_q3_select_events_by_muons.pdf",
+        "regression_eval_1/residuals_by_q3_select_events_by_E_recoil_CCinc.pdf",
         "residuals_q3_muon_sel.pdf",
     ),
     ("regression_eval_1/q3_vs_iqr_rms_full_1A.pdf", "iqr_E_resolution_plot_1A.pdf"),
@@ -33,7 +33,7 @@ REGRESSION_COPIES = [
 
 CLASSIFICATION_COPIES = [
     ("classification_eval/log_flops_vs_val_loss.pdf", "flops_classification.pdf"),
-    ("classification_eval/log_steps_vs_val_loss.pdf", "steps_regression.pdf"),
+    ("classification_eval/log_steps_vs_val_loss.pdf", "steps_classification.pdf"),
 ]
 
 CLASSIFICATION_FIRST_PAGE = [

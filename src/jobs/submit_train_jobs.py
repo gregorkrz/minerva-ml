@@ -31,7 +31,7 @@ def generate_cmd(data_cap=-1, seed=42, task="regression", model="Transformer1", 
         base = f"python -m src.scripts.train --resume {continue_from} -name {resume_run_name} --resume-run-id {resume_run_id} --max_steps 1000000"
         return base.format(continue_from=continue_from)
     base = "python -m src.scripts.train -bs {bs} --mode {task} {detailed_task} -name {name} --d_model {model_dim} --depth {model_depth} --n_heads {model_n_heads} --dropout {model_dropout} --attn_dropout {model_attn_dropout} {cap} --seed {seed} -seed-event-sampler {seed}  --max_steps {max_steps} --grad_accum_steps {grad_accum_steps} {extra} --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260326 "
-    # Model options: ... "OLS", "OLS_RW", "OLM" or "OLM_FB" (medium OmniLearned; run names use OLM_FB_ for both tasks), "BERT-tiny"
+    # Model options: ... "OLS", "OLS_int" (OLS + --ol-interaction --ol-local-interaction), "OLS_RW", "OLM" or "OLM_FB" (medium OmniLearned; run names use OLM_FB_ for both tasks), "BERT-tiny"
     # Seed both the event sampler and the whole training with seed
     detailed_task = "-E-available-no-muon" if task == "regression" else "-npi2"
     model_dim = 128
@@ -42,6 +42,12 @@ def generate_cmd(data_cap=-1, seed=42, task="regression", model="Transformer1", 
     if model == "OLS":
         name = f"Run_1703_OLS_{task}_{data_cap}_seed{seed}"
         extra = " --use-omnilearned small --use-pretrained pretrain_s --zero-cond-feature 2 "
+    elif model == "OLS_int":
+        name = f"Run_1703_OLS_int_{task}_{data_cap}_seed{seed}"
+        extra = (
+            " --use-omnilearned small --use-pretrained pretrain_s --zero-cond-feature 2 "
+            "--ol-interaction --ol-local-interaction "
+        )
     elif model == "OLS_RW":
         name = f"Run_1703_OLS_RW_{task}_{data_cap}_seed{seed}"
         extra = " --use-omnilearned small --zero-cond-feature 2 "
@@ -83,6 +89,7 @@ def get_cmds_and_slurm_times():
         "20000": {
             "OLS_RW": "01:30:00",
             "OLS": "00:50:00",
+            "OLS_int": "00:50:00",
             "OLM_FB": "00:50:00",
             "BERT-tiny": "00:50:00",
             "Transformer1": "00:20:00",
@@ -91,6 +98,7 @@ def get_cmds_and_slurm_times():
         "50000": {
             "OLS_RW": "03:00:00",
             "OLS": "01:00:00",
+            "OLS_int": "01:00:00",
             "OLM_FB": "01:00:00",
             "BERT-tiny": "01:00:00",
             "Transformer1": "00:20:00",
@@ -101,12 +109,14 @@ def get_cmds_and_slurm_times():
             "Transformer1": "00:20:00",
             "Transformer1NR": "00:20:00",
             "OLS": "01:00:00",
+            "OLS_int": "01:00:00",
             "OLM_FB": "01:00:00",
             "BERT-tiny": "01:00:00",
         },
         "200000": {
             "OLS_RW": "05:00:00",
             "OLS": "01:30:00",
+            "OLS_int": "01:30:00",
             "OLM_FB": "01:30:00",
             "BERT-tiny": "01:30:00",
             "Transformer1": "00:20:00",
@@ -117,8 +127,8 @@ def get_cmds_and_slurm_times():
     slurm_times = []
     for seed in [50, 51, 52, 53]:
         for data_cap in [-1]:
-            for task in ["regression"]:
-                for model in ["OLM_FB"]:
+            for task in ["classifier"]:
+                for model in ["OLS_int"]:
                     if "OL" in model:
                         bs = 2048
                         grad_accum_steps = 1

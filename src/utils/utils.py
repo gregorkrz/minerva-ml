@@ -36,7 +36,7 @@ def get_runs_by_model_and_cap(
       - OLS_RW: Run_1203_OLS_RW_regression_<cap>_seed...
       - OLS:    Run_1203_OLS_regression_<cap>_seed...
       - OLM:    Run_1203_OLM_FB_regression_<cap>_seed... (legacy: _OLM_regression_)
-      - Transformer1 / Transformer1NR: both map to "Transformer-small"
+      - Transformer1 / Transformer1NR: both map to "Transformer-xsmall"
         (Run_*_regression_Transformer1_data_cap_... and ...Transformer1NR_data_cap_...)
       - MLP: Run_cond_only_lowLR_full_seed<SEED>_...
       - MLP (NR full): names containing _cond_only_lowLR_NR_full_seed<SEED>_ (regression template in
@@ -67,9 +67,9 @@ def get_runs_by_model_and_cap(
             if m:
                 raw, cap = m.group(1), int(m.group(2))
                 if raw in ("Transformer1", "Transformer1NR"):
-                    model = "Transformer-small"
+                    model = "Transformer-xsmall"
                 elif raw == "Transformer3NR":
-                    model = "Transformer-large"
+                    model = "Transformer-small"
                 else:
                     model = raw
         if model is None:
@@ -104,7 +104,7 @@ def get_classification_runs_by_model_and_cap(
       - OLS_RW: Run_1203_OLS_RW_classifier_<cap>_seed...
       - OLS:    Run_1203_OLS_classifier_<cap>_seed...
       - OLM:    Run_1203_OLM_FB_classifier_<cap>_seed... (legacy: _OLM_classifier_)
-      - Transformer1 / Transformer1NR: both map to "Transformer-small"
+      - Transformer1 / Transformer1NR: both map to "Transformer-xsmall"
         (Run_*_classifier_Transformer1_data_cap_... and ...Transformer1NR_data_cap_...)
       - MLP (standard): substring _class_cond_only_lowLR_<dscap>_seed<SEED>_
           e.g. Run_*_class_cond_only_lowLR_full_seed42_...  -> cap -1 when dscap is "full"
@@ -138,9 +138,9 @@ def get_classification_runs_by_model_and_cap(
             if m:
                 raw, cap = m.group(1), int(m.group(2))
                 if raw in ("Transformer1", "Transformer1NR"):
-                    model = "Transformer-small"
+                    model = "Transformer-xsmall"
                 elif raw == "Transformer3NR":
-                    model = "Transformer-large"
+                    model = "Transformer-small"
                 else:
                     model = raw
         if model is None:
