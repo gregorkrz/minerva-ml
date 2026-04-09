@@ -132,6 +132,7 @@ class BertBaseline(nn.Module):
         pretrained_model_name_or_path: str,
         use_cls_token: bool = False,
         bert_random_init: bool = False,
+        global_cont_dim: int = 0,
     ):
         super().__init__()
         self.use_cls_token = use_cls_token
@@ -140,13 +141,22 @@ class BertBaseline(nn.Module):
         )
         hidden = int(self.bert.config.hidden_size)
         self.proj = nn.Linear(input_dim, hidden)
+        self.global_proj = nn.Linear(global_cont_dim, hidden) if global_cont_dim > 0 else None
         self.head = nn.Linear(hidden, output_dim)
         if use_cls_token:
             self.cls_token = nn.Parameter(torch.randn(1, 1, hidden) * 0.02)
 
-    def forward(self, x, mask):
+    def forward(self, x, mask, global_cont=None):
         # x: [B, N, input_dim], mask: [B, N] (1 = valid, 0 = pad)
+        # global_cont: [B, global_cont_dim] -> projected and prepended as token 0 when enabled
         x = self.proj(x)
+        if self.global_proj is not None:
+            if global_cont is None:
+                raise ValueError("BERT global token enabled but global_cont is missing")
+            gtok = self.global_proj(global_cont).unsqueeze(1).to(device=x.device, dtype=x.dtype)
+            x = torch.cat([gtok, x], dim=1)
+            ones = torch.ones(x.shape[0], 1, device=mask.device, dtype=mask.dtype)
+            mask = torch.cat([ones, mask], dim=1)
         if self.use_cls_token:
             B = x.shape[0]
             cls = self.cls_token.expand(B, -1, -1).to(device=x.device, dtype=x.dtype)
@@ -556,6 +566,8 @@ def create_bert_model(args, task):
         raise ValueError("Invalid task type")
     pretrained_name = BERT_PRESETS[args.use_bert]
     ri = bool(getattr(args, "bert_random_init", False))
+    e_sum_dim = 6 if args.include_E_sum else 0
+    global_cont_dim = (GLOBAL_COND_BASE_DIM if args.use_cond else 0) + e_sum_dim
     if ri:
         print("BERT encoder: random weight init (config from preset id, no HF checkpoint weights).")
     return BertBaseline(
@@ -564,17 +576,40 @@ def create_bert_model(args, task):
         pretrained_model_name_or_path=pretrained_name,
         use_cls_token=bool(getattr(args, "use_cls_token", False)),
         bert_random_init=ri,
+        global_cont_dim=global_cont_dim,
     )
 
 
-def prepare_batch_bert(batch, device, use_pid=False, pid_idx=4):
-    """Prepare batch for BertBaseline (particle tokens + padding mask)."""
+def prepare_batch_bert(batch, device, use_pid=False, pid_idx=4, use_cond=False,
+                       include_E_sum=False, zero_cond_feature=None):
+    """Prepare batch for BertBaseline (particle tokens + optional global token + padding mask)."""
     X = batch["X"].to(device, dtype=torch.float32)
     y = batch["y"].to(device)
     mask = batch["attention_mask"].to(device, dtype=torch.float32)
     if use_pid and batch.get("pid") is not None:
         X = torch.cat([X[:, :, :pid_idx], X[:, :, pid_idx + 1:]], dim=2)
-    return {"X": X, "y": y, "attention_mask": mask}
+
+    global_cont = None
+    if use_cond and batch.get("cond") is not None:
+        global_cont = batch["cond"].to(device, dtype=torch.float32)
+
+    if include_E_sum:
+        if batch.get("energy_sums") is not None:
+            e_sums = batch["energy_sums"].to(device, dtype=torch.float32)
+            e_sums = torch.log(e_sums + 1e-3)
+            if global_cont is not None:
+                global_cont = torch.cat([global_cont, e_sums], dim=1)
+            else:
+                global_cont = e_sums
+        elif global_cont is not None and global_cont.shape[1] in (10, 13, 16):
+            # Cond already includes log energy sums; use as-is
+            pass
+
+    if zero_cond_feature is not None and global_cont is not None:
+        for idx in zero_cond_feature:
+            global_cont[:, idx] = 0.0
+
+    return {"X": X, "y": y, "attention_mask": mask, "global_cont": global_cont}
 
 
 def prepare_batch_omnilearned(batch, device, use_cond=False, use_pid=False, pid_idx=4,
@@ -691,7 +726,11 @@ def run_calculate_flops(args):
             include_E_sum=args.include_E_sum,
         )
     elif getattr(args, "use_bert", None):
-        inputs = prepare_batch_bert(dummy_batch, device, args.use_pid, args.pid_idx)
+        inputs = prepare_batch_bert(
+            dummy_batch, device, args.use_pid, args.pid_idx,
+            use_cond=args.use_cond, include_E_sum=args.include_E_sum,
+            zero_cond_feature=args.zero_cond_feature,
+        )
     else:
         inputs = prepare_batch(
             dummy_batch, device, args.use_cond, args.use_pid, args.coord_dim, args.pid_idx,
@@ -719,7 +758,7 @@ def run_calculate_flops(args):
 def forward_model(model, inputs, args):
     """Run forward pass for ViT, PET2, or BertBaseline; returns logits."""
     if getattr(args, "use_bert", None):
-        return model(inputs["X"], inputs["attention_mask"])
+        return model(inputs["X"], inputs["attention_mask"], global_cont=inputs.get("global_cont"))
     if args.use_omnilearned:
         outputs = model(
             inputs["X"], inputs["y"],
@@ -854,7 +893,11 @@ def evaluate(model, dataloader, device, args, class_weights, use_amp=False, step
             inputs = prepare_batch_omnilearned(batch, device, args.use_cond, args.use_pid, args.pid_idx,
                                               include_E_sum=args.include_E_sum)
         elif getattr(args, "use_bert", None):
-            inputs = prepare_batch_bert(batch, device, args.use_pid, args.pid_idx)
+            inputs = prepare_batch_bert(
+                batch, device, args.use_pid, args.pid_idx,
+                use_cond=args.use_cond, include_E_sum=args.include_E_sum,
+                zero_cond_feature=args.zero_cond_feature,
+            )
         else:
             inputs = prepare_batch(batch, device, args.use_cond, args.use_pid, args.coord_dim, args.pid_idx, include_E_sum=args.include_E_sum, zero_cond_feature=args.zero_cond_feature)
         with autocast(enabled=use_amp):
@@ -1264,7 +1307,11 @@ def train(args):
                 inputs = prepare_batch_omnilearned(batch, device, args.use_cond, args.use_pid, args.pid_idx,
                                                   include_E_sum=args.include_E_sum)
             elif getattr(args, "use_bert", None):
-                inputs = prepare_batch_bert(batch, device, args.use_pid, args.pid_idx)
+                inputs = prepare_batch_bert(
+                    batch, device, args.use_pid, args.pid_idx,
+                    use_cond=args.use_cond, include_E_sum=args.include_E_sum,
+                    zero_cond_feature=args.zero_cond_feature,
+                )
             else:
                 inputs = prepare_batch(batch, device, args.use_cond, args.use_pid, args.coord_dim, args.pid_idx, include_E_sum=args.include_E_sum, zero_cond_feature=args.zero_cond_feature)
 
