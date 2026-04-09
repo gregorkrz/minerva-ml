@@ -34,6 +34,7 @@ def get_runs_by_model_and_cap(
 
     Run name formats (from submit_train_jobs):
       - OLS_RW: Run_1203_OLS_RW_regression_<cap>_seed...
+      - OLS_int: Run_*_OLS_int_regression_<cap>_seed... -> "OmniLearned-small-int" (interactions on)
       - OLS:    Run_1203_OLS_regression_<cap>_seed...
       - OLM:    Run_1203_OLM_FB_regression_<cap>_seed... (legacy: _OLM_regression_)
       - Transformer1 / Transformer1NR: both map to "Transformer-xsmall"
@@ -54,6 +55,10 @@ def get_runs_by_model_and_cap(
         m = re.search(r"_OLS_RW_regression_(-?\d+)_", name)
         if m:
             model, cap = "OmniLearned-small-rw", int(m.group(1))
+        if model is None:
+            m = re.search(r"_OLS_int_regression_(-?\d+)_", name)
+            if m:
+                model, cap = "OmniLearned-small-int", int(m.group(1))
         if model is None:
             m = re.search(r"_OLS_regression_(-?\d+)_", name)
             if m:
@@ -102,6 +107,7 @@ def get_classification_runs_by_model_and_cap(
 
     Run name formats (from submit_train_jobs):
       - OLS_RW: Run_1203_OLS_RW_classifier_<cap>_seed...
+      - OLS_int: Run_*_OLS_int_classifier_<cap>_seed... -> "OmniLearned-small-int" (interactions on)
       - OLS:    Run_1203_OLS_classifier_<cap>_seed...
       - OLM:    Run_1203_OLM_FB_classifier_<cap>_seed... (legacy: _OLM_classifier_)
       - Transformer1 / Transformer1NR: both map to "Transformer-xsmall"
@@ -125,6 +131,10 @@ def get_classification_runs_by_model_and_cap(
         m = re.search(r"_OLS_RW_classifier_(-?\d+)_", name)
         if m:
             model, cap = "OmniLearned-small-rw", int(m.group(1))
+        if model is None:
+            m = re.search(r"_OLS_int_classifier_(-?\d+)_", name)
+            if m:
+                model, cap = "OmniLearned-small-int", int(m.group(1))
         if model is None:
             m = re.search(r"_OLS_classifier_(-?\d+)_", name)
             if m:

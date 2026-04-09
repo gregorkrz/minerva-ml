@@ -67,7 +67,7 @@ DEFAULT_N_BINS = 5
 DEFAULT_Q3_BIN_EDGES = np.array([0, 2.5, 5, 7.5, 10, 12.5, 15, 20, 25])
 
 # Default legend title on performance plots (pass ``legend_title=None`` to omit).
-CLASSIFICATION_PERFORMANCE_LEGEND_TITLE = "Minerva Open Data Playlist 1A/1B"
+CLASSIFICATION_PERFORMANCE_LEGEND_TITLE = None
 
 
 def _classification_legend_kw(fontsize: int, legend_title: str | None) -> dict[str, Any]:

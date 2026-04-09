@@ -28,7 +28,7 @@ REGRESSION_COPIES = [
         "residuals_q3_muon_sel.pdf",
     ),
     ("regression_eval_1/q3_vs_iqr_rms_full_1A.pdf", "iqr_E_resolution_plot_1A.pdf"),
-    ("regression_eval_1/q3_vs_iqr_rms_full_1A_1B.pdf", "iqr_E_resolution_plot_1A_1B.pdf"),
+    ("regression_eval_1/q3_vs_iqr_full_1A_1B.pdf", "iqr_E_resolution_plot_1A_1B.pdf"),
 ]
 
 CLASSIFICATION_COPIES = [

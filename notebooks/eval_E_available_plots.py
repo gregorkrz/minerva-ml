@@ -840,6 +840,8 @@ def plot_residuals_by_q3(
     baseline_key: str = DEFAULT_BASELINE_KEY,
     use_cc_selection: int = 2,
     legend_title: str | None = None,
+    colors: dict[str, Any] | None = None,
+    baseline_color: Any = "black",
     verbose: bool = True,
     data: dict | None = None,
     transform=None,
@@ -847,11 +849,20 @@ def plot_residuals_by_q3(
 ) -> plt.Figure:
     """Per-q3-bin residual and ratio histograms (E_reco−E_true and E_reco/E_true).
 
-    Each column is titled with its :math:`q_3` range; a shared legend sits under
-    the figure suptitle and above the subplot matrix.
+    The top row uses :math:`E_{\mathrm{reco}} - E_{\mathrm{true}}` on :math:`[-1, 1]` GeV;
+    the bottom row uses :math:`E_{\mathrm{reco}} / E_{\mathrm{true}}` on :math:`[0, 2]`.
 
-    *legend_title* defaults (when *None*) to a paper-style two-line title for
-    ``use_cc_selection >= 2``; pass an empty string to suppress.
+    Each column is titled with its :math:`q_3` range. A three-line figure title
+    (main + playlist + selection when applicable) sits above the axes; the model
+    legend is drawn only on the first panel (top-left).
+
+    *colors* is an optional ``{model_name: matplotlib_color}`` dict (same as
+    :func:`plot_rms_iqr_with_uncertainty`). Seed suffixes (``§0``, …) are
+    stripped for lookup so notebook palettes like ``clrs_dict_full`` match.
+
+    *legend_title* (when not *None*) is appended after the main title line; use
+    ``""`` for no extra lines. When *None* and ``use_cc_selection >= 2``, the
+    second and third lines are the playlist and selection strings.
     """
     if q3_bins is None:
         q3_bins = [0, 0.3, 0.6, 1.2, 1.8, 2.4, 3.0, 100]
@@ -898,18 +909,50 @@ def plot_residuals_by_q3(
         mask_sel = mc_E[dp] > 0
 
     n_cols = len(q3_bins) - 1
-    fig, ax = plt.subplots(2, n_cols, figsize=(4.3 * n_cols, 7.0))
+    # Width per column matches previous style; extra total height reserves space for the
+    # three-line suptitle while keeping ~the same subplot height as figsize (..., 5) full-axes.
+    fig, ax = plt.subplots(2, n_cols, figsize=(4 * n_cols, 6.4))
     if n_cols == 1:
         ax = ax[:, np.newaxis]
 
-    residual_bins = np.linspace(-2, 2, 160)
+    residual_bins = np.linspace(-1, 1, 160)
     ratio_bins = np.linspace(0, 2, 50)
-    resolved_legend_title = legend_title
-    if resolved_legend_title is None and use_cc_selection >= 2:
-        resolved_legend_title = (
-            f"Minerva Open Data Playlist {dp}\n"
-            "Event selection def. by E_recoil_CCinc"
+
+    def _model_color_key(model: str) -> str:
+        return model.split("§", 1)[0] if "§" in model else model
+
+    model_bases_ordered: list[str] = []
+    for loss in results:
+        for model in results[loss]:
+            if model not in E_pred_dict.get(dp, {}).get(loss, {}):
+                continue
+            key = _model_color_key(model)
+            if key not in model_bases_ordered:
+                model_bases_ordered.append(key)
+    if colors:
+        color_by_model_base = _resolve_color_map(model_bases_ordered, colors)
+    else:
+        prop_cycle = plt.rcParams["axes.prop_cycle"]
+        cycle_cols = prop_cycle.by_key().get(
+            "color", ["C0", "C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9"]
         )
+        color_by_model_base = {
+            m: cycle_cols[i % len(cycle_cols)] for i, m in enumerate(model_bases_ordered)
+        }
+
+    if legend_title is None:
+        if use_cc_selection >= 2:
+            title_text = (
+                "Available energy residual and ratio histograms\n"
+                f"Minerva Open Data Playlist {dp}\n"
+                "Event selection def. by E_recoil_CCinc"
+            )
+        else:
+            title_text = "Available energy residual and ratio histograms"
+    else:
+        title_text = "Available energy residual and ratio histograms"
+        if legend_title:
+            title_text += "\n" + legend_title
 
     for i in range(n_cols):
         qlow, qhigh = q3_bins[i], q3_bins[i + 1]
@@ -927,12 +970,14 @@ def plot_residuals_by_q3(
                 bins=residual_bins,
                 histtype="step",
                 label="Baseline",
+                color=baseline_color,
             )
             ax[1, i].hist(
                 ratio_bl,
                 bins=ratio_bins,
                 histtype="step",
                 label="Baseline",
+                color=baseline_color,
             )
 
         for loss in results:
@@ -941,18 +986,21 @@ def plot_residuals_by_q3(
                     continue
                 reco = E_pred_dict[dp][loss][model][mask]
                 ratio_model = reco[valid] / true[valid]
-                mlab = f"{model}"
+                mlab = _model_color_key(model)
+                mcol = color_by_model_base.get(mlab, "tab:gray")
                 ax[0, i].hist(
                     reco[valid] - true[valid],
                     bins=residual_bins,
                     histtype="step",
                     label=mlab,
+                    color=mcol,
                 )
                 ax[1, i].hist(
                     ratio_model,
                     bins=ratio_bins,
                     histtype="step",
                     label=mlab,
+                    color=mcol,
                 )
 
         col_title = _q3_bin_title(qlow, qhigh)
@@ -965,51 +1013,47 @@ def plot_residuals_by_q3(
             xlabel=r"$E_{\mathrm{reco}} / E_{\mathrm{true}}$",
             ylabel="Counts",
         )
+        ax[0, i].set_xlim(-1, 1)
         ax[0, i].grid(True)
         ax[1, i].grid(True)
+        # Headroom so step histogram peaks (and overlapping series) are not flush with the top spine.
+        for row in (0, 1):
+            lo, hi = ax[row, i].get_ylim()
+            ax[row, i].set_ylim(lo, hi * 1.10)
 
-    fig.suptitle(
-        r"Top: $E_{\mathrm{reco}} - E_{\mathrm{true}}$ [GeV]; "
-        r"bottom: $E_{\mathrm{reco}} / E_{\mathrm{true}}$",
-        fontsize=11,
-        y=0.99,
-    )
+    fig.suptitle(title_text, fontsize=11, y=0.995)
 
-    # Reserve upper margin for suptitle + legend; shrink subplot area from the top.
-    fig.tight_layout(rect=[0, 0.03, 1, 0.70])
+    # Keep the 2×n_axes stack about 5" tall (same as the old full-height ``figsize=(..., 5)``),
+    # with the extra figure height left for the suptitle band above ``rect[3]``.
+    fig_h = fig.get_figheight()
+    bottom_m = 0.02
+    axes_stack_height_in = 5.0
+    top_frac = bottom_m + min(axes_stack_height_in / fig_h, 0.96 - bottom_m)
+    fig.tight_layout()
 
-    # Shared legend from first column (labels match every column); dedupe, keep order.
     h0, lab0 = ax[0, 0].get_legend_handles_labels()
     if h0:
         by_label: dict[str, Any] = {}
         for h, lab in zip(h0, lab0):
             if lab not in by_label:
                 by_label[lab] = h
-        n_ent = len(by_label)
-        # Compact grid under the suptitle (not a single wide row).
-        ncol_leg = 3 if n_ent > 4 else min(n_ent, 2)
-        leg_kw: dict[str, Any] = {
-            "handles": list(by_label.values()),
-            "labels": list(by_label.keys()),
-            "loc": "upper center",
-            "bbox_to_anchor": (0.5, 0.88),
-            "ncol": ncol_leg,
-            "fontsize": 8,
-            "frameon": True,
-            "fancybox": False,
-            "edgecolor": "0.75",
-            "facecolor": "1.0",
-            "framealpha": 0.95,
-            "handlelength": 1.8,
-            "handletextpad": 0.6,
-            "columnspacing": 1.2,
-            "borderpad": 0.35,
-            "labelspacing": 0.35,
-        }
-        if resolved_legend_title:
-            leg_kw["title"] = resolved_legend_title
-            leg_kw["title_fontsize"] = 8
-        fig.legend(**leg_kw)
+        sorted_labs = sorted(by_label.keys())
+        sorted_handles = [by_label[lab] for lab in sorted_labs]
+        ax[0, 0].legend(
+            sorted_handles,
+            sorted_labs,
+            loc="upper right",
+            fontsize=7,
+            frameon=True,
+            fancybox=False,
+            edgecolor="0.75",
+            facecolor="1.0",
+            framealpha=0.95,
+            handlelength=1.6,
+            handletextpad=0.45,
+            borderpad=0.35,
+            labelspacing=0.35,
+        )
 
     return fig
 
