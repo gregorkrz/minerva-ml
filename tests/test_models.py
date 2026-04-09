@@ -219,3 +219,35 @@ class TestBertBaseline:
         with torch.no_grad():
             out = model(torch.randn(B, N, 4), torch.ones(B, N))
         assert out.shape == (B, 1)
+
+    def test_forward_with_global_token(self):
+        from src.scripts.train import BertBaseline
+
+        model = BertBaseline(
+            input_dim=4,
+            output_dim=1,
+            pretrained_model_name_or_path="prajjwal1/bert-tiny",
+            use_cls_token=False,
+            bert_random_init=True,
+            global_cont_dim=16,
+        )
+        model.eval()
+        with torch.no_grad():
+            out = model(torch.randn(B, N, 4), torch.ones(B, N), global_cont=torch.randn(B, 16))
+        assert out.shape == (B, 1)
+
+    def test_forward_with_global_token_requires_cond(self):
+        from src.scripts.train import BertBaseline
+
+        model = BertBaseline(
+            input_dim=4,
+            output_dim=1,
+            pretrained_model_name_or_path="prajjwal1/bert-tiny",
+            use_cls_token=False,
+            bert_random_init=True,
+            global_cont_dim=16,
+        )
+        model.eval()
+        with pytest.raises(ValueError, match="global_cont is missing"):
+            with torch.no_grad():
+                _ = model(torch.randn(B, N, 4), torch.ones(B, N))
