@@ -187,6 +187,34 @@ class TestTrainingCLI:
         assert result.returncode == 0, f"Training failed:\n{result.stderr}"
         assert "Training complete!" in result.stdout
 
+    def test_bert_regression(self, synthetic_data_dir, tmp_path, _no_wandb):
+        result = subprocess.run(
+            [
+                sys.executable, "-m", "src.scripts.train",
+                "-bs", "8",
+                "--mode", "regression",
+                "-E-available-no-muon",
+                "-name", "ci_bert_reg",
+                "--max_steps", "2",
+                "--warmup_steps", "1",
+                "--eval_interval", "2",
+                "--log_interval", "2",
+                "--save_interval", "2",
+                "--no_wandb",
+                "--num_workers", "1",
+                "--data_path", synthetic_data_dir,
+                "--output_dir", str(tmp_path),
+                "--use-bert", "tiny",
+                "--bert-random-init",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=180,
+            cwd=os.path.dirname(os.path.dirname(__file__)),
+        )
+        assert result.returncode == 0, f"Training failed:\n{result.stderr}"
+        assert "Training complete!" in result.stdout
+
 
 # Allow the dataloader test to reference torch without an explicit import at the top,
 # keeping the import inside the test module scope alongside the src imports.
