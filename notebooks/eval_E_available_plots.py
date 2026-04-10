@@ -672,8 +672,8 @@ def plot_rms_iqr(
 
     ax[0].legend(fontsize=7)
     ax[1].legend(fontsize=7)
-    ax[0].set(xlabel="MC truth $q_3$ [GeV]", ylabel="RMS of $E_{\\mathrm{reco}}/E_{\\mathrm{true}}$")
-    ax[1].set(xlabel="MC truth $q_3$ [GeV]", ylabel="25-75 IQR of $E_{\\mathrm{reco}}/E_{\\mathrm{true}}$")
+    ax[0].set(xlabel="MC truth $q_3$ [GeV]", ylabel="RMS of $E_{\\mathrm{available}}^{\\mathrm{reco}}/E_{\\mathrm{available}}^{\\mathrm{true}}$")
+    ax[1].set(xlabel="MC truth $q_3$ [GeV]", ylabel="25-75 IQR of $E_{\\mathrm{available}}^{\\mathrm{reco}}/E_{\\mathrm{available}}^{\\mathrm{true}}$")
     ax[0].grid(True)
     ax[1].grid(True)
     fig.tight_layout()
@@ -701,8 +701,8 @@ def _Etrue_bin_title(elow: float, ehigh: float, upper_threshold: float = 100.0) 
     lo = _format_bin_edge_for_title(elow)
     hi = _format_bin_edge_for_title(ehigh)
     if ehigh >= upper_threshold:
-        return rf"$E_{{\mathrm{{true}}}} \geq {lo}\ \mathrm{{GeV}}$"
-    return rf"$E_{{\mathrm{{true}}}} \in [{lo}, {hi})\ \mathrm{{GeV}}$"
+        return rf"$E_{{\mathrm{{available}}}}^{{\mathrm{{true}}}} \geq {lo}\ \mathrm{{GeV}}$"
+    return rf"$E_{{\mathrm{{available}}}}^{{\mathrm{{true}}}} \in [{lo}, {hi})\ \mathrm{{GeV}}$"
 
 
 def plot_residuals_by_energy(
@@ -788,19 +788,19 @@ def plot_residuals_by_energy(
                     ax[2, i].hist(ratio_model, bins=ratio_bins_wide, histtype="step", label=mlab)
 
         ax[0, i].set(
-            xlabel=r"$E_{\mathrm{reco}} - E_{\mathrm{true}}$ [GeV]",
+            xlabel=r"$E_{\mathrm{available}}^{\mathrm{reco}} - E_{\mathrm{available}}^{\mathrm{true}}$ [GeV]",
             ylabel="Counts",
             title=bin_title,
         )
         ax[0, i].grid(True)
         ax[1, i].set(
-            xlabel=r"$E_{\mathrm{reco}} / E_{\mathrm{true}}$",
+            xlabel=r"$E_{\mathrm{available}}^{\mathrm{reco}} / E_{\mathrm{available}}^{\mathrm{true}}$",
             ylabel="Counts",
             title=bin_title,
         )
         ax[1, i].grid(True)
         ax[2, i].set(
-            xlabel=r"$E_{\mathrm{reco}} / E_{\mathrm{true}}$",
+            xlabel=r"$E_{\mathrm{available}}^{\mathrm{reco}} / E_{\mathrm{available}}^{\mathrm{true}}$",
             ylabel="Counts",
             title=bin_title + r" ($0$–$10$, log)",
         )
@@ -1005,12 +1005,12 @@ def plot_residuals_by_q3(
 
         col_title = _q3_bin_title(qlow, qhigh)
         ax[0, i].set(
-            xlabel=r"$E_{\mathrm{reco}} - E_{\mathrm{true}}$ [GeV]",
+            xlabel=r"$E_{\mathrm{available}}^{\mathrm{reco}} - E_{\mathrm{available}}^{\mathrm{true}}$ [GeV]",
             ylabel="Counts",
             title=col_title,
         )
         ax[1, i].set(
-            xlabel=r"$E_{\mathrm{reco}} / E_{\mathrm{true}}$",
+            xlabel=r"$E_{\mathrm{available}}^{\mathrm{reco}} / E_{\mathrm{available}}^{\mathrm{true}}$",
             ylabel="Counts",
         )
         ax[0, i].set_xlim(-1, 1)
@@ -1524,28 +1524,28 @@ def plot_rms_iqr_with_uncertainty(
 
     ax_iqr.set(
         xlabel="MC truth $q_3$ [GeV]",
-        ylabel="IQR / MPV of $E_{\\mathrm{reco}}/E_{\\mathrm{true}}$",
+        ylabel="IQR / MPV of $E_{\\mathrm{available}}^{\\mathrm{reco}}/E_{\\mathrm{available}}^{\\mathrm{true}}$",
     )
     ax_iqr.grid(True)
     if iqr_only:
         ax_mpv_panel.set(
             xlabel="MC truth $q_3$ [GeV]",
-            ylabel="MPV of $E_{\\mathrm{reco}}/E_{\\mathrm{true}}$",
+            ylabel="MPV of $E_{\\mathrm{available}}^{\\mathrm{reco}}/E_{\\mathrm{available}}^{\\mathrm{true}}$",
         )
         ax_mpv_panel.grid(True)
     else:
         ax_rms.set(
             xlabel="MC truth $q_3$ [GeV]",
-            ylabel="RMS / MPV of $E_{\\mathrm{reco}}/E_{\\mathrm{true}}$",
+            ylabel="RMS / MPV of $E_{\\mathrm{available}}^{\\mathrm{reco}}/E_{\\mathrm{available}}^{\\mathrm{true}}$",
         )
         ax_rms.grid(True)
         ax_bottom[0].set(
             xlabel="MC truth $q_3$ [GeV]",
-            ylabel="MPV of $E_{\\mathrm{reco}}/E_{\\mathrm{true}}$",
+            ylabel="MPV of $E_{\\mathrm{available}}^{\\mathrm{reco}}/E_{\\mathrm{available}}^{\\mathrm{true}}$",
         )
         ax_bottom[1].set(
             xlabel="MC truth $q_3$ [GeV]",
-            ylabel="MPV of $E_{\\mathrm{reco}}/E_{\\mathrm{true}}$",
+            ylabel="MPV of $E_{\\mathrm{available}}^{\\mathrm{reco}}/E_{\\mathrm{available}}^{\\mathrm{true}}$",
         )
         ax_bottom[0].grid(True)
         ax_bottom[1].grid(True)
@@ -1689,8 +1689,8 @@ def plot_example_E_pred_true(
         ax.scatter(t, p, c=color, s=36, zorder=2, edgecolors="white", linewidths=0.3)
         ax.set_aspect("equal", adjustable="box")
         ax.set_title(f"{title}\n({loss})", fontsize=9)
-        ax.set_xlabel(r"$E_{\mathrm{true}}$ [GeV]")
-        ax.set_ylabel(r"$E_{\mathrm{pred}}$ [GeV]")
+        ax.set_xlabel(r"$E_{\mathrm{available}}^{\mathrm{true}}$ [GeV]")
+        ax.set_ylabel(r"$E_{\mathrm{available}}^{\mathrm{reco}}$ [GeV]")
         ax.grid(True, alpha=0.3)
         if verbose:
             print(f"\n--- {title} ({loss}) [{flat_key}] ---")

@@ -127,8 +127,8 @@ def get_cmds_and_slurm_times():
     slurm_times = []
     for seed in [50, 51, 52, 53]:
         for data_cap in [-1]:
-            for task in ["regression"]:
-                for model in ["OLM_FB"]:
+            for task in ["regression", "classifier"]:
+                for model in ["BERT-tiny"]:
                     if "OL" in model:
                         bs = 2048
                         grad_accum_steps = 1
