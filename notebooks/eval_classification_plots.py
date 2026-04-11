@@ -2,8 +2,10 @@
 Evaluation plotting utilities for charged-pion classification models.
 
 Loads evaluation results from checkpoint directories and produces
-AUPRC / AUROC / TPR-at-fixed-FPR summary plots binned by pion energy,
-pion angle, or true q3.  Supports multi-run uncertainty bands.
+AUPRC / AUROC / TPR vs kinematic bins for pion energy, pion angle, true *q₃*,
+or hadronic invariant mass *W*.  TPR at a target FPR can use either a **single
+score threshold** fit on the full masked sample (``use_global_fpr=True``) or
+**per-bin** ROC cuts (``use_global_fpr=False``).  Supports multi-run uncertainty bands.
 
 Usage example::
 
@@ -63,8 +65,64 @@ def _default_signal_label(signal_classes: list[int]) -> str:
 
 
 DEFAULT_FIXED_FPR = [0.2]
+
+
+def _tpr_column_title_vs_kinematics(use_global_fpr: bool) -> str:
+    """Third-column title for kinematic-bin performance plots."""
+    return "TPR @ fixed FPR" if use_global_fpr else "TPR @ per-bin FPR"
+
+
+def _tpr_line_legend_label(model_name: str, fpr_val: float, use_global_fpr: bool) -> str:
+    """Legend entry for a TPR curve; per-bin mode omits the explicit FPR suffix."""
+    if use_global_fpr:
+        return f"{model_name} (FPR={fpr_val:.0%})"
+    return model_name
+
+
+def _global_score_thresholds_at_target_fprs(
+    y_true: np.ndarray,
+    scores: np.ndarray,
+    fixed_fpr: list[float],
+) -> dict[float, float]:
+    """Return one score threshold per target FPR from a **global** ROC curve.
+
+    Thresholds follow :func:`sklearn.metrics.roc_curve` (same ``searchsorted``
+    indexing as the legacy per-bin extraction).  Events are classified as
+    signal when ``scores >= threshold`` (sklearn convention for ``y_score``).
+    """
+    y_true = np.asarray(y_true, dtype=np.int32)
+    scores = np.asarray(scores, dtype=np.float64)
+    valid = ~np.isnan(scores)
+    y_true, scores = y_true[valid], scores[valid]
+    out: dict[float, float] = {}
+    n_neg = int((y_true == 0).sum())
+    n_pos = int((y_true == 1).sum())
+    if n_neg == 0 or n_pos == 0:
+        for target_fpr in fixed_fpr:
+            out[target_fpr] = float("nan")
+        return out
+    fpr_arr, _tpr_arr, thr = roc_curve(y_true, scores)
+    n_thr = len(thr)
+    if n_thr == 0:
+        for target_fpr in fixed_fpr:
+            out[target_fpr] = float("nan")
+        return out
+    for target_fpr in fixed_fpr:
+        idx = int(np.searchsorted(fpr_arr, target_fpr, side="right") - 1)
+        idx = max(0, min(idx, n_thr - 1))
+        out[target_fpr] = float(thr[idx])
+    return out
+
+
 DEFAULT_N_BINS = 5
 DEFAULT_Q3_BIN_EDGES = np.array([0, 2.5, 5, 7.5, 10, 12.5, 15, 20, 25])
+
+# Hadronic invariant mass W (GeV bin edges for classification plots).
+DEFAULT_W_BIN_EDGES_GEV = np.array([0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0])
+
+# PDG-like masses for W² (MeV), consistent with ``extract_baselines.py``.
+PROTON_MASS_MEV = 938.2720813
+MUON_MASS_MEV = 105.6583755
 
 # Default legend title on performance plots (pass ``legend_title=None`` to omit).
 CLASSIFICATION_PERFORMANCE_LEGEND_TITLE = None
@@ -270,6 +328,82 @@ def load_truth_and_baselines(
         "q3_bin_edges": q3_bin_edges,
         "q3_bin_mids": (q3_bin_edges[:-1] + q3_bin_edges[1:]) / 2,
     }
+
+
+# ---------------------------------------------------------------------------
+# Hadronic invariant mass W (from baseline kinematics)
+# ---------------------------------------------------------------------------
+
+
+def hadronic_invariant_W_gev_from_baselines(
+    baselines: dict[str, np.ndarray],
+    test_idx: np.ndarray,
+) -> np.ndarray:
+    """Hadronic invariant mass *W* (GeV) per test event from baseline branches.
+
+    Uses the lab-frame expression
+
+        ``W² = M_p² + 2 M_p E_recoil - 2 (E_μ + E_recoil) (E_μ - |p_μ| cos θ_μ) + m_μ²``,
+
+    with all energies in MeV.  The combination ``(E_μ - |p_μ| cos θ_μ)`` is
+    reconstructed from the same *q0*, *q3*, and MC incoming neutrino energy
+    *E_true* stored in the baseline file as
+
+        ``E_μ - |p_μ| cos θ_μ = (Q² + m_μ²) / (2 E_ν)``,
+
+    where ``Q² = q₃² - q₀²`` (MeV²) with *q₃* the magnitude returned by
+    ``extract_baselines.get_q3`` and ``q₀ = E_ν - E_μ``.
+
+    ``E_recoil`` is ``MasterAnaDev_hadron_recoil`` (``E_recoil_only`` in the
+    npz); invalid recoil rows (``< 0``) yield NaN for *W*.
+
+    Parameters
+    ----------
+    baselines
+        Dictionary loaded from ``*_enu_baselines.npz``.
+    test_idx
+        Indices of the test split (same convention as :func:`load_truth_and_baselines`).
+    """
+    E_mu = np.asarray(baselines["E_muon"][test_idx], dtype=np.float64)
+    E_rec = np.asarray(baselines["E_recoil_only"][test_idx], dtype=np.float64)
+    q0 = np.asarray(baselines["q0"][test_idx], dtype=np.float64)
+    q3 = np.asarray(baselines["q3"][test_idx], dtype=np.float64)
+    E_nu = np.asarray(baselines["E_true"][test_idx], dtype=np.float64)
+
+    Mp, mm = PROTON_MASS_MEV, MUON_MASS_MEV
+    Q2 = q3 * q3 - q0 * q0
+    with np.errstate(divide="ignore", invalid="ignore"):
+        emu_minus_pl = (Q2 + mm * mm) / (2.0 * E_nu)
+
+    valid = (E_mu > 0) & (E_nu > 0) & np.isfinite(emu_minus_pl) & (E_rec >= 0)
+    W2 = Mp * Mp + 2.0 * Mp * E_rec - 2.0 * (E_mu + E_rec) * emu_minus_pl + mm * mm
+    W_gev = np.sqrt(np.maximum(W2, 0.0)) / 1000.0
+    W_gev[~valid] = np.nan
+    return W_gev
+
+
+def add_hadronic_W_to_classification_data(
+    data: dict[str, Any],
+    playlist: str,
+    w_bin_edges: np.ndarray | None = None,
+) -> dict[str, Any]:
+    """Shallow copy of *data* with ``W_GeV``, ``W_bin_edges``, and ``W_bin_mids``.
+
+    Required keys: ``baselines``, ``test_idx`` (as returned by
+    :func:`load_truth_and_baselines`).
+    """
+    if w_bin_edges is None:
+        w_bin_edges = DEFAULT_W_BIN_EDGES_GEV.copy()
+    else:
+        w_bin_edges = _as_strictly_increasing_bin_edges(w_bin_edges, "w_bin_edges")
+
+    out = dict(data)
+    test_idx = data["test_idx"][playlist]
+    bl = data["baselines"][playlist]
+    out["W_GeV"] = hadronic_invariant_W_gev_from_baselines(bl, test_idx)
+    out["W_bin_edges"] = w_bin_edges
+    out["W_bin_mids"] = (w_bin_edges[:-1] + w_bin_edges[1:]) / 2
+    return out
 
 
 def equal_frequency_bin_edges(
@@ -533,13 +667,19 @@ def bin_separation_metrics(
     probs: np.ndarray,
     threshold: float = 0.5,
     fixed_fpr: list[float] | None = None,
+    global_score_thresholds: dict[float, float] | None = None,
 ) -> dict | None:
-    """Signal in *bin_mask* vs **the full background sample**: AUPRC, AUROC, TPR@FPR.
+    """Signal in *bin_mask* vs **the full background sample**: AUPRC, AUROC, TPR.
 
     Positives are true signal events that pass *bin_mask* (e.g. in a kinematic
     bin). Negatives are **every** background event, not only those in the bin.
     So the **same** background set — and the same number of negative examples —
     is used for each bin’s ROC/AUPRC; only the in-bin signal positives change.
+
+    If ``global_score_thresholds`` is set (mapping target FPR → score cut fit
+    on the **global** masked sample), ``tpr_at_fpr`` is the fraction of in-bin
+    true signal with ``probs >= threshold`` (one cut for all bins). Otherwise
+    ``tpr_at_fpr`` is read from the bin’s local ROC (legacy behaviour).
     """
     if fixed_fpr is None:
         fixed_fpr = DEFAULT_FIXED_FPR
@@ -571,10 +711,24 @@ def bin_separation_metrics(
     tp = (selected & (y_eval == 1)).sum()
 
     tpr_at_fpr = {}
-    for target_fpr in fixed_fpr:
-        idx = np.searchsorted(fpr_arr, target_fpr, side="right") - 1
-        idx = max(0, min(idx, len(tpr_arr) - 1))
-        tpr_at_fpr[target_fpr] = float(tpr_arr[idx])
+    if global_score_thresholds is not None:
+        n_sig_bin = int(sig_in_bin.sum())
+        if n_sig_bin == 0:
+            for target_fpr in fixed_fpr:
+                tpr_at_fpr[target_fpr] = float("nan")
+        else:
+            for target_fpr in fixed_fpr:
+                t_cut = global_score_thresholds.get(target_fpr, float("nan"))
+                if np.isnan(t_cut):
+                    tpr_at_fpr[target_fpr] = float("nan")
+                else:
+                    passed = (probs >= t_cut) & sig_in_bin
+                    tpr_at_fpr[target_fpr] = float(passed.sum() / n_sig_bin)
+    else:
+        for target_fpr in fixed_fpr:
+            idx = np.searchsorted(fpr_arr, target_fpr, side="right") - 1
+            idx = max(0, min(idx, len(tpr_arr) - 1))
+            tpr_at_fpr[target_fpr] = float(tpr_arr[idx])
 
     return {
         "auprc": auprc_val,
@@ -595,12 +749,17 @@ def compute_binned_metrics_single(
     event_mask: np.ndarray | None = None,
     playlist: str = "1A",
     pion_bins_require_has_pion: bool = True,
+    use_global_fpr: bool = True,
 ) -> dict[str, list[dict | None]]:
     """Per-bin metrics for pion E and pion theta (single run).
 
     If ``pion_bins_require_has_pion`` is False, every event can land in an
     E bin (by ``pion_E_MC``); θ bins use finite ``pion_theta_MC`` only.
     Binary signal/background is unchanged (all non-signal remain background).
+
+    If ``use_global_fpr`` is True, ``tpr_at_fpr`` uses one score cut per target
+    FPR from the global (masked) ROC; if False, TPR is taken from each bin's
+    local ROC at the target FPR (see :func:`bin_separation_metrics`).
     """
     if fixed_fpr is None:
         fixed_fpr = DEFAULT_FIXED_FPR
@@ -613,6 +772,19 @@ def compute_binned_metrics_single(
     if event_mask is not None:
         is_signal = is_signal & event_mask
         is_background = is_background & event_mask
+
+    if event_mask is not None:
+        m = event_mask
+        y_glob, p_glob = y_true[m], probs[m]
+    else:
+        y_glob, p_glob = y_true, probs
+    vg = ~np.isnan(p_glob)
+    y_glob, p_glob = y_glob[vg], p_glob[vg]
+    global_thr = (
+        _global_score_thresholds_at_target_fprs(y_glob, p_glob, fixed_fpr)
+        if use_global_fpr
+        else None
+    )
 
     E_bins = data["pion_E_MC_bins"]
     theta_bins = data["pion_theta_MC_bins"]
@@ -628,7 +800,16 @@ def compute_binned_metrics_single(
             require_has_pion=pion_bins_require_has_pion,
         )
         metrics_E.append(
-            bin_separation_metrics(bm, is_signal, is_background, y_true, probs, threshold, fixed_fpr)
+            bin_separation_metrics(
+                bm,
+                is_signal,
+                is_background,
+                y_true,
+                probs,
+                threshold,
+                fixed_fpr,
+                global_score_thresholds=global_thr,
+            )
         )
 
     metrics_theta = []
@@ -641,7 +822,16 @@ def compute_binned_metrics_single(
             require_has_pion=pion_bins_require_has_pion,
         )
         metrics_theta.append(
-            bin_separation_metrics(bm, is_signal, is_background, y_true, probs, threshold, fixed_fpr)
+            bin_separation_metrics(
+                bm,
+                is_signal,
+                is_background,
+                y_true,
+                probs,
+                threshold,
+                fixed_fpr,
+                global_score_thresholds=global_thr,
+            )
         )
 
     return {"E": metrics_E, "theta": metrics_theta}
@@ -655,13 +845,32 @@ def compute_binned_metrics_q3(
     fixed_fpr: list[float] | None = None,
     event_mask: np.ndarray | None = None,
     playlist: str = "1A",
+    use_global_fpr: bool = True,
 ) -> list[dict | None]:
-    """Per-q3-bin metrics (single run)."""
+    """Per-q3-bin metrics (single run).
+
+    AUPRC/AUROC use the usual in-bin ROC.  If ``use_global_fpr`` is True,
+    ``tpr_at_fpr`` uses one score threshold per target FPR fit on the **global**
+    (optionally ``event_mask``'ed) sample, then reports in-bin signal efficiency
+    at that cut.  If False, ``tpr_at_fpr`` is read from each bin's local ROC.
+    """
     if fixed_fpr is None:
         fixed_fpr = DEFAULT_FIXED_FPR
 
     sig = get_signal_probabilities(result, signal_classes, playlist)
     y_true, probs = sig["ytrue"], sig["ypred"]
+
+    if event_mask is not None:
+        y_glob, p_glob = y_true[event_mask], probs[event_mask]
+    else:
+        y_glob, p_glob = y_true, probs
+    vg = ~np.isnan(p_glob)
+    y_glob, p_glob = y_glob[vg], p_glob[vg]
+    global_thr_map: dict[float, float] | None = (
+        _global_score_thresholds_at_target_fprs(y_glob, p_glob, fixed_fpr)
+        if use_global_fpr
+        else None
+    )
 
     q3 = data["q3_GeV"]
     edges = data["q3_bin_edges"]
@@ -687,9 +896,98 @@ def compute_binned_metrics_q3(
             auroc_val = auc(fpr_arr, tpr_arr)
             tpr_at_fpr = {}
             for target_fpr in fixed_fpr:
-                idx = np.searchsorted(fpr_arr, target_fpr, side="right") - 1
-                idx = max(0, min(idx, len(tpr_arr) - 1))
-                tpr_at_fpr[target_fpr] = float(tpr_arr[idx])
+                if use_global_fpr:
+                    t_cut = global_thr_map.get(target_fpr, float("nan")) if global_thr_map else float("nan")
+                    if np.isnan(t_cut):
+                        tpr_at_fpr[target_fpr] = float("nan")
+                    else:
+                        sig_mask = y_bin == 1
+                        tpr_at_fpr[target_fpr] = float(
+                            ((p_bin >= t_cut) & sig_mask).sum() / max(int(sig_mask.sum()), 1)
+                        )
+                else:
+                    idx = int(np.searchsorted(fpr_arr, target_fpr, side="right") - 1)
+                    idx = max(0, min(idx, len(tpr_arr) - 1))
+                    tpr_at_fpr[target_fpr] = float(tpr_arr[idx])
+            metrics.append({
+                "auprc": auprc_val,
+                "auroc": auroc_val,
+                "n_signal": int(n_sig),
+                "tpr_at_fpr": tpr_at_fpr,
+            })
+    return metrics
+
+
+def compute_binned_metrics_W(
+    result: dict,
+    data: dict,
+    signal_classes: list[int],
+    threshold: float = 0.5,
+    fixed_fpr: list[float] | None = None,
+    event_mask: np.ndarray | None = None,
+    playlist: str = "1A",
+    use_global_fpr: bool = True,
+) -> list[dict | None]:
+    """Per-*W*-bin metrics (single run); same structure as :func:`compute_binned_metrics_q3`.
+
+    AUPRC/AUROC use in-bin ROC.  ``tpr_at_fpr`` follows ``use_global_fpr`` like
+    :func:`compute_binned_metrics_q3`.
+    """
+    if fixed_fpr is None:
+        fixed_fpr = DEFAULT_FIXED_FPR
+
+    sig = get_signal_probabilities(result, signal_classes, playlist)
+    y_true, probs = sig["ytrue"], sig["ypred"]
+
+    if event_mask is not None:
+        y_glob, p_glob = y_true[event_mask], probs[event_mask]
+    else:
+        y_glob, p_glob = y_true, probs
+    vg = ~np.isnan(p_glob)
+    y_glob, p_glob = y_glob[vg], p_glob[vg]
+    global_thr_map: dict[float, float] | None = (
+        _global_score_thresholds_at_target_fprs(y_glob, p_glob, fixed_fpr)
+        if use_global_fpr
+        else None
+    )
+
+    w = data["W_GeV"]
+    edges = data["W_bin_edges"]
+
+    metrics = []
+    for i in range(len(edges) - 1):
+        bm = mc_value_in_bin(w, edges, i, require_finite=False)
+        if event_mask is not None:
+            bm = bm & event_mask
+        y_bin = y_true[bm]
+        p_bin = probs[bm]
+        valid = ~(np.isnan(y_bin) | np.isnan(p_bin))
+        y_bin = y_bin[valid]
+        p_bin = p_bin[valid]
+        n_sig = (y_bin == 1).sum()
+        n_bg = (y_bin == 0).sum()
+        if n_sig == 0 or n_bg == 0:
+            metrics.append(None)
+        else:
+            prec, rec, _ = precision_recall_curve(y_bin, p_bin)
+            auprc_val = auc(rec, prec)
+            fpr_arr, tpr_arr, _ = roc_curve(y_bin, p_bin)
+            auroc_val = auc(fpr_arr, tpr_arr)
+            tpr_at_fpr = {}
+            for target_fpr in fixed_fpr:
+                if use_global_fpr:
+                    t_cut = global_thr_map.get(target_fpr, float("nan")) if global_thr_map else float("nan")
+                    if np.isnan(t_cut):
+                        tpr_at_fpr[target_fpr] = float("nan")
+                    else:
+                        sig_mask = y_bin == 1
+                        tpr_at_fpr[target_fpr] = float(
+                            ((p_bin >= t_cut) & sig_mask).sum() / max(int(sig_mask.sum()), 1)
+                        )
+                else:
+                    idx = int(np.searchsorted(fpr_arr, target_fpr, side="right") - 1)
+                    idx = max(0, min(idx, len(tpr_arr) - 1))
+                    tpr_at_fpr[target_fpr] = float(tpr_arr[idx])
             metrics.append({
                 "auprc": auprc_val,
                 "auroc": auroc_val,
@@ -766,6 +1064,7 @@ def compute_all_metrics(
     event_mask: np.ndarray | None = None,
     playlist: str = "1A",
     pion_bins_require_has_pion: bool = True,
+    use_global_fpr: bool = True,
 ) -> dict[str, dict]:
     """Compute aggregated pion-E/theta metrics for all models.
 
@@ -787,6 +1086,7 @@ def compute_all_metrics(
                 event_mask,
                 playlist,
                 pion_bins_require_has_pion=pion_bins_require_has_pion,
+                use_global_fpr=use_global_fpr,
             )
             runs_E.append(m["E"])
             runs_theta.append(m["theta"])
@@ -805,6 +1105,7 @@ def compute_all_metrics_q3(
     fixed_fpr: list[float] | None = None,
     event_mask: np.ndarray | None = None,
     playlist: str = "1A",
+    use_global_fpr: bool = True,
 ) -> dict[str, dict]:
     """Compute aggregated q3-binned metrics for all models.
 
@@ -819,7 +1120,47 @@ def compute_all_metrics_q3(
         for run_result in run_list:
             runs.append(
                 compute_binned_metrics_q3(
-                    run_result, data, signal_classes, threshold, fixed_fpr, event_mask, playlist,
+                    run_result,
+                    data,
+                    signal_classes,
+                    threshold,
+                    fixed_fpr,
+                    event_mask,
+                    playlist,
+                    use_global_fpr=use_global_fpr,
+                )
+            )
+        out[model_name] = aggregate_metrics(runs, fixed_fpr)
+    return out
+
+
+def compute_all_metrics_W(
+    results: dict[str, list[dict]],
+    data: dict,
+    signal_classes: list[int],
+    threshold: float = 0.5,
+    fixed_fpr: list[float] | None = None,
+    event_mask: np.ndarray | None = None,
+    playlist: str = "1A",
+    use_global_fpr: bool = True,
+) -> dict[str, dict]:
+    """Aggregated *W*-binned metrics for all models (requires ``W_GeV`` / ``W_bin_edges`` on *data*)."""
+    if fixed_fpr is None:
+        fixed_fpr = DEFAULT_FIXED_FPR
+    out = {}
+    for model_name, run_list in sorted(results.items(), key=lambda kv: kv[0]):
+        runs = []
+        for run_result in run_list:
+            runs.append(
+                compute_binned_metrics_W(
+                    run_result,
+                    data,
+                    signal_classes,
+                    threshold,
+                    fixed_fpr,
+                    event_mask,
+                    playlist,
+                    use_global_fpr=use_global_fpr,
                 )
             )
         out[model_name] = aggregate_metrics(runs, fixed_fpr)
@@ -897,6 +1238,31 @@ def compute_signal_baseline(
     }
 
 
+def compute_signal_baseline_W(
+    results: dict[str, list[dict]],
+    data: dict,
+    signal_classes: list[int],
+    event_mask: np.ndarray | None = None,
+    playlist: str = "1A",
+) -> np.ndarray:
+    """Random-classifier baseline (signal fraction) per *W* bin."""
+    first_model = next(iter(results))
+    first_run = results[first_model][0]
+    sig = get_signal_probabilities(first_run, signal_classes, playlist)
+    y_true = sig["ytrue"]
+
+    w = data["W_GeV"]
+    edges = data["W_bin_edges"]
+    baseline_w = []
+    for i in range(len(edges) - 1):
+        bm = mc_value_in_bin(w, edges, i, require_finite=False)
+        if event_mask is not None:
+            bm = bm & event_mask
+        n_sig = (y_true[bm] == 1).sum() if bm.sum() > 0 else 0
+        baseline_w.append(y_true[bm].mean() if n_sig > 0 else np.nan)
+    return np.array(baseline_w)
+
+
 # ---------------------------------------------------------------------------
 # Plotting helpers
 # ---------------------------------------------------------------------------
@@ -924,6 +1290,80 @@ def compute_reco_baseline_recall_per_bin(
     return np.array(recalls)
 
 
+def _histogram_inttype_counts_with_positives(
+    ax: plt.Axes,
+    hist_var: np.ndarray,
+    plot_mask: np.ndarray,
+    y_true_binary: np.ndarray,
+    bin_edges: np.ndarray,
+    *,
+    log_x: bool = False,
+) -> None:
+    """Stacked histogram: blue = not MC signal in bin, orange = MC signal (positives).
+
+    Total bar height per bin matches ``np.histogram(hist_var[plot_mask], ...)``.
+    """
+    counts_all, _ = np.histogram(hist_var[plot_mask], bins=bin_edges)
+    pos_mask = plot_mask & (y_true_binary == 1)
+    counts_sig, _ = np.histogram(hist_var[pos_mask], bins=bin_edges)
+    counts_all = np.asarray(counts_all, dtype=np.int64)
+    counts_sig = np.asarray(counts_sig, dtype=np.int64)
+    counts_sig = np.minimum(counts_sig, counts_all)
+    counts_bg = counts_all - counts_sig
+    widths = np.diff(bin_edges)
+    x0 = bin_edges[:-1]
+
+    ax.bar(
+        x0,
+        counts_bg.astype(float),
+        width=widths,
+        align="edge",
+        color="tab:blue",
+        edgecolor="black",
+        linewidth=0.5,
+        alpha=0.65,
+        label="Other (not signal)",
+    )
+    ax.bar(
+        x0,
+        counts_sig.astype(float),
+        width=widths,
+        align="edge",
+        bottom=counts_bg.astype(float),
+        color="tab:orange",
+        edgecolor="black",
+        linewidth=0.5,
+        alpha=0.9,
+        label="Signal (positives)",
+    )
+    for i, ctot in enumerate(counts_all):
+        if ctot > 0:
+            ax.text(
+                x0[i] + widths[i] / 2,
+                float(ctot),
+                str(int(ctot)),
+                ha="center",
+                va="bottom",
+                fontsize=7,
+            )
+        cs = int(counts_sig[i])
+        if cs > 0:
+            y_mid = float(counts_bg[i]) + float(cs) / 2.0
+            ax.text(
+                x0[i] + widths[i] / 2,
+                y_mid,
+                str(cs),
+                ha="center",
+                va="center",
+                fontsize=6,
+                color="white" if cs >= 3 else "black",
+            )
+    ax.grid(True, axis="y", alpha=0.3)
+    if log_x:
+        ax.set_xscale("log")
+    ax.legend(loc="upper right", fontsize=6, framealpha=0.9)
+
+
 def _plot_metric_line(
     ax: plt.Axes,
     x: np.ndarray,
@@ -948,10 +1388,12 @@ def _format_axes_grid(
     row_titles: list[str] | None = None,
     log_x: bool = False,
     fixed_fpr: list[float] | None = None,
+    use_global_fpr: bool = True,
 ) -> None:
     """Apply labels, titles, legend and grid to an (n_rows, 3) axes array."""
     if fixed_fpr is None:
         fixed_fpr = DEFAULT_FIXED_FPR
+    tpr_title = _tpr_column_title_vs_kinematics(use_global_fpr)
     for row in range(n_rows):
         for col in range(3):
             ax = axes[row, col] if n_rows > 1 else axes[col]
@@ -961,7 +1403,7 @@ def _format_axes_grid(
             if col < 2:
                 ax.set_title(f"{title_prefix}{col_labels[col]} vs. {xlabel.split('[')[0].strip()}")
             else:
-                ax.set_title(f"{title_prefix}TPR @ fixed FPR vs. {xlabel.split('[')[0].strip()}")
+                ax.set_title(f"{title_prefix}{tpr_title} vs. {xlabel.split('[')[0].strip()}")
             ax.legend(fontsize=7)
             ax.grid(True)
             if log_x:
@@ -983,25 +1425,27 @@ def plot_cc1pi_vs_pion_kinematics(
     colors: dict[str, str] | None = None,
     legend_title: str | None = CLASSIFICATION_PERFORMANCE_LEGEND_TITLE,
     suptitle: str | None = None,
+    use_global_fpr: bool = True,
     playlist: str = "1A",
 ) -> plt.Figure:
     """2x3 figure: pion E (top row) and pion theta (bottom row).
 
-    Columns: AUPRC, AUROC, TPR@FPR.
+    Columns: AUPRC, AUROC, TPR vs kinematics (global or per-bin FPR; see ``use_global_fpr``).
 
     Parameters
     ----------
     reco_baseline_tpr : optional dict with keys ``"E"`` and ``"theta"``,
         each a per-bin recall array for a reconstruction-level baseline.
-        Plotted on the rightmost (TPR@FPR) panels.
+        Plotted on the rightmost (TPR @ fixed FPR) panels.
     reco_baseline_label : label for the reconstruction baseline in the legend.
     legend_title : optional legend title (e.g. dataset line); ``None`` to omit.
     suptitle : figure super-title; default
-        ``$CC1\\pi^\\pm$ tagging - Minerva Open Data Playlist {playlist}``.
+        ``$CC1\\pi^\\pm$ tagging - MINERvA Open Data Playlist {playlist}``.
     playlist : playlist id for the default *suptitle* only.
     """
     if fixed_fpr is None:
         fixed_fpr = DEFAULT_FIXED_FPR
+    tpr_title = _tpr_column_title_vs_kinematics(use_global_fpr)
     fig, axes = plt.subplots(2, 3, figsize=(17, 9), tight_layout=True)
 
     E_mid = data["pion_E_MC_bins_mid"]
@@ -1023,13 +1467,14 @@ def plot_cc1pi_vs_pion_kinematics(
 
         for fpr_val in fixed_fpr:
             key = f"tpr@{fpr_val}"
+            lbl = _tpr_line_legend_label(model_name, fpr_val, use_global_fpr)
             _plot_metric_line(
                 axes[0, 2], E_mid, agg_E[key],
-                f"{model_name} (FPR={fpr_val:.0%})", uncertainties, **clr,
+                lbl, uncertainties, **clr,
             )
             _plot_metric_line(
                 axes[1, 2], theta_mid, agg_theta[key],
-                f"{model_name} (FPR={fpr_val:.0%})", uncertainties, **clr,
+                lbl, uncertainties, **clr,
             )
 
     if reco_baseline_tpr is not None:
@@ -1051,7 +1496,7 @@ def plot_cc1pi_vs_pion_kinematics(
             if col < 2:
                 ax.set_title(f"{metric} vs. {x_short}")
             else:
-                ax.set_title(f"TPR @ fixed FPR vs. {x_short}")
+                ax.set_title(f"{tpr_title} vs. {x_short}")
             ax.legend(**_classification_legend_kw(7, legend_title))
             ax.grid(True)
             if row == 0:
@@ -1059,7 +1504,7 @@ def plot_cc1pi_vs_pion_kinematics(
                 ax.set_xscale("log")
 
     if suptitle is None:
-        suptitle = fr"$CC1\pi^\pm$ tagging - Minerva Open Data Playlist {playlist}"
+        suptitle = fr"$CC1\pi^\pm$ tagging - MINERvA Open Data Playlist {playlist}"
     fig.suptitle(suptitle, fontsize=14)
     return fig
 
@@ -1075,15 +1520,16 @@ def plot_multi_pion_vs_q3(
     colors: dict[str, str] | None = None,
     title: str | None = None,
     legend_title: str | None = CLASSIFICATION_PERFORMANCE_LEGEND_TITLE,
+    use_global_fpr: bool = True,
     playlist: str = "1A",
 ) -> plt.Figure:
-    """1x3 figure: AUPRC / AUROC / TPR@FPR vs q3.
+    """1x3 figure: AUPRC / AUROC / TPR vs *q₃* (global or per-bin FPR).
 
     Parameters
     ----------
     reco_baseline_tpr_q3 : optional per-bin recall array for a
         reconstruction-level baseline.  Plotted on the rightmost
-        (TPR@FPR) panel.
+        (TPR @ fixed FPR) panel.
     reco_baseline_label : label for the reconstruction baseline in the legend.
     title : optional figure super-title.  Defaults to a multi-pion
         description when *None*.
@@ -1091,6 +1537,7 @@ def plot_multi_pion_vs_q3(
     """
     if fixed_fpr is None:
         fixed_fpr = DEFAULT_FIXED_FPR
+    tpr_title = _tpr_column_title_vs_kinematics(use_global_fpr)
     fig, axes = plt.subplots(1, 3, figsize=(17, 5), tight_layout=True)
 
     q3_mid = data["q3_bin_mids"]
@@ -1105,7 +1552,8 @@ def plot_multi_pion_vs_q3(
             key = f"tpr@{fpr_val}"
             _plot_metric_line(
                 axes[2], q3_mid, agg[key],
-                f"{model_name} (FPR={fpr_val:.0%})", uncertainties, **clr,
+                _tpr_line_legend_label(model_name, fpr_val, use_global_fpr),
+                uncertainties, **clr,
             )
 
     if reco_baseline_tpr_q3 is not None:
@@ -1121,13 +1569,108 @@ def plot_multi_pion_vs_q3(
         if col < 2:
             ax.set_title(f"{metric} vs. {x_short}")
         else:
-            ax.set_title(f"TPR @ fixed FPR vs. {x_short}")
+            ax.set_title(f"{tpr_title} vs. {x_short}")
         ax.legend(**_classification_legend_kw(7, legend_title))
         ax.grid(True)
 
     if title is None:
         title = (
-            fr"$CCN\pi^\pm$ tagging ($N \geq 1$) - Minerva Open Data Playlist {playlist}"
+            fr"$CCN\pi^\pm$ tagging ($N \geq 1$) - MINERvA Open Data Playlist {playlist}"
+        )
+    fig.suptitle(title, fontsize=14)
+    return fig
+
+
+def plot_multi_classification_vs_W(
+    all_metrics_W: dict[str, dict],
+    data: dict,
+    baseline_W: np.ndarray,
+    fixed_fpr: list[float] | None = None,
+    uncertainties: bool = False,
+    reco_baseline_tpr_W: np.ndarray | None = None,
+    reco_baseline_label: str = "Baseline",
+    colors: dict[str, str] | None = None,
+    title: str | None = None,
+    legend_title: str | None = CLASSIFICATION_PERFORMANCE_LEGEND_TITLE,
+    use_global_fpr: bool = True,
+    playlist: str = "1A",
+    results: dict[str, list[dict]] | None = None,
+    signal_classes: list[int] | None = None,
+) -> plt.Figure:
+    """1×3 or 1×4 figure: AUPRC / AUROC / TPR vs *W* (global or per-bin FPR).
+
+    Same layout as :func:`plot_multi_pion_vs_q3` but with *W* on the *x* axis.
+    If both *results* and *signal_classes* are passed, a fourth panel shows a
+    stacked histogram of **all** test events vs *W* (blue = not signal,
+    orange = signal), with total *N* on top of each bar and *N* signal inside
+    the orange segment — same convention as :func:`plot_binned_by_inttype`.
+    """
+    if fixed_fpr is None:
+        fixed_fpr = DEFAULT_FIXED_FPR
+    if (results is None) ^ (signal_classes is None):
+        raise ValueError("results and signal_classes must both be set or both be omitted")
+
+    tpr_title = _tpr_column_title_vs_kinematics(use_global_fpr)
+    n_cols = 4 if results is not None else 3
+    fig_w = 22.0 if n_cols == 4 else 17.0
+    fig, axes = plt.subplots(1, n_cols, figsize=(fig_w, 5), tight_layout=True)
+
+    w_mid = data["W_bin_mids"]
+
+    axes[0].plot(w_mid, baseline_W, "o--", color="gray", label="Random baseline")
+
+    for model_name, agg in sorted(all_metrics_W.items(), key=lambda kv: kv[0]):
+        clr = {} if colors is None else {"color": colors.get(model_name)}
+        _plot_metric_line(axes[0], w_mid, agg["auprc"], model_name, uncertainties, **clr)
+        _plot_metric_line(axes[1], w_mid, agg["auroc"], model_name, uncertainties, **clr)
+        for fpr_val in fixed_fpr:
+            key = f"tpr@{fpr_val}"
+            _plot_metric_line(
+                axes[2], w_mid, agg[key],
+                _tpr_line_legend_label(model_name, fpr_val, use_global_fpr),
+                uncertainties, **clr,
+            )
+
+    if reco_baseline_tpr_W is not None:
+        axes[2].plot(w_mid, reco_baseline_tpr_W, "s--", color="black",
+                     label=reco_baseline_label)
+
+    col_labels = ["AUPRC", "AUROC", "Efficiency (TPR)"]
+    for col, metric in enumerate(col_labels):
+        ax = axes[col]
+        ax.set_xlabel(r"$W$ [GeV]")
+        ax.set_ylabel(metric)
+        x_short = r"$W$"
+        if col < 2:
+            ax.set_title(f"{metric} vs. {x_short}")
+        else:
+            ax.set_title(f"{tpr_title} vs. {x_short}")
+        ax.legend(**_classification_legend_kw(7, legend_title))
+        ax.grid(True)
+
+    if n_cols == 4:
+        first_model = next(iter(results))
+        y_true_binary = get_signal_probabilities(
+            results[first_model][0], signal_classes, playlist
+        )["ytrue"]
+        w_gev = data["W_GeV"]
+        if len(w_gev) != len(y_true_binary):
+            raise ValueError(
+                f"len(W_GeV)={len(w_gev)} != len(y_true)={len(y_true_binary)}; "
+                "check playlist alignment for the event-count panel."
+            )
+        ax_h = axes[3]
+        all_mask = np.ones(len(w_gev), dtype=bool)
+        _histogram_inttype_counts_with_positives(
+            ax_h, w_gev, all_mask, y_true_binary, data["W_bin_edges"],
+        )
+        ax_h.set_xlabel(r"$W$ [GeV]")
+        ax_h.set_ylabel("Events")
+        ax_h.set_title(r"Events vs. $W$ (top = $N_{\mathrm{tot}}$, orange = $N_{\mathrm{sig}}$)")
+
+    if title is None:
+        title = (
+            fr"$CCN\pi^\pm$ tagging ($N \geq 1$) - MINERvA Open Data Playlist {playlist}"
         )
     fig.suptitle(title, fontsize=14)
     return fig
@@ -1152,16 +1695,20 @@ def plot_binned_by_inttype(
     signal_label: str | None = None,
     pion_bins_require_has_pion: bool = True,
     legend_title: str | None = CLASSIFICATION_PERFORMANCE_LEGEND_TITLE,
+    use_global_fpr: bool = True,
 ) -> plt.Figure:
-    """One row per interaction type, 4 columns: AUPRC, AUROC, TPR@FPR,
-    and an event-count histogram.
+    """One row per interaction type, 4 columns: AUPRC, AUROC, TPR (global or per-bin FPR),
+    and a stacked event-count histogram (blue: not signal, orange: MC positives).
 
     Parameters
     ----------
-    x_var : ``"pion_E"``, ``"pion_theta"``, or ``"q3"``.
+    x_var : ``"pion_E"``, ``"pion_theta"``, ``"q3"``, or ``"W"`` (hadronic
+        invariant mass; requires ``W_GeV`` / ``W_bin_edges`` on *data*).
     reco_baseline_pred : optional binary prediction array (same length as
         test set). When provided, the per-bin recall is overlaid on the
-        TPR@FPR panel for each interaction type.
+        TPR panel for each interaction type.
+    use_global_fpr : if True, one global score cut per target FPR; if False,
+        TPR is taken from each bin's local ROC (and plot titles/legends match).
     reco_baseline_label : legend label for the reconstruction baseline.
     signal_label : optional name for the signal class definition (e.g.
         ``r"$CC\\pi^0$"``). Used when there are events in an interaction
@@ -1174,6 +1721,7 @@ def plot_binned_by_inttype(
         fixed_fpr = DEFAULT_FIXED_FPR
     if int_types is None:
         int_types = MC_INT_TYPE
+    tpr_title = _tpr_column_title_vs_kinematics(use_global_fpr)
 
     int_type_arr = data["int_type_arr"]
     n_int = len(int_types)
@@ -1196,6 +1744,10 @@ def plot_binned_by_inttype(
         hist_var = data["q3_GeV"]
         bin_edges = data["q3_bin_edges"]
         hist_pion_mask = np.ones(len(hist_var), dtype=bool)
+    elif x_var == "W":
+        hist_var = data["W_GeV"]
+        bin_edges = data["W_bin_edges"]
+        hist_pion_mask = np.ones(len(hist_var), dtype=bool)
     elif x_var == "pion_E":
         hist_var = data["pion_E_MC"]
         bin_edges = data["pion_E_MC_bins"]
@@ -1208,7 +1760,7 @@ def plot_binned_by_inttype(
         else:
             hist_pion_mask = np.isfinite(hist_var)
     else:
-        raise ValueError(f"Unknown x_var: {x_var}")
+        raise ValueError(f"Unknown x_var: {x_var!r}")
 
     for row_idx, (int_code, int_name) in enumerate(int_types.items()):
         int_mask = int_type_arr == int_code
@@ -1220,6 +1772,8 @@ def plot_binned_by_inttype(
         # Choose x-axis midpoints
         if x_var == "q3":
             x_mid = data["q3_bin_mids"]
+        elif x_var == "W":
+            x_mid = data["W_bin_mids"]
         elif x_var == "pion_E":
             x_mid = data["pion_E_MC_bins_mid"]
         else:
@@ -1254,35 +1808,14 @@ def plot_binned_by_inttype(
                     color="gray",
                 )
                 ax.set_title(f"{int_name} (N={n_events:,})")
-            # Histogram still shows kinematic counts for this interaction type
+            # Histogram: stacked all events vs MC signal positives in this interaction type
             ax_h = axes[row_idx, 3]
-            counts, _ = np.histogram(hist_var[plot_mask], bins=bin_edges)
-            widths = np.diff(bin_edges)
-            ax_h.bar(
-                bin_edges[:-1],
-                counts,
-                width=widths,
-                align="edge",
-                edgecolor="black",
-                linewidth=0.5,
-                alpha=0.7,
+            _histogram_inttype_counts_with_positives(
+                ax_h, hist_var, plot_mask, y_true_binary, bin_edges, log_x=log_x,
             )
-            for i, c in enumerate(counts):
-                if c > 0:
-                    ax_h.text(
-                        bin_edges[i] + widths[i] / 2,
-                        c,
-                        str(c),
-                        ha="center",
-                        va="bottom",
-                        fontsize=7,
-                    )
             ax_h.set_xlabel(xlabel)
             ax_h.set_ylabel("Events")
-            ax_h.set_title(f"{int_name} (N={n_events:,}) — event counts")
-            ax_h.grid(True, axis="y", alpha=0.3)
-            if log_x:
-                ax_h.set_xscale("log")
+            ax_h.set_title(f"{int_name} (N={n_events:,}) — events (orange = positives)")
             continue
 
         # Compute baseline
@@ -1298,7 +1831,28 @@ def plot_binned_by_inttype(
         if x_var == "q3":
             bl_values = bl["q3"]
             all_agg = compute_all_metrics_q3(
-                results, data, signal_classes, threshold, fixed_fpr, int_mask, playlist,
+                results,
+                data,
+                signal_classes,
+                threshold,
+                fixed_fpr,
+                int_mask,
+                playlist,
+                use_global_fpr=use_global_fpr,
+            )
+        elif x_var == "W":
+            bl_values = compute_signal_baseline_W(
+                results, data, signal_classes, int_mask, playlist,
+            )
+            all_agg = compute_all_metrics_W(
+                results,
+                data,
+                signal_classes,
+                threshold,
+                fixed_fpr,
+                int_mask,
+                playlist,
+                use_global_fpr=use_global_fpr,
             )
         else:
             bl_values = bl[{"pion_E": "E", "pion_theta": "theta"}[x_var]]
@@ -1311,6 +1865,7 @@ def plot_binned_by_inttype(
                 int_mask,
                 playlist,
                 pion_bins_require_has_pion=pion_bins_require_has_pion,
+                use_global_fpr=use_global_fpr,
             )
             sub_key = {"pion_E": "E", "pion_theta": "theta"}[x_var]
             all_agg = {mn: m[sub_key] for mn, m in all_agg_full.items()}
@@ -1326,7 +1881,8 @@ def plot_binned_by_inttype(
                 key = f"tpr@{fpr_val}"
                 _plot_metric_line(
                     axes[row_idx, 2], x_mid, agg[key],
-                    f"{model_name} (FPR={fpr_val:.0%})", uncertainties, **clr,
+                    _tpr_line_legend_label(model_name, fpr_val, use_global_fpr),
+                    uncertainties, **clr,
                 )
 
         # Reconstruction baseline on TPR panel
@@ -1336,6 +1892,11 @@ def plot_binned_by_inttype(
                 reco_bl = compute_reco_baseline_recall_per_bin(
                     reco_baseline_pred, is_signal_masked,
                     data["q3_GeV"], data["q3_bin_edges"],
+                )
+            elif x_var == "W":
+                reco_bl = compute_reco_baseline_recall_per_bin(
+                    reco_baseline_pred, is_signal_masked,
+                    data["W_GeV"], data["W_bin_edges"],
                 )
             else:
                 var_key = {"pion_E": "pion_E_MC", "pion_theta": "pion_theta_MC"}[x_var]
@@ -1359,29 +1920,23 @@ def plot_binned_by_inttype(
             if col < 2:
                 ax.set_title(f"{int_name} (N={n_events:,}) — {metric} vs. {xlabel.split('[')[0].strip()}")
             else:
-                ax.set_title(f"{int_name} (N={n_events:,}) — TPR @ fixed FPR vs. {xlabel.split('[')[0].strip()}")
+                ax.set_title(
+                    f"{int_name} (N={n_events:,}) — {tpr_title} vs. {xlabel.split('[')[0].strip()}"
+                )
             ax.legend(**_classification_legend_kw(7, legend_title))
             ax.grid(True)
             if log_x:
                 ax.set_xlim(x_mid[0] * 0.8, x_mid[-1] * 1.2)
                 ax.set_xscale("log")
 
-        # --- Histogram column (col 3) ---
+        # --- Histogram column (col 3): stacked not-signal (blue) + signal positives (orange)
         ax_h = axes[row_idx, 3]
-        counts, _ = np.histogram(hist_var[plot_mask], bins=bin_edges)
-        widths = np.diff(bin_edges)
-        ax_h.bar(bin_edges[:-1], counts, width=widths, align="edge",
-                 edgecolor="black", linewidth=0.5, alpha=0.7)
-        for i, c in enumerate(counts):
-            if c > 0:
-                ax_h.text(bin_edges[i] + widths[i] / 2, c, str(c),
-                          ha="center", va="bottom", fontsize=7)
+        _histogram_inttype_counts_with_positives(
+            ax_h, hist_var, plot_mask, y_true_binary, bin_edges, log_x=log_x,
+        )
         ax_h.set_xlabel(xlabel)
         ax_h.set_ylabel("Events")
-        ax_h.set_title(f"{int_name} (N={n_events:,}) — event counts")
-        ax_h.grid(True, axis="y", alpha=0.3)
-        if log_x:
-            ax_h.set_xscale("log")
+        ax_h.set_title(f"{int_name} (N={n_events:,}) — events (orange = positives)")
 
     fig.suptitle(title, fontsize=14, y=1.005)
     return fig
@@ -1403,7 +1958,7 @@ def plot_event_counts_by_inttype(
 
     Parameters
     ----------
-    x_var : ``"pion_E"``, ``"pion_theta"``, or ``"q3"``.
+    x_var : ``"pion_E"``, ``"pion_theta"``, ``"q3"``, or ``"W"``.
     pion_bins_require_has_pion : same meaning as in :func:`plot_binned_by_inttype`.
     """
     if int_types is None:
@@ -1414,6 +1969,9 @@ def plot_event_counts_by_inttype(
     if x_var == "q3":
         var = data["q3_GeV"]
         bin_edges = data["q3_bin_edges"]
+    elif x_var == "W":
+        var = data["W_GeV"]
+        bin_edges = data["W_bin_edges"]
     elif x_var == "pion_E":
         var = data["pion_E_MC"]
         bin_edges = data["pion_E_MC_bins"]
@@ -1421,9 +1979,11 @@ def plot_event_counts_by_inttype(
         var = data["pion_theta_MC"]
         bin_edges = data["pion_theta_MC_bins"]
     else:
-        raise ValueError(f"Unknown x_var: {x_var}")
+        raise ValueError(f"Unknown x_var: {x_var!r}")
 
     if x_var == "q3":
+        kin_mask = np.ones(len(var), dtype=bool)
+    elif x_var == "W":
         kin_mask = np.ones(len(var), dtype=bool)
     elif x_var == "pion_E":
         kin_mask = data["has_pion"] if pion_bins_require_has_pion else np.ones(len(var), dtype=bool)

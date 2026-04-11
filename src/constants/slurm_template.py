@@ -38,7 +38,7 @@ nvidia-smi
 {env_vars}
 
 # User commands
-
+pip install transformers
 {commands}
 EOF
 )
