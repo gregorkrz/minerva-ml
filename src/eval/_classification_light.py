@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import numpy.ma as ma
 
-from eval_classification_plots import (
+from src.eval.classification_plots import (
     compute_all_metrics,
     compute_all_metrics_q3,
     compute_reco_baseline_recall_per_bin,

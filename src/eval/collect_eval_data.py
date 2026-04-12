@@ -9,7 +9,7 @@ Default layout (relative to repo root)::
 Each file is a versioned dict suitable for offline ``plot_*.py`` scripts.
 
 **Regression pickle** (``schema_version`` 2+) also stores precomputed
-``eval_data_*`` dicts returned by :func:`eval_E_available_plots.load_eval_data`
+``eval_data_*`` dicts returned by :func:`src.eval.e_available_plots.load_eval_data`
 / ``load_eval_data_grouped`` (``results``, ``E_true_dict``, ``E_pred_dict``,
 ``Enu_baselines``, ``Enu_filters``, ``mc_E``, …) so ``plot_regression.py`` can
 pass ``data=...`` and avoid re-reading NPZs from ``ckpt_dir``.
@@ -23,9 +23,8 @@ import sys
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-for _d in (_REPO_ROOT, _REPO_ROOT / "notebooks"):
-    if str(_d) not in sys.path:
-        sys.path.insert(0, str(_d))
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
 from src.eval._constants import (
     CLASSIFICATION_PICKLE_STEM,
@@ -69,7 +68,11 @@ def collect_classification(
     ckpt_dir: Path,
     wandb_tag: str,
 ) -> dict:
-    from eval_classification_plots import load_results, load_truth_and_baselines, add_hadronic_W_to_classification_data
+    from src.eval.classification_plots import (
+        add_hadronic_W_to_classification_data,
+        load_results,
+        load_truth_and_baselines,
+    )
     from src.utils.utils import get_classification_runs_by_model_and_cap
 
     runs_by_model_cap = get_classification_runs_by_model_and_cap(wandb_tag)
@@ -109,7 +112,7 @@ def collect_classification(
 
 
 def collect_regression(ckpt_dir: Path, wandb_tag: str, suppress_errors: bool) -> dict:
-    from eval_E_available_plots import load_eval_data, load_eval_data_grouped
+    from src.eval.e_available_plots import load_eval_data, load_eval_data_grouped
     from src.utils.utils import get_runs_by_model_and_cap
 
     runs_by_model_cap = get_runs_by_model_and_cap(wandb_tag)

@@ -152,7 +152,7 @@ python -m src.eval.collect_eval_data --flag <TAG>
 
 This writes `out/eval_data/classification_<TAG>.pkl` and `out/eval_data/regression_<TAG>.pkl`. Use `--out-dir` optionally.
 
-**2. Generate PDFs** (each script accepts `--flag`, `--out-dir`, and `--plots-dir`; defaults match the layout below):
+**2. Generate PDFs** (each script accepts `--flag`, `--out-dir`, and `--plots-dir`; defaults match the layout below). Plotting code lives under ``src.eval.classification_plots`` and ``src.eval.e_available_plots`` (several modules each); notebooks may still use ``from eval_*_plots import …`` via thin shims in ``notebooks/``.
 
 ```bash
 python -m src.eval.plot_steps              # training curves → plots/{regression,classification}/steps/

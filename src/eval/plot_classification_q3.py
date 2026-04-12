@@ -18,11 +18,10 @@ import seaborn as sns
 from sklearn.metrics import confusion_matrix
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-for _d in (_REPO_ROOT, _REPO_ROOT / "notebooks"):
-    if str(_d) not in sys.path:
-        sys.path.insert(0, str(_d))
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
-from eval_classification_plots import (
+from src.eval.classification_plots import (
     CLASSIFICATION_PERFORMANCE_LEGEND_TITLE,
     compute_all_metrics_q3,
     compute_signal_baseline,

@@ -18,11 +18,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
-for _d in (_REPO_ROOT, _REPO_ROOT / "notebooks"):
-    if str(_d) not in sys.path:
-        sys.path.insert(0, str(_d))
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
-from eval_E_available_plots import (
+from src.eval.e_available_plots import (
     plot_example_E_pred_true,
     plot_residuals_by_energy,
     plot_residuals_by_q3,
