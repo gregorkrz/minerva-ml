@@ -3,7 +3,7 @@ Evaluation plotting utilities for charged-pion classification models.
 
 Loads evaluation results from checkpoint directories and produces
 AUPRC / AUROC / TPR vs kinematic bins for pion energy, pion angle, true *q₃*,
-or hadronic invariant mass *W*.  TPR at a target FPR can use either a **single
+or true MC hadronic invariant mass *W* (GeV) from baselines.  TPR at a target FPR can use either a **single
 score threshold** fit on the full masked sample (``use_global_fpr=True``) or
 **per-bin** ROC cuts (``use_global_fpr=False``).  Supports multi-run uncertainty bands.
 
@@ -72,11 +72,45 @@ def _tpr_column_title_vs_kinematics(use_global_fpr: bool) -> str:
     return "TPR @ fixed FPR" if use_global_fpr else "TPR @ per-bin FPR"
 
 
-def _tpr_line_legend_label(model_name: str, fpr_val: float, use_global_fpr: bool) -> str:
-    """Legend entry for a TPR curve; per-bin mode omits the explicit FPR suffix."""
-    if use_global_fpr:
-        return f"{model_name} (FPR={fpr_val:.0%})"
+def _tpr_line_legend_label(model_name: str, _fpr_val: float, _use_global_fpr: bool) -> str:
+    """Legend entry for a model TPR line (no FPR suffix; baseline uses :func:`_baseline_legend_with_global_fpr`)."""
     return model_name
+
+
+def _global_reco_baseline_fpr(reco_pred: np.ndarray, y_true_binary: np.ndarray) -> float:
+    """Full-sample FPR of a binary baseline: FP / (FP + TN) on true background."""
+    y_true_binary = np.asarray(y_true_binary)
+    reco_pred = np.asarray(reco_pred)
+    bg = y_true_binary == 0
+    n_bg = int(bg.sum())
+    if n_bg == 0:
+        return float("nan")
+    fp = int(((reco_pred == 1) & bg).sum())
+    return fp / n_bg
+
+
+def _reco_baseline_fpr_on_mask(
+    reco_pred: np.ndarray,
+    y_true_binary: np.ndarray,
+    mask: np.ndarray,
+) -> float:
+    """Baseline FPR restricted to rows where *mask* is True: FP / (FP+TN) on true background in mask."""
+    reco_pred = np.asarray(reco_pred)
+    y_true_binary = np.asarray(y_true_binary)
+    mask = np.asarray(mask, dtype=bool)
+    bg = mask & (y_true_binary == 0)
+    n_bg = int(bg.sum())
+    if n_bg == 0:
+        return float("nan")
+    fp = int(((reco_pred == 1) & bg).sum())
+    return fp / n_bg
+
+
+def _baseline_legend_with_global_fpr(base_label: str, global_fpr: float | None) -> str:
+    """Append ``(FPR x.x%)`` when *global_fpr* is finite; else return *base_label*."""
+    if global_fpr is None or not np.isfinite(global_fpr):
+        return base_label
+    return f"{base_label} (FPR {100.0 * float(global_fpr):.1f}%)"
 
 
 def _global_score_thresholds_at_target_fprs(
@@ -119,6 +153,11 @@ DEFAULT_Q3_BIN_EDGES = np.array([0, 2.5, 5, 7.5, 10, 12.5, 15, 20, 25])
 
 # Hadronic invariant mass W (GeV bin edges for classification plots).
 DEFAULT_W_BIN_EDGES_GEV = np.array([0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0])
+# Fixed x-axis [GeV] for every figure that plots metrics or counts vs *W* (not data-driven).
+W_METRICS_XLIM_GEV: tuple[float, float] = (
+    float(DEFAULT_W_BIN_EDGES_GEV[0]),
+    float(DEFAULT_W_BIN_EDGES_GEV[-1]),
+)
 
 # PDG-like masses for W² (MeV), consistent with ``extract_baselines.py``.
 PROTON_MASS_MEV = 938.2720813
@@ -269,12 +308,13 @@ def load_truth_and_baselines(
 
         baseline_file = f"{playlist}_enu_baselines.npz"
         loaded = False
-        for subdir in ["baselines2", "baselines1", "baselines"]:
-            candidate = data_path / subdir / baseline_file
-            if candidate.exists():
-                baselines_dict[playlist] = dict(np.load(candidate))
-                loaded = True
-                break
+        subdir = "baselines"
+        candidate = data_path / subdir / baseline_file
+        print("Baseline file: ", candidate)
+        if candidate.exists():
+            baselines_dict[playlist] = dict(np.load(candidate))
+            loaded = True
+            break
         if not loaded:
             print(f"[{playlist}] WARNING: no baselines found in {data_path}")
 
@@ -331,15 +371,53 @@ def load_truth_and_baselines(
 
 
 # ---------------------------------------------------------------------------
-# Hadronic invariant mass W (from baseline kinematics)
+# Hadronic invariant mass W (MC truth from baselines; optional reco-derived W)
 # ---------------------------------------------------------------------------
+
+
+def mc_true_hadronic_W_gev_from_baselines(
+    baselines: dict[str, np.ndarray],
+    test_idx: np.ndarray,
+) -> np.ndarray:
+    """True MC hadronic *W* (GeV) per test event from baseline ``mc_true_hadronic_W_GeV``.
+
+    This array is written by ``extract_baselines.py`` using
+    :func:`extract_baselines.true_hadronic_invariant_W_gev_from_mc_part`
+    (sum of non-lepton final-state four-momenta; see that script).  Sentinel
+    invalid values are ``-1``; they become ``nan`` here for binning and metrics.
+
+    Parameters
+    ----------
+    baselines
+        Dictionary loaded from ``*_enu_baselines.npz`` (must include the key
+        ``mc_true_hadronic_W_GeV``).
+    test_idx
+        Indices of the test split (same convention as :func:`load_truth_and_baselines`).
+
+    Raises
+    ------
+    KeyError
+        If ``mc_true_hadronic_W_GeV`` is missing — regenerate baselines with
+        ``src/scripts/extract_baselines.py``.
+    """
+    if "mc_true_hadronic_W_GeV" not in baselines:
+        raise KeyError(
+            "Baselines must contain 'mc_true_hadronic_W_GeV' (true MC hadronic W in GeV). "
+            "Re-run src/scripts/extract_baselines.py to regenerate *_enu_baselines.npz files."
+        )
+    w = np.asarray(baselines["mc_true_hadronic_W_GeV"][test_idx], dtype=np.float64)
+    return np.where((w < 0.0) | ~np.isfinite(w), np.nan, w)
 
 
 def hadronic_invariant_W_gev_from_baselines(
     baselines: dict[str, np.ndarray],
     test_idx: np.ndarray,
 ) -> np.ndarray:
-    """Hadronic invariant mass *W* (GeV) per test event from baseline branches.
+    """Reco-derived hadronic *W* (GeV) per test event from baseline kinematics (**not** MC truth).
+
+    For **classification vs. true MC** *W*, use :func:`mc_true_hadronic_W_gev_from_baselines`
+    via :func:`add_hadronic_W_to_classification_data` (default).  This function remains
+    available for comparisons that use the lab-frame expression below.
 
     Uses the lab-frame expression
 
@@ -389,6 +467,10 @@ def add_hadronic_W_to_classification_data(
 ) -> dict[str, Any]:
     """Shallow copy of *data* with ``W_GeV``, ``W_bin_edges``, and ``W_bin_mids``.
 
+    ``W_GeV`` is **true MC hadronic invariant mass** (GeV) from the baselines
+    field ``mc_true_hadronic_W_GeV`` produced by ``extract_baselines.py`` — not
+    the reco-derived lab-frame *W* from :func:`hadronic_invariant_W_gev_from_baselines`.
+
     Required keys: ``baselines``, ``test_idx`` (as returned by
     :func:`load_truth_and_baselines`).
     """
@@ -400,7 +482,7 @@ def add_hadronic_W_to_classification_data(
     out = dict(data)
     test_idx = data["test_idx"][playlist]
     bl = data["baselines"][playlist]
-    out["W_GeV"] = hadronic_invariant_W_gev_from_baselines(bl, test_idx)
+    out["W_GeV"] = mc_true_hadronic_W_gev_from_baselines(bl, test_idx)
     out["W_bin_edges"] = w_bin_edges
     out["W_bin_mids"] = (w_bin_edges[:-1] + w_bin_edges[1:]) / 2
     return out
@@ -1267,6 +1349,13 @@ def compute_signal_baseline_W(
 # Plotting helpers
 # ---------------------------------------------------------------------------
 
+
+def _set_xlim_w_metrics(ax: plt.Axes) -> None:
+    """Set a consistent *W* [GeV] axis span on metric / histogram panels."""
+    lo, hi = W_METRICS_XLIM_GEV
+    ax.set_xlim(lo, hi)
+
+
 def compute_reco_baseline_recall_per_bin(
     reco_pred: np.ndarray,
     is_signal: np.ndarray,
@@ -1290,6 +1379,43 @@ def compute_reco_baseline_recall_per_bin(
     return np.array(recalls)
 
 
+def compute_reco_baseline_fpr_per_bin(
+    reco_pred: np.ndarray,
+    y_true_binary: np.ndarray,
+    bin_var: np.ndarray,
+    bin_edges: np.ndarray,
+    event_mask: np.ndarray | None = None,
+    *,
+    has_pion: np.ndarray | None = None,
+    finite_bin_var: bool = False,
+) -> np.ndarray:
+    """Per-bin FPR of a binary reconstruction baseline on **true background**.
+
+    In each kinematic bin (same edges as the stacked count histogram), among
+    events passing ``event_mask`` (and optional ``has_pion``) with
+    ``y_true_binary == 0``, returns the fraction with ``reco_pred == 1``.
+    Bins with no true background yield ``nan``.
+    """
+    if event_mask is None:
+        event_mask = np.ones(len(bin_var), dtype=bool)
+    y_true_binary = np.asarray(y_true_binary)
+    reco_pred = np.asarray(reco_pred)
+    out: list[float] = []
+    for i in range(len(bin_edges) - 1):
+        bm = mc_value_in_bin(bin_var, bin_edges, i, require_finite=finite_bin_var)
+        if has_pion is not None:
+            bm = bm & has_pion
+        bm = bm & event_mask
+        bg = bm & (y_true_binary == 0)
+        n_bg = int(bg.sum())
+        if n_bg == 0:
+            out.append(float("nan"))
+        else:
+            fp = int(((reco_pred == 1) & bg).sum())
+            out.append(fp / n_bg)
+    return np.asarray(out, dtype=np.float64)
+
+
 def _histogram_inttype_counts_with_positives(
     ax: plt.Axes,
     hist_var: np.ndarray,
@@ -1298,10 +1424,19 @@ def _histogram_inttype_counts_with_positives(
     bin_edges: np.ndarray,
     *,
     log_x: bool = False,
+    reco_baseline_pred: np.ndarray | None = None,
+    finite_bin_var: bool = False,
+    has_pion_for_binning: np.ndarray | None = None,
 ) -> None:
-    """Stacked histogram: blue = not MC signal in bin, orange = MC signal (positives).
+    """Stacked histogram: orange = MC signal (positives) on the **bottom**,
+    blue = not signal stacked **above**.
 
     Total bar height per bin matches ``np.histogram(hist_var[plot_mask], ...)``.
+    Signal is drawn first (``bottom=0``); ``Other`` uses ``bottom=counts_sig``
+    so the smaller category is not hidden under a large lower block.
+
+    If ``reco_baseline_pred`` is set, a **right** *y* axis shows per-bin baseline
+    FPR on true background within ``plot_mask`` (``Baseline FPR`` line + legend).
     """
     counts_all, _ = np.histogram(hist_var[plot_mask], bins=bin_edges)
     pos_mask = plot_mask & (y_true_binary == 1)
@@ -1315,26 +1450,26 @@ def _histogram_inttype_counts_with_positives(
 
     ax.bar(
         x0,
-        counts_bg.astype(float),
-        width=widths,
-        align="edge",
-        color="tab:blue",
-        edgecolor="black",
-        linewidth=0.5,
-        alpha=0.65,
-        label="Other (not signal)",
-    )
-    ax.bar(
-        x0,
         counts_sig.astype(float),
         width=widths,
         align="edge",
-        bottom=counts_bg.astype(float),
         color="tab:orange",
         edgecolor="black",
         linewidth=0.5,
         alpha=0.9,
         label="Signal (positives)",
+    )
+    ax.bar(
+        x0,
+        counts_bg.astype(float),
+        width=widths,
+        align="edge",
+        bottom=counts_sig.astype(float),
+        color="tab:blue",
+        edgecolor="black",
+        linewidth=0.5,
+        alpha=0.65,
+        label="Other (not signal)",
     )
     for i, ctot in enumerate(counts_all):
         if ctot > 0:
@@ -1348,7 +1483,7 @@ def _histogram_inttype_counts_with_positives(
             )
         cs = int(counts_sig[i])
         if cs > 0:
-            y_mid = float(counts_bg[i]) + float(cs) / 2.0
+            y_mid = float(counts_sig[i]) / 2.0
             ax.text(
                 x0[i] + widths[i] / 2,
                 y_mid,
@@ -1362,6 +1497,40 @@ def _histogram_inttype_counts_with_positives(
     if log_x:
         ax.set_xscale("log")
     ax.legend(loc="upper right", fontsize=6, framealpha=0.9)
+
+    if reco_baseline_pred is not None:
+        if len(reco_baseline_pred) != len(hist_var):
+            raise ValueError(
+                f"len(reco_baseline_pred)={len(reco_baseline_pred)} != len(hist_var)={len(hist_var)}"
+            )
+        fpr_bin = compute_reco_baseline_fpr_per_bin(
+            reco_baseline_pred,
+            y_true_binary,
+            hist_var,
+            bin_edges,
+            event_mask=plot_mask,
+            has_pion=has_pion_for_binning,
+            finite_bin_var=finite_bin_var,
+        )
+        x_mid = (bin_edges[:-1] + bin_edges[1:]) / 2.0
+        ax2 = ax.twinx()
+        ax2.plot(
+            x_mid,
+            fpr_bin,
+            color="black",
+            linestyle="-",
+            marker="o",
+            markersize=3,
+            linewidth=1.2,
+            label="Baseline FPR",
+            clip_on=False,
+            zorder=5,
+        )
+        ax2.set_ylabel("Baseline FPR", color="black")
+        ax2.tick_params(axis="y", labelcolor="black")
+        ymax = float(np.nanmax(fpr_bin)) if np.any(np.isfinite(fpr_bin)) else 1.0
+        ax2.set_ylim(0.0, min(1.0, max(0.05, ymax * 1.15)))
+        ax2.legend(loc="upper left", fontsize=6, framealpha=0.9)
 
 
 def _plot_metric_line(
@@ -1422,34 +1591,89 @@ def plot_cc1pi_vs_pion_kinematics(
     uncertainties: bool = False,
     reco_baseline_tpr: dict[str, np.ndarray] | None = None,
     reco_baseline_label: str = "Baseline",
+    reco_baseline_global_fpr: float | None = None,
+    reco_baseline_pred: np.ndarray | None = None,
+    results: dict[str, list[dict]] | None = None,
+    signal_classes: list[int] | None = None,
+    pion_bins_require_has_pion: bool = True,
     colors: dict[str, str] | None = None,
     legend_title: str | None = CLASSIFICATION_PERFORMANCE_LEGEND_TITLE,
     suptitle: str | None = None,
     use_global_fpr: bool = True,
     playlist: str = "1A",
 ) -> plt.Figure:
-    """2x3 figure: pion E (top row) and pion theta (bottom row).
+    """2×3 or 2×4 figure: pion *E* (top) and pion *θ* (bottom).
 
     Columns: AUPRC, AUROC, TPR vs kinematics (global or per-bin FPR; see ``use_global_fpr``).
+    If both *results* and *signal_classes* are passed, a fourth column shows stacked
+    event counts vs *E* or *θ* (same convention as :func:`plot_multi_classification_vs_W`).
+    Optional *reco_baseline_pred* draws per-bin **Baseline FPR** on a twin *y* axis on
+    those histograms.
 
     Parameters
     ----------
     reco_baseline_tpr : optional dict with keys ``"E"`` and ``"theta"``,
         each a per-bin recall array for a reconstruction-level baseline.
-        Plotted on the rightmost (TPR @ fixed FPR) panels.
+        Plotted on the TPR panels (column index 2).
+    reco_baseline_global_fpr : optional scalar FPR for the baseline legend on the TPR panels.
+        If omitted but *reco_baseline_pred* and *results* / *signal_classes* are set,
+        FPR is computed on the full masked sample like :func:`plot_multi_classification_vs_W`.
+    reco_baseline_pred : optional binary predictions (same length as the test set).
+    results, signal_classes : together enable the fourth-column histograms; must both
+        be set or both omitted.
+    pion_bins_require_has_pion : same meaning as in :func:`compute_binned_metrics_single`
+        and :func:`plot_binned_by_inttype` for the count histograms.
     reco_baseline_label : label for the reconstruction baseline in the legend.
     legend_title : optional legend title (e.g. dataset line); ``None`` to omit.
     suptitle : figure super-title; default
         ``$CC1\\pi^\\pm$ tagging - MINERvA Open Data Playlist {playlist}``.
-    playlist : playlist id for the default *suptitle* only.
+    playlist : playlist id for the default *suptitle* and for *y_true* from *results*.
     """
     if fixed_fpr is None:
         fixed_fpr = DEFAULT_FIXED_FPR
+    if (results is None) ^ (signal_classes is None):
+        raise ValueError("results and signal_classes must both be set or both be omitted")
+
     tpr_title = _tpr_column_title_vs_kinematics(use_global_fpr)
-    fig, axes = plt.subplots(2, 3, figsize=(17, 9), tight_layout=True)
+    n_cols = 4 if results is not None else 3
+    fig_w = 22.0 if n_cols == 4 else 17.0
+    fig, axes = plt.subplots(2, n_cols, figsize=(fig_w, 9), tight_layout=True)
 
     E_mid = data["pion_E_MC_bins_mid"]
     theta_mid = data["pion_theta_MC_bins_mid"]
+
+    y_true_binary: np.ndarray | None = None
+    if n_cols == 4:
+        first_model = next(iter(results))
+        y_true_binary = get_signal_probabilities(
+            results[first_model][0], signal_classes, playlist
+        )["ytrue"]
+        pE = data["pion_E_MC"]
+        pTh = data["pion_theta_MC"]
+        if len(pE) != len(y_true_binary):
+            raise ValueError(
+                f"len(pion_E_MC)={len(pE)} != len(y_true)={len(y_true_binary)}; "
+                "check playlist alignment for the event-count panels."
+            )
+        if reco_baseline_pred is not None and len(reco_baseline_pred) != len(pE):
+            raise ValueError(
+                f"len(reco_baseline_pred)={len(reco_baseline_pred)} != len(pion_E_MC)={len(pE)}"
+            )
+
+    bl_tpr_label = reco_baseline_label
+    if reco_baseline_tpr is not None:
+        fpr_for_legend = reco_baseline_global_fpr
+        if (
+            fpr_for_legend is None
+            and reco_baseline_pred is not None
+            and results is not None
+            and signal_classes is not None
+        ):
+            fm = next(iter(results))
+            y_tb = get_signal_probabilities(results[fm][0], signal_classes, playlist)["ytrue"]
+            if len(reco_baseline_pred) == len(y_tb):
+                fpr_for_legend = _global_reco_baseline_fpr(reco_baseline_pred, y_tb)
+        bl_tpr_label = _baseline_legend_with_global_fpr(reco_baseline_label, fpr_for_legend)
 
     # Random baseline (circle markers like models; dashed + gray to distinguish)
     axes[0, 0].plot(E_mid, baseline["E"], "o--", color="gray", label="Random baseline")
@@ -1479,11 +1703,45 @@ def plot_cc1pi_vs_pion_kinematics(
 
     if reco_baseline_tpr is not None:
         if "E" in reco_baseline_tpr:
-            axes[0, 2].plot(E_mid, reco_baseline_tpr["E"], "s--", color="black",
-                            label=reco_baseline_label)
+            axes[0, 2].plot(
+                E_mid, reco_baseline_tpr["E"], "s--", color="black",
+                label=bl_tpr_label,
+            )
         if "theta" in reco_baseline_tpr:
-            axes[1, 2].plot(theta_mid, reco_baseline_tpr["theta"], "s--", color="black",
-                            label=reco_baseline_label)
+            axes[1, 2].plot(
+                theta_mid, reco_baseline_tpr["theta"], "s--", color="black",
+                label=bl_tpr_label,
+            )
+
+    if n_cols == 4 and y_true_binary is not None:
+        has_pion = data["has_pion"]
+        hp_bin = has_pion if pion_bins_require_has_pion else None
+        plot_mask_e = has_pion if pion_bins_require_has_pion else np.ones(len(data["pion_E_MC"]), dtype=bool)
+        plot_mask_th = (
+            has_pion if pion_bins_require_has_pion else np.isfinite(data["pion_theta_MC"])
+        )
+        _histogram_inttype_counts_with_positives(
+            axes[0, 3],
+            data["pion_E_MC"],
+            plot_mask_e,
+            y_true_binary,
+            data["pion_E_MC_bins"],
+            log_x=True,
+            reco_baseline_pred=reco_baseline_pred,
+            finite_bin_var=False,
+            has_pion_for_binning=hp_bin,
+        )
+        _histogram_inttype_counts_with_positives(
+            axes[1, 3],
+            data["pion_theta_MC"],
+            plot_mask_th,
+            y_true_binary,
+            data["pion_theta_MC_bins"],
+            log_x=False,
+            reco_baseline_pred=reco_baseline_pred,
+            finite_bin_var=True,
+            has_pion_for_binning=hp_bin,
+        )
 
     col_labels = ["AUPRC", "AUROC", "Efficiency (TPR)"]
     xlabels = [r"True $E_\pi$ [GeV]", r"True $\theta_\pi$ [rad]"]
@@ -1502,6 +1760,18 @@ def plot_cc1pi_vs_pion_kinematics(
             if row == 0:
                 ax.set_xlim(E_mid[0] * 0.8, E_mid[-1] * 1.2)
                 ax.set_xscale("log")
+        if n_cols == 4:
+            axh = axes[row, 3]
+            axh.set_xlabel(kinematic)
+            axh.set_ylabel("Events")
+            x_short = kinematic.split("[")[0].strip()
+            axh.set_title(
+                rf"Event counts vs. {x_short} (top = $N_{{\mathrm{{tot}}}}$; orange = $N_{{\mathrm{{sig}}}}$)"
+            )
+            axh.grid(True, axis="y", alpha=0.3)
+            if row == 0:
+                axh.set_xlim(E_mid[0] * 0.8, E_mid[-1] * 1.2)
+                axh.set_xscale("log")
 
     if suptitle is None:
         suptitle = fr"$CC1\pi^\pm$ tagging - MINERvA Open Data Playlist {playlist}"
@@ -1589,6 +1859,8 @@ def plot_multi_classification_vs_W(
     uncertainties: bool = False,
     reco_baseline_tpr_W: np.ndarray | None = None,
     reco_baseline_label: str = "Baseline",
+    reco_baseline_global_fpr: float | None = None,
+    reco_baseline_pred: np.ndarray | None = None,
     colors: dict[str, str] | None = None,
     title: str | None = None,
     legend_title: str | None = CLASSIFICATION_PERFORMANCE_LEGEND_TITLE,
@@ -1604,6 +1876,14 @@ def plot_multi_classification_vs_W(
     stacked histogram of **all** test events vs *W* (blue = not signal,
     orange = signal), with total *N* on top of each bar and *N* signal inside
     the orange segment — same convention as :func:`plot_binned_by_inttype`.
+
+    Pass *reco_baseline_global_fpr* (scalar FP/(FP+TN) on the test set, same
+    convention as the notebook) to show it in the column-3 baseline legend,
+    e.g. ``Baseline (FPR 3.5%)``.  If omitted but *reco_baseline_pred* is set
+    and the fourth panel is used, FPR is computed from *reco_baseline_pred* and
+    the task ``y_true`` from *results* / *signal_classes*.  With the fourth
+    panel, *reco_baseline_pred* also draws **Baseline FPR** per *W* bin on a
+    right-hand axis over the stacked counts.
     """
     if fixed_fpr is None:
         fixed_fpr = DEFAULT_FIXED_FPR
@@ -1632,8 +1912,16 @@ def plot_multi_classification_vs_W(
             )
 
     if reco_baseline_tpr_W is not None:
-        axes[2].plot(w_mid, reco_baseline_tpr_W, "s--", color="black",
-                     label=reco_baseline_label)
+        fpr_for_legend = reco_baseline_global_fpr
+        if fpr_for_legend is None and reco_baseline_pred is not None and results is not None and signal_classes is not None:
+            first_model = next(iter(results))
+            y_tb = get_signal_probabilities(
+                results[first_model][0], signal_classes, playlist
+            )["ytrue"]
+            if len(reco_baseline_pred) == len(y_tb):
+                fpr_for_legend = _global_reco_baseline_fpr(reco_baseline_pred, y_tb)
+        bl_lbl = _baseline_legend_with_global_fpr(reco_baseline_label, fpr_for_legend)
+        axes[2].plot(w_mid, reco_baseline_tpr_W, "s--", color="black", label=bl_lbl)
 
     col_labels = ["AUPRC", "AUROC", "Efficiency (TPR)"]
     for col, metric in enumerate(col_labels):
@@ -1647,6 +1935,7 @@ def plot_multi_classification_vs_W(
             ax.set_title(f"{tpr_title} vs. {x_short}")
         ax.legend(**_classification_legend_kw(7, legend_title))
         ax.grid(True)
+        _set_xlim_w_metrics(ax)
 
     if n_cols == 4:
         first_model = next(iter(results))
@@ -1659,14 +1948,26 @@ def plot_multi_classification_vs_W(
                 f"len(W_GeV)={len(w_gev)} != len(y_true)={len(y_true_binary)}; "
                 "check playlist alignment for the event-count panel."
             )
+        if reco_baseline_pred is not None and len(reco_baseline_pred) != len(w_gev):
+            raise ValueError(
+                f"len(reco_baseline_pred)={len(reco_baseline_pred)} != len(W_GeV)={len(w_gev)}"
+            )
         ax_h = axes[3]
         all_mask = np.ones(len(w_gev), dtype=bool)
         _histogram_inttype_counts_with_positives(
-            ax_h, w_gev, all_mask, y_true_binary, data["W_bin_edges"],
+            ax_h,
+            w_gev,
+            all_mask,
+            y_true_binary,
+            data["W_bin_edges"],
+            reco_baseline_pred=reco_baseline_pred,
         )
         ax_h.set_xlabel(r"$W$ [GeV]")
         ax_h.set_ylabel("Events")
-        ax_h.set_title(r"Events vs. $W$ (top = $N_{\mathrm{tot}}$, orange = $N_{\mathrm{sig}}$)")
+        ax_h.set_title(
+            r"Event counts vs. $W$ (top = $N_{\mathrm{tot}}$; orange = $N_{\mathrm{sig}}$)"
+        )
+        _set_xlim_w_metrics(ax_h)
 
     if title is None:
         title = (
@@ -1706,7 +2007,10 @@ def plot_binned_by_inttype(
         invariant mass; requires ``W_GeV`` / ``W_bin_edges`` on *data*).
     reco_baseline_pred : optional binary prediction array (same length as
         test set). When provided, the per-bin recall is overlaid on the
-        TPR panel for each interaction type.
+        TPR panel for each interaction type, the baseline legend **FPR** is
+        computed on the **same row mask** as the histogram (interaction type
+        ∩ pion / finiteness rules), and per-bin **Baseline FPR** on that slice
+        is drawn on the right axis of the stacked histogram.
     use_global_fpr : if True, one global score cut per target FPR; if False,
         TPR is taken from each bin's local ROC (and plot titles/legends match).
     reco_baseline_label : legend label for the reconstruction baseline.
@@ -1762,6 +2066,13 @@ def plot_binned_by_inttype(
     else:
         raise ValueError(f"Unknown x_var: {x_var!r}")
 
+    finite_hist = x_var == "pion_theta"
+    hp_for_bins = (
+        data["has_pion"]
+        if (x_var in ("pion_E", "pion_theta") and pion_bins_require_has_pion)
+        else None
+    )
+
     for row_idx, (int_code, int_name) in enumerate(int_types.items()):
         int_mask = int_type_arr == int_code
 
@@ -1786,6 +2097,9 @@ def plot_binned_by_inttype(
                     ha="center", va="center", fontsize=14, color="gray",
                 )
                 axes[row_idx, col].set_title(f"{int_name} (N=0)")
+            if x_var == "W":
+                for col in range(4):
+                    _set_xlim_w_metrics(axes[row_idx, col])
             continue
 
         n_signal = int(((y_true_binary == 1) & int_mask).sum())
@@ -1811,11 +2125,21 @@ def plot_binned_by_inttype(
             # Histogram: stacked all events vs MC signal positives in this interaction type
             ax_h = axes[row_idx, 3]
             _histogram_inttype_counts_with_positives(
-                ax_h, hist_var, plot_mask, y_true_binary, bin_edges, log_x=log_x,
+                ax_h,
+                hist_var,
+                plot_mask,
+                y_true_binary,
+                bin_edges,
+                log_x=log_x and x_var != "W",
+                reco_baseline_pred=reco_baseline_pred,
+                finite_bin_var=finite_hist,
+                has_pion_for_binning=hp_for_bins,
             )
             ax_h.set_xlabel(xlabel)
             ax_h.set_ylabel("Events")
-            ax_h.set_title(f"{int_name} (N={n_events:,}) — events (orange = positives)")
+            ax_h.set_title(f"{int_name} (N={n_events:,}) — events (orange = signal, bottom)")
+            if x_var == "W":
+                _set_xlim_w_metrics(ax_h)
             continue
 
         # Compute baseline
@@ -1908,8 +2232,10 @@ def plot_binned_by_inttype(
                     data[edges_key],
                     has_pion=data["has_pion"] if pion_bins_require_has_pion else None,
                 )
-            axes[row_idx, 2].plot(x_mid, reco_bl, "s--", color="black",
-                                  label=reco_baseline_label)
+            # FPR in legend: same interaction-type (and pion/hist) slice as this row's histogram
+            fpr_row = _reco_baseline_fpr_on_mask(reco_baseline_pred, y_true_binary, plot_mask)
+            bl_lbl = _baseline_legend_with_global_fpr(reco_baseline_label, fpr_row)
+            axes[row_idx, 2].plot(x_mid, reco_bl, "s--", color="black", label=bl_lbl)
 
         # --- Metric columns ---
         col_labels = ["AUPRC", "AUROC", "Efficiency (TPR)"]
@@ -1925,18 +2251,30 @@ def plot_binned_by_inttype(
                 )
             ax.legend(**_classification_legend_kw(7, legend_title))
             ax.grid(True)
-            if log_x:
+            if x_var == "W":
+                _set_xlim_w_metrics(ax)
+            elif log_x:
                 ax.set_xlim(x_mid[0] * 0.8, x_mid[-1] * 1.2)
                 ax.set_xscale("log")
 
         # --- Histogram column (col 3): stacked not-signal (blue) + signal positives (orange)
         ax_h = axes[row_idx, 3]
         _histogram_inttype_counts_with_positives(
-            ax_h, hist_var, plot_mask, y_true_binary, bin_edges, log_x=log_x,
+            ax_h,
+            hist_var,
+            plot_mask,
+            y_true_binary,
+            bin_edges,
+            log_x=log_x and x_var != "W",
+            reco_baseline_pred=reco_baseline_pred,
+            finite_bin_var=finite_hist,
+            has_pion_for_binning=hp_for_bins,
         )
         ax_h.set_xlabel(xlabel)
         ax_h.set_ylabel("Events")
-        ax_h.set_title(f"{int_name} (N={n_events:,}) — events (orange = positives)")
+        ax_h.set_title(f"{int_name} (N={n_events:,}) — events (orange = signal, bottom)")
+        if x_var == "W":
+            _set_xlim_w_metrics(ax_h)
 
     fig.suptitle(title, fontsize=14, y=1.005)
     return fig
@@ -2018,7 +2356,9 @@ def plot_event_counts_by_inttype(
         ax.set_ylabel("Events")
         ax.set_title(f"{int_name} (N={n_plotted:,})")
         ax.grid(True, axis="y", alpha=0.3)
-        if log_x:
+        if x_var == "W":
+            _set_xlim_w_metrics(ax)
+        elif log_x:
             ax.set_xscale("log")
 
     fig.suptitle(title, fontsize=14, y=1.005)

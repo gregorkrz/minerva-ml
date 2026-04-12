@@ -12,6 +12,8 @@ neutrino energy reconstruction methods:
 6. Reco muon passing the criteria theta<20 degrees and 1.5 < |p| < 20 GeV?
 7. Ground truth q0, total lab-frame energy transfer
 8. Ground truth q3, three momentum transfer
+9. True MC hadronic invariant mass ``W`` (GeV) from ``mc_FSPart*`` (sum of
+   non-lepton final-state four-momenta; see :func:`true_hadronic_invariant_W_gev_from_mc_part`)
 
 Results are stored as numpy arrays for each playlist.
 
@@ -34,6 +36,57 @@ PRONG_KEYS = [
 ]
 CHARGED_PION_PIDS = {8, 9}
 MUON_MASS = 105.6583745
+
+# |PDG| for e, ν_e, μ, ν_μ, τ, ν_τ — excluded when summing FS hadrons for true W.
+_LEPTON_ABS_PDG_FOR_TRUE_W = frozenset(range(11, 17))
+
+
+def true_hadronic_invariant_W_gev_from_mc_part(mc_part) -> np.ndarray:
+    """True hadronic invariant mass *W* (GeV) from MC final-state particles.
+
+    For each event, ``P_h^μ = Σ_i p_i^μ`` over all ``mc_FSPart*`` rows whose
+    ``|mc_FSPartPDG|`` is **not** in ``{11,…,16}`` (electrons, muons, taus and
+    associated neutrinos). Then ``W = sqrt(P_h²)`` with energies and momenta
+    in MeV in the ntuples, result in GeV.
+
+    This matches the usual definition of the hadronic system in
+    ``ν + N → μ + X`` when the FS particle list is complete: outgoing leptons
+    are omitted and all other FS lines (hadrons, photons, nuclear fragments
+    with valid PDG codes) contribute.
+
+    Returns
+    -------
+    ndarray, shape ``(n_events,)``
+        ``W`` in GeV, or ``-1`` if there is no FS, no non-lepton lines, or
+        ``P_h²`` is not finite / not positive within numerical noise.
+    """
+    n_events = len(mc_part.n)
+    out = np.full(n_events, -1.0, dtype=np.float64)
+    for ev in range(n_events):
+        lo, hi = int(mc_part.bounds[ev]), int(mc_part.bounds[ev + 1])
+        if lo >= hi:
+            continue
+        chunk = mc_part.data[lo:hi]
+        pdg_abs = np.abs(chunk[:, 4].astype(np.int32))
+        mask = ~np.isin(pdg_abs, list(_LEPTON_ABS_PDG_FOR_TRUE_W))
+        if not np.any(mask):
+            continue
+        sel = chunk[mask]
+        px = float(np.sum(sel[:, 0]))
+        py = float(np.sum(sel[:, 1]))
+        pz = float(np.sum(sel[:, 2]))
+        e = float(np.sum(sel[:, 3]))
+        w2_mev2 = e * e - px * px - py * py - pz * pz
+        if not np.isfinite(w2_mev2):
+            continue
+        if w2_mev2 < 0.0:
+            if w2_mev2 > -1e-3 * max(e * e, 1.0):
+                w2_mev2 = 0.0
+            else:
+                continue
+        out[ev] = np.sqrt(w2_mev2) / 1000.0
+    return out
+
 
 def get_muon_kinematics(master_ana_dev):
     """
@@ -125,11 +178,12 @@ def compute_ccqe_formula(muon_kinematics):
     
     return E_nu_formula
 
-def get_pion_kinematics(master_ana_dev):
+def get_pion_kinematics(master_ana_dev, mc_part=None):
     # Get pion kinematics if there is exactly one charged pion (or one neutral pion with no charged pions).
     # Returns an (N_events, 4) array of four-vectors; rows are zero for events
     # that are not CC or don't have a unique single-pion final state.
-    mc_part = get_dense(mc_part_keys, master_ana_dev)
+    if mc_part is None:
+        mc_part = get_dense(mc_part_keys, master_ana_dev)
     current = master_ana_dev["mc_current"].array().to_numpy()
     cc_events = np.where(current == 1)[0]
     n_events = len(current)
@@ -167,6 +221,7 @@ def compute_enu_baselines(root_file_path):
             - 'E_mu+E_recoil_CCinc': E_muon + E_recoil_CCinc
             - 'E_muon': Muon energy (for reference)
             - 'blob_recoil_E*': blob-based recoil energy components
+            - 'mc_true_hadronic_W_GeV': true hadronic W from ``mc_FSPart*`` (GeV, -1 invalid)
     """
     with uproot.open(root_file_path) as uf:
         master_ana_dev = uf["MasterAnaDev"]
@@ -216,8 +271,11 @@ def compute_enu_baselines(root_file_path):
         q0 = get_q0(muon_kinematics, E_true)
         q3 = get_q3(muon_kinematics, E_true, q0)
 
-        # 8. Pion four-vectors (px, py, pz, E) for single-pion CC events
-        pion_four_vectors = get_pion_kinematics(master_ana_dev)
+        # 8. Pion four-vectors (px, py, pz, E) for single-pion CC events;
+        #    same ``mc_FSPart*`` load also drives true hadronic W.
+        mc_part = get_dense(mc_part_keys, master_ana_dev)
+        pion_four_vectors = get_pion_kinematics(master_ana_dev, mc_part=mc_part)
+        mc_true_hadronic_W_GeV = true_hadronic_invariant_W_gev_from_mc_part(mc_part)
 
         # 9. MC current type and interaction type
         mc_current = master_ana_dev["mc_current"].array().to_numpy()
@@ -299,6 +357,7 @@ def compute_enu_baselines(root_file_path):
             "blob_recoil_E_hcal": blob_recoil_E_hcal,
             "blob_recoil_E_nucl": blob_recoil_E_nucl,
             "blob_recoil_E_od": blob_recoil_E_od,
+            "mc_true_hadronic_W_GeV": mc_true_hadronic_W_GeV,
         }
 
 
@@ -350,6 +409,7 @@ def process_playlist(playlist_path, playlist_name):
         "blob_recoil_E_hcal": [],
         "blob_recoil_E_nucl": [],
         "blob_recoil_E_od": [],
+        "mc_true_hadronic_W_GeV": [],
     }
     
     # Process each file
@@ -378,9 +438,14 @@ def process_playlist(playlist_path, playlist_name):
     n_events = len(concatenated_results['CCQE_formula'])
     print(f"\n[{playlist_name}] Statistics:")
     print(f"  Total events: {n_events}")
-    for key in ['CCQE_formula', 'Enu_from_muon', 'Enu_from_muon+proton', 
-                'E_mu+E_recoil', 'E_mu+E_recoil_CCinc', 'E_true', 'muon_filter_CC_paper', 'q0', 'q3']:
-        valid_events = (concatenated_results[key] > 0).sum()
+    for key in ['CCQE_formula', 'Enu_from_muon', 'Enu_from_muon+proton',
+                'E_mu+E_recoil', 'E_mu+E_recoil_CCinc', 'E_true', 'muon_filter_CC_paper', 'q0', 'q3',
+                'mc_true_hadronic_W_GeV']:
+        arr = concatenated_results[key]
+        if key == 'mc_true_hadronic_W_GeV':
+            valid_events = int(np.sum(arr != -1))
+        else:
+            valid_events = int(np.sum(arr > 0))
         print(f"  {key}: {valid_events}/{n_events} valid ({100*valid_events/n_events:.1f}%)")
     
     return concatenated_results
