@@ -21,7 +21,7 @@ The typical workflow is:
 2. Preprocess ROOT files into ML-ready tensors
 3. Split into train/val/test
 4. Train models locally or submit SLURM jobs
-5. Run test evaluation (`eval`) on checkpoints, then analyze with notebooks
+5. Run test evaluation (`eval`) on checkpoints, then produce figures with `src.eval` (or notebooks)
 
 ## 1) Get the data (two options)
 
@@ -125,7 +125,7 @@ python src/jobs/submit_train_jobs.py
 
 The script also includes `get_cmds_and_slurm_times_continue()` for checkpoint resume runs.
 
-## 5) Analysis (test eval + notebooks)
+## 5) Analysis (test eval, evaluation plots, notebooks)
 
 After training, group the runs you want to compare in [Weights & Biases](https://wandb.ai) by assigning the **same tag** to each run (in the run’s overview or via the API). The tools below use that tag against the `minerva-models` project under your W&B entity (set `WANDB_ENTITY` and use `wandb login` as needed).
 
@@ -139,13 +139,41 @@ python -m src.scripts.print_eval_commands --wandb-flag <TAG>
 
 `--wandb-flag` only lists runs whose checkpoint folder name matches a wandb run name with that tag; omit it to consider every run under `--ckpt-dir` (default: see `--help`). Run each printed line locally. **Evaluation is very small and fast**—it is fine to run on **login nodes** without a GPU job.
 
-### Notebooks
+### Evaluation plots (`src.eval`)
 
-1. Open `notebooks/Eval_Classification.ipynb` or `notebooks/Eval_Regression.ipynb`.
-2. Set the `WANDB_TAG` variable at the top to match your tag (both notebooks use this to query runs).
-3. Run all cells.
+Offline plotting reads cached pickles under `out/eval_data/` (by default) and writes PDFs under `plots/` (by default). Run from the repository root with `PYTHONPATH` set to the repo (or install the package in editable mode) so imports resolve.
 
-To run the same notebooks headlessly from the repo root (requires `nbconvert`; e.g. `pip install nbconvert`):
+**1. Cache eval inputs** (loads checkpoints / W&B histories; paths are configurable in `src/eval/_constants.py`):
+
+```bash
+export PYTHONPATH="$PWD"
+python -m src.eval.collect_eval_data --flag <TAG>
+```
+
+This writes `out/eval_data/classification_<TAG>.pkl` and `out/eval_data/regression_<TAG>.pkl`. Use `--out-dir` optionally.
+
+**2. Generate PDFs** (each script accepts `--flag`, `--out-dir`, and `--plots-dir`; defaults match the layout below):
+
+```bash
+python -m src.eval.plot_steps              # training curves → plots/{regression,classification}/steps/
+python -m src.eval.plot_regression         # energy / q₃ / scaling → plots/regression/
+python -m src.eval.plot_classification_W  # vs hadronic W → plots/classification/w_bins/
+python -m src.eval.plot_classification_q3  # vs q₃, CCNπ, light appendix → plots/classification/q3/ and .../light/
+python -m src.eval.plot_classification_Pions  # pion kinematics, CC1π⁰, light appendix → plots/classification/pions/ and .../light/
+```
+
+**3. Figures for a LaTeX paper** (copies or single-page extracts into `figures_latex/`):
+
+```bash
+python -m src.scripts.copy_figures_for_paper
+# or: python -m src.scripts.copy_figures_for_paper --dry-run
+```
+
+Use `--plots-root` if your PDFs live outside the default `plots/` tree (`--out-root` is an alias). Outputs go under `figures_latex/regression`, `figures_latex/classification`, and `figures_latex/classification_detailed` by default.
+
+### Notebooks (optional)
+
+The `notebooks/Eval_*.ipynb` notebooks remain useful for interactive exploration. Set `WANDB_TAG` at the top to match your tag and run all cells. To execute headlessly (requires `nbconvert`; e.g. `pip install nbconvert`):
 
 ```bash
 cd notebooks
@@ -159,7 +187,7 @@ jupyter nbconvert --to html Eval_Regression.ipynb
 jupyter nbconvert --to html Eval_Classification.ipynb
 ```
 
-Classification evaluation covers tagging and related metrics; regression evaluation covers energy-scale and scaling plots. Figures and PDFs are written under paths configured in each notebook (typically under `out/`).
+For publication-quality PDFs and the directory layout used by `copy_figures_for_paper`, prefer the `src.eval` pipeline above rather than notebook output paths.
 
 ## 6) Event displays
 
