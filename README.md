@@ -2,6 +2,39 @@
 
 This repository contains the data processing and model training code used for ML studies on MINERvA events.
 
+## Environment setup (Docker / Singularity)
+
+The provided `Dockerfile` is based on the published container image:
+
+- `docker.io/gkrz/minerva_ml:v1`
+
+### Docker
+
+```bash
+docker pull docker.io/gkrz/minerva_ml:v1
+docker run --rm -it \
+  -v "$PWD":/workspace/minerva-ml \
+  -w /workspace/minerva-ml \
+  docker.io/gkrz/minerva_ml:v1 \
+  bash
+```
+
+### Singularity / Apptainer
+
+```bash
+singularity pull docker://gkrz/minerva_ml:v1
+singularity shell --bind "$PWD":/workspace/minerva-ml minerva_ml_v1.sif
+cd /workspace/minerva-ml
+```
+
+After entering the container, run project commands from the repository root, for example:
+
+```bash
+python -m src.scripts.train --help
+python -m src.scripts.eval --help
+python -m src.scripts.split_dataset --help
+```
+
 ## Dataset
 
 The processed dataset used by this project is available on Hugging Face:
