@@ -112,7 +112,7 @@ def main(argv: list[str] | None = None) -> None:
         suppress_errors=suppress,
         use_cc_selection=2,
         colors=clrs,
-        text="Minerva Open Data Playlist 1A\nEvent selection def. by E_recoil_CCinc",
+        text="",
         data=data_no_rw,
     )
     fig_i.savefig(out_dir / "q3_vs_iqr_rms_full_1A.pdf", bbox_inches="tight")
@@ -131,13 +131,12 @@ def main(argv: list[str] | None = None) -> None:
         suppress_errors=suppress,
         use_cc_selection=1,
         colors=clrs,
-        text=(
-            "Minerva Open Data Playlist 1A\n"
-            r"$1.5 < p_\mu < 20\,\mathrm{GeV},\ \theta_\mu < 20^\circ$"
-        ),
+        text="",
         data=data_no_rw,
     )
-    fig_i.savefig(out_dir / "q3_vs_iqr_rms_full_muon_selection_only.pdf", bbox_inches="tight")
+    fig_i.savefig(
+        out_dir / "q3_vs_iqr_rms_full_muon_selection_only.pdf", bbox_inches="tight"
+    )
     plt.close(fig_i)
     print("Saved:", out_dir / "q3_vs_iqr_rms_full_muon_selection_only.pdf")
 
@@ -151,7 +150,7 @@ def main(argv: list[str] | None = None) -> None:
         return_hist_fig=True,
         suppress_errors=suppress,
         colors=clrs,
-        text="Minerva Open Data Playlist 1B\nEvent selection def. by E_recoil_CCinc",
+        text="",
         data=data_no_rw,
     )
     fig_i.savefig(out_dir / "q3_vs_iqr_rms_full_1B.pdf", bbox_inches="tight")
@@ -171,7 +170,9 @@ def main(argv: list[str] | None = None) -> None:
         colors=clrs,
         data=data_no_rw,
     )
-    fig_dbg.savefig(out_dir / "debug_E_pred_vs_true_examples_1A.pdf", bbox_inches="tight")
+    fig_dbg.savefig(
+        out_dir / "debug_E_pred_vs_true_examples_1A.pdf", bbox_inches="tight"
+    )
     plt.close(fig_dbg)
     print("Saved:", out_dir / "debug_E_pred_vs_true_examples_1A.pdf")
 
@@ -232,8 +233,7 @@ def main(argv: list[str] | None = None) -> None:
         ylabel=r"25-75 IQR of $E_{\mathrm{available}}^{\mathrm{reco}}/E_{\mathrm{available}}^{\mathrm{true}}$",
     )
     selection_text = (
-        "MINERvA Open Data Playlists 1A, 1B\n"
-        r"Event selection def. by E_recoil_CCinc"
+        "MINERvA Open Data Playlists 1A, 1B\n" r"Event selection def. by E_recoil_CCinc"
     )
     leg1 = ax[1].legend(title=selection_text, fontsize=9, loc="upper right")
     leg1.set_title(selection_text)
@@ -268,7 +268,10 @@ def main(argv: list[str] | None = None) -> None:
         suppress_errors=suppress,
         data=data_first,
     )
-    fig_ii_q3.savefig(out_dir / "residuals_by_q3_select_events_by_E_recoil_CCinc.pdf", bbox_inches="tight")
+    fig_ii_q3.savefig(
+        out_dir / "residuals_by_q3_select_events_by_E_recoil_CCinc.pdf",
+        bbox_inches="tight",
+    )
     plt.close(fig_ii_q3)
     print("Saved:", out_dir / "residuals_by_q3_select_events_by_E_recoil_CCinc.pdf")
 
@@ -284,13 +287,17 @@ def main(argv: list[str] | None = None) -> None:
         use_cc_selection=1,
         data=data_first,
     )
-    fig_ii_q3.savefig(out_dir / "residuals_by_q3_select_events_by_muons.pdf", bbox_inches="tight")
+    fig_ii_q3.savefig(
+        out_dir / "residuals_by_q3_select_events_by_muons.pdf", bbox_inches="tight"
+    )
     plt.close(fig_ii_q3)
     print("Saved:", out_dir / "residuals_by_q3_select_events_by_muons.pdf")
 
     training_names_grouped = {"Log1p": {}}
     for model, caps in runs_by_model_cap.items():
-        for cap, run_list in sorted(caps.items(), key=lambda x: (x[0] == -1, -x[0] if x[0] > 0 else 0)):
+        for cap, run_list in sorted(
+            caps.items(), key=lambda x: (x[0] == -1, -x[0] if x[0] > 0 else 0)
+        ):
             if not run_list:
                 continue
             label = f"{model} {_cap_to_label(cap)}"
@@ -342,14 +349,19 @@ def main(argv: list[str] | None = None) -> None:
     if "baseline" in values:
         axs.axhline(
             values["baseline"]["iqr"][Q3_BIN_IDX],
-            color="black", linestyle=":", lw=1, label="Baseline",
+            color="black",
+            linestyle=":",
+            lw=1,
+            label="Baseline",
         )
 
     axs.set_xscale("log")
     axs.set_xlabel("Number of training samples")
     axs.set_ylabel("IQR [GeV]")
     q3_mid = values["q3_bin_mids"][Q3_BIN_IDX]
-    axs.set_title(f"IQR vs Training Samples (q$_3$ bin {Q3_BIN_IDX}, mid = {q3_mid:.2f} GeV)")
+    axs.set_title(
+        f"IQR vs Training Samples (q$_3$ bin {Q3_BIN_IDX}, mid = {q3_mid:.2f} GeV)"
+    )
     axs.legend(fontsize=9)
     axs.grid(True)
     fig_iii.tight_layout()

@@ -3,11 +3,12 @@
 Workflow (Python 3.10+ recommended)::
 
     python -m src.eval.collect_eval_data --flag Run_2703
-    python -m src.eval.plot_steps
+    python -m src.eval.plot_steps  # → plots/steps_combined/; --separate-panels for per-task PDFs
     python -m src.eval.plot_regression
     python -m src.eval.plot_classification_W
     python -m src.eval.plot_classification_q3
     python -m src.eval.plot_classification_Pions
+    python -m src.eval.plot_classification_light  # light PDFs only (optional --components)
 
 Run from the ``minerva-data-processing`` repository root with ``PYTHONPATH=``.
 

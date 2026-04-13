@@ -6,12 +6,14 @@ from typing import Any
 import numpy as np
 
 from ._constants import DEFAULT_FIXED_FPR
-from ._binning import _pion_kinematic_bin_mask, get_signal_probabilities, mc_value_in_bin
 from ._metrics_binned import (
+    _pion_kinematic_bin_mask,
     aggregate_metrics,
     compute_binned_metrics_q3,
     compute_binned_metrics_single,
     compute_binned_metrics_W,
+    get_signal_probabilities,
+    mc_value_in_bin,
 )
 
 def compute_all_metrics(

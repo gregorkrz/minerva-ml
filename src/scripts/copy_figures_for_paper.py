@@ -6,8 +6,9 @@ to a selected page.
 
 Source layout matches ``src.eval`` plotting scripts (default under repo ``plots/``):
   - ``plots/regression/`` — ``plot_regression.py``
-  - ``plots/regression/steps/`` — ``plot_steps.py``
-  - ``plots/classification/steps/`` — ``plot_steps.py``
+  - ``plots/steps_combined/`` — ``plot_steps.py`` (classification | regression, one legend)
+  - ``plots/classification/steps/`` — ``plot_steps.py`` (only with ``--separate-panels``)
+  - ``plots/regression/steps/`` — ``plot_steps.py`` (only with ``--separate-panels``)
   - ``plots/classification/pions/`` — ``plot_classification_Pions.py``
   - ``plots/classification/q3/`` — ``plot_classification_q3.py``
 
@@ -28,8 +29,8 @@ _DEFAULT_PLOTS = _PROJECT_ROOT / "plots"
 _DEFAULT_FIGURES = _PROJECT_ROOT / "figures_latex"
 
 REGRESSION_COPIES = [
-    ("regression/steps/log_flops_vs_val_loss.pdf", "flops_regression.pdf"),
-    ("regression/steps/log_steps_vs_val_loss.pdf", "steps_regression.pdf"),
+    ("steps_combined/log_flops_vs_val_loss.pdf", "flops_val_loss_clf_reg.pdf"),
+    ("steps_combined/log_steps_vs_val_loss.pdf", "steps_val_loss_clf_reg.pdf"),
     (
         "regression/residuals_by_q3_select_events_by_E_recoil_CCinc.pdf",
         "residuals_q3_muon_sel.pdf",
@@ -38,10 +39,8 @@ REGRESSION_COPIES = [
     ("regression/q3_vs_iqr_rms_full_1A_1B.pdf", "iqr_E_resolution_plot_1A_1B.pdf"),
 ]
 
-CLASSIFICATION_COPIES = [
-    ("classification/steps/log_flops_vs_val_loss.pdf", "flops_classification.pdf"),
-    ("classification/steps/log_steps_vs_val_loss.pdf", "steps_classification.pdf"),
-]
+# Training-curve PDFs are combined clf|reg under steps_combined/ (see REGRESSION_COPIES).
+CLASSIFICATION_COPIES: list[tuple[str, str]] = []
 
 CLASSIFICATION_FIRST_PAGE = [
     ("classification/pions/eval_cc1pi_tagging_1A.pdf", "CC1PiPMTagging.pdf"),

@@ -155,11 +155,12 @@ This writes `out/eval_data/classification_<TAG>.pkl` and `out/eval_data/regressi
 **2. Generate PDFs** (each script accepts `--flag`, `--out-dir`, and `--plots-dir`; defaults match the layout below). Plotting code lives under ``src.eval.classification_plots`` and ``src.eval.e_available_plots`` (several modules each); notebooks may still use ``from eval_*_plots import …`` via thin shims in ``notebooks/``.
 
 ```bash
-python -m src.eval.plot_steps              # training curves → plots/{regression,classification}/steps/
+python -m src.eval.plot_steps              # training curves → plots/steps_combined/ (1×2 clf|reg, one legend); add --separate-panels for plots/{classification,regression}/steps/
 python -m src.eval.plot_regression         # energy / q₃ / scaling → plots/regression/
 python -m src.eval.plot_classification_W  # vs hadronic W → plots/classification/w_bins/
 python -m src.eval.plot_classification_q3  # vs q₃, CCNπ, light appendix → plots/classification/q3/ and .../light/
 python -m src.eval.plot_classification_Pions  # pion kinematics, CC1π⁰, light appendix → plots/classification/pions/ and .../light/
+python -m src.eval.plot_classification_light   # light PDFs only → plots/classification/light/ (see --components)
 ```
 
 **3. Figures for a LaTeX paper** (copies or single-page extracts into `figures_latex/`):

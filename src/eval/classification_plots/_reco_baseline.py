@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from ._binning import mc_value_in_bin
+from ._metrics_binned import mc_value_in_bin
 
 def compute_reco_baseline_recall_per_bin(
     reco_pred: np.ndarray,

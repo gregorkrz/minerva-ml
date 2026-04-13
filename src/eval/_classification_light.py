@@ -1,8 +1,13 @@
-"""Figures from ``Eval_Classification_Light.ipynb`` (subset / compact panels).
+"""Compact "light" classification PDFs for paper-style summaries.
 
-Can save **pion** panels only, **CCNπ q₃** panels only, or both (default), so
-``plot_classification_Pions.py`` and ``plot_classification_q3.py`` can each
-emit their share without duplicating the full bundle when both run.
+For each playlist, **single-pion** tasks (CC1π±, CCπ⁰) emit three separate PDFs:
+AUPRC / AUROC / TPR@fixed FPR vs *q₃*, the same vs *W*, and a 2×3 figure with
+pion *E* (top row) and *θ* (bottom row).
+
+CCNπ (multi-pion) emits vs *q₃* and vs *W* only (two PDFs when *W* data exist).
+
+``plot_classification_q3`` passes ``components=("q3",)`` (CCNπ only);
+``plot_classification_Pions`` passes ``components=("pion",)`` (CC1π± and CCπ⁰).
 """
 
 from __future__ import annotations
@@ -17,32 +22,409 @@ import numpy.ma as ma
 from src.eval.classification_plots import (
     compute_all_metrics,
     compute_all_metrics_q3,
+    compute_all_metrics_W,
     compute_reco_baseline_recall_per_bin,
+    compute_signal_baseline,
+    compute_signal_baseline_W,
     data_with_signal_pion_bins,
-    mc_value_in_bin,
-    save_figures_to_pdf,
     _plot_metric_line,
+)
+from src.eval.classification_plots._constants import (
+    _baseline_legend_with_global_fpr,
+    _tpr_column_title_vs_kinematics,
+    _tpr_line_legend_label,
 )
 
 LightComponent = Literal["pion", "q3"]
 
-COLOR_N_TOTAL = "#9e9e9e"
-COLOR_N_SIGNAL = "#1f77b4"
-COLOR_SB = "#2ca02c"
-HIST_EDGE = "0.25"
-HIST_EDGELINE = 0.35
-HIST_ALPHA_TOTAL = 0.55
-HIST_ALPHA_SIGNAL = 0.9
+_COL_LABELS = ("AUPRC", "AUROC", "Efficiency (TPR)")
+# q₃ metrics always use global FPR in ``compute_all_metrics_q3`` (matches ``plot_classification_q3``).
+_TPR_TITLE_Q3 = _tpr_column_title_vs_kinematics(True)
 
 
-def _legend_title_playlist_task(_playlist: str, task_line2: str) -> str:
-    return f"Minerva Open Data Playlist 1A/1B\n{task_line2}"
+def _save_single_fig(fig: plt.Figure, path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, bbox_inches="tight")
+    plt.close(fig)
+    print("Saved:", path)
 
 
-def _apply_legend_title(ax: plt.Axes, leg_title: str) -> None:
-    leg = ax.legend(fontsize=7, title=leg_title)
-    if leg.get_title() is not None:
-        leg.get_title().set_fontsize(8)
+def _figure_metrics_1x3(
+    all_metrics: dict[str, dict],
+    x: np.ndarray,
+    xlabel: str,
+    baseline_auprc: np.ndarray,
+    fixed_fpr: list[float],
+    reco_baseline_tpr: np.ndarray,
+    reco_label: str,
+    suptitle: str,
+    colors: dict[str, str],
+    *,
+    log_x: bool = False,
+    reco_baseline_global_fpr: float | None = None,
+) -> plt.Figure:
+    """One row: AUPRC | AUROC | TPR vs a common *x* (global FPR only)."""
+    fig, axes = plt.subplots(1, 3, figsize=(14.5, 4.6), constrained_layout=True)
+    axes[0].plot(x, baseline_auprc, "o--", color="gray", label="Random baseline", zorder=1)
+
+    for model_name, agg in sorted(all_metrics.items(), key=lambda kv: kv[0]):
+        clr = {"color": colors.get(model_name, "tab:gray")}
+        _plot_metric_line(axes[0], x, agg["auprc"], model_name, True, **clr)
+        _plot_metric_line(axes[1], x, agg["auroc"], model_name, True, **clr)
+        for fpr_val in fixed_fpr:
+            key = f"tpr@{fpr_val}"
+            lbl = _tpr_line_legend_label(model_name, fpr_val, True)
+            _plot_metric_line(axes[2], x, agg[key], lbl, True, **clr)
+
+    bl_lbl = (
+        _baseline_legend_with_global_fpr(reco_label, reco_baseline_global_fpr)
+        if reco_baseline_global_fpr is not None and np.isfinite(reco_baseline_global_fpr)
+        else reco_label
+    )
+    axes[2].plot(x, reco_baseline_tpr, "s--", color="black", label=bl_lbl, zorder=2)
+
+    x_short = xlabel.split("[")[0].strip() if "[" in xlabel else xlabel
+    for col, metric in enumerate(_COL_LABELS):
+        ax = axes[col]
+        ax.set_xlabel(xlabel, fontsize=11)
+        ax.set_ylabel(metric, fontsize=11)
+        if col < 2:
+            ax.set_title(f"{metric} vs. {x_short}", fontsize=11)
+        else:
+            ax.set_title(f"{_TPR_TITLE_Q3} vs. {x_short}", fontsize=11)
+        ax.legend(fontsize=8, loc="best")
+        ax.grid(True, alpha=0.35)
+        if log_x:
+            ax.set_xscale("log")
+
+    fig.suptitle(suptitle, fontsize=13)
+    return fig
+
+
+def _figure_metrics_2x3_pion(
+    all_metrics: dict[str, dict],
+    x_E: np.ndarray,
+    x_theta: np.ndarray,
+    baseline_E: np.ndarray,
+    baseline_theta: np.ndarray,
+    fixed_fpr: list[float],
+    reco_tpr_E: np.ndarray,
+    reco_tpr_theta: np.ndarray,
+    reco_label: str,
+    reco_baseline_global_fpr: float,
+    suptitle: str,
+    colors: dict[str, str],
+) -> plt.Figure:
+    """Two rows: pion *E* (top) and *θ* (bottom); matches ``plot_cc1pi_vs_pion_kinematics`` (3-col part)."""
+    fig, axes = plt.subplots(2, 3, figsize=(14.5, 8.0), constrained_layout=True)
+
+    axes[0, 0].plot(x_E, baseline_E, "o--", color="gray", label="Random baseline", zorder=1)
+    axes[1, 0].plot(x_theta, baseline_theta, "o--", color="gray", label="Random baseline", zorder=1)
+
+    for model_name, m in sorted(all_metrics.items(), key=lambda kv: kv[0]):
+        clr = {"color": colors.get(model_name, "tab:gray")}
+        agg_E, agg_th = m["E"], m["theta"]
+        _plot_metric_line(axes[0, 0], x_E, agg_E["auprc"], model_name, True, **clr)
+        _plot_metric_line(axes[0, 1], x_E, agg_E["auroc"], model_name, True, **clr)
+        _plot_metric_line(axes[1, 0], x_theta, agg_th["auprc"], model_name, True, **clr)
+        _plot_metric_line(axes[1, 1], x_theta, agg_th["auroc"], model_name, True, **clr)
+        for fpr_val in fixed_fpr:
+            key = f"tpr@{fpr_val}"
+            lab = _tpr_line_legend_label(model_name, fpr_val, True)
+            _plot_metric_line(axes[0, 2], x_E, agg_E[key], lab, True, **clr)
+            _plot_metric_line(axes[1, 2], x_theta, agg_th[key], lab, True, **clr)
+
+    bl_lbl = _baseline_legend_with_global_fpr(reco_label, reco_baseline_global_fpr)
+    axes[0, 2].plot(x_E, reco_tpr_E, "s--", color="black", label=bl_lbl, zorder=2)
+    axes[1, 2].plot(x_theta, reco_tpr_theta, "s--", color="black", label=bl_lbl, zorder=2)
+
+    e_short = r"True $E_\pi$"
+    th_short = r"True $\theta_\pi$"
+    for col, metric in enumerate(_COL_LABELS):
+        ax0 = axes[0, col]
+        ax1 = axes[1, col]
+        ax0.set_xlabel(r"True $E_\pi$ [GeV]", fontsize=11)
+        ax1.set_xlabel(r"True $\theta_\pi$ [rad]", fontsize=11)
+        ax0.set_ylabel(metric, fontsize=11)
+        ax1.set_ylabel(metric, fontsize=11)
+        if col < 2:
+            ax0.set_title(f"{metric} vs. {e_short}", fontsize=11)
+            ax1.set_title(f"{metric} vs. {th_short}", fontsize=11)
+        else:
+            ax0.set_title(f"{_TPR_TITLE_Q3} vs. {e_short}", fontsize=11)
+            ax1.set_title(f"{_TPR_TITLE_Q3} vs. {th_short}", fontsize=11)
+        ax0.legend(fontsize=7, loc="best")
+        ax1.legend(fontsize=7, loc="best")
+        ax0.grid(True, alpha=0.35)
+        ax1.grid(True, alpha=0.35)
+        ax0.set_xscale("log")
+        if len(x_E) > 0 and np.all(np.isfinite(x_E[[0, -1]])):
+            ax0.set_xlim(float(x_E[0]) * 0.8, float(x_E[-1]) * 1.2)
+
+    fig.suptitle(suptitle, fontsize=13)
+    return fig
+
+
+def save_light_classification_pdfs(
+    out_dir: Path,
+    results: dict,
+    data_by_playlist: dict,
+    clrs_dict_full: dict[str, str],
+    playlists: list[str],
+    components: tuple[LightComponent, ...] = ("pion", "q3"),
+    *,
+    data_w_by_playlist: dict | None = None,
+) -> None:
+    """Write light PDFs under *out_dir* (typically ``.../classification/light/``)."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    do_pion = "pion" in components
+    do_q3 = "q3" in components
+
+    cc1pi_classes = [0]
+    cc1pi0_classes = [2]
+    multi_pi_classes = [0, 1]
+    PI0_MASS = 134.977
+    DELTA_M = PI0_MASS
+
+    for playlist in playlists:
+        data = data_by_playlist[playlist]
+        data_w = data_w_by_playlist[playlist] if data_w_by_playlist else None
+
+        test_idx = data["test_idx"][playlist]
+        baselines_pl = data["baselines"][playlist]
+        first_model = next(iter(results))
+        run0 = results[first_model][0][playlist]
+        pid = run0["pid"]
+        n_muons = baselines_pl["n_muons"][test_idx]
+        n_charged_prongs = baselines_pl["n_charged_prongs"][test_idx]
+        improved_nmichel = baselines_pl["improved_nmichel"][test_idx]
+
+        if do_pion:
+
+            def _single_pion_bundle(
+                *,
+                signal_classes: list[int],
+                y_pred: np.ndarray,
+                baseline_fpr: float,
+                tag: str,
+                suptitle_q3: str,
+                suptitle_W: str,
+                suptitle_pion: str,
+            ) -> None:
+                if not np.isfinite(baseline_fpr):
+                    return
+                fpr = [baseline_fpr]
+                data_sp = data_with_signal_pion_bins(
+                    data, pid, signal_classes,
+                    pion_quantile_require_has_pion=False,
+                    pion_bin_edge_method="equal_frequency",
+                )
+
+                metrics_q3 = compute_all_metrics_q3(
+                    results, data, signal_classes=signal_classes, fixed_fpr=fpr, playlist=playlist,
+                )
+                bl_q3 = compute_signal_baseline(
+                    results, data, signal_classes=signal_classes, playlist=playlist,
+                    pion_bins_require_has_pion=False,
+                )["q3"]
+                y_true = np.isin(pid, signal_classes).astype(int)
+                is_signal = y_true == 1
+                reco_q3 = compute_reco_baseline_recall_per_bin(
+                    y_pred, is_signal, data["q3_GeV"], data["q3_bin_edges"],
+                )
+                x_q3 = data["q3_bin_mids"]
+                fig = _figure_metrics_1x3(
+                    metrics_q3,
+                    x_q3,
+                    r"True $q_3$ [GeV]",
+                    bl_q3,
+                    fpr,
+                    reco_q3,
+                    "Baseline",
+                    suptitle_q3,
+                    clrs_dict_full,
+                    log_x=False,
+                    reco_baseline_global_fpr=baseline_fpr,
+                )
+                _save_single_fig(fig, out_dir / f"eval_classification_light_{tag}_q3_{playlist}.pdf")
+
+                if data_w is not None:
+                    metrics_W = compute_all_metrics_W(
+                        results,
+                        data_w,
+                        signal_classes=signal_classes,
+                        fixed_fpr=fpr,
+                        playlist=playlist,
+                        use_global_fpr=True,
+                    )
+                    bl_W = compute_signal_baseline_W(
+                        results, data_w, signal_classes=signal_classes, playlist=playlist,
+                    )
+                    reco_W = compute_reco_baseline_recall_per_bin(
+                        y_pred, is_signal, data_w["W_GeV"], data_w["W_bin_edges"],
+                    )
+                    x_W = data_w["W_bin_mids"]
+                    fig_w = _figure_metrics_1x3(
+                        metrics_W,
+                        x_W,
+                        r"True hadronic $W$ [GeV]",
+                        bl_W,
+                        fpr,
+                        reco_W,
+                        "Baseline",
+                        suptitle_W,
+                        clrs_dict_full,
+                        log_x=False,
+                        reco_baseline_global_fpr=baseline_fpr,
+                    )
+                    _save_single_fig(fig_w, out_dir / f"eval_classification_light_{tag}_W_{playlist}.pdf")
+                metrics_pion = compute_all_metrics(
+                    results, data_sp, signal_classes=signal_classes,
+                    fixed_fpr=fpr, playlist=playlist,
+                    pion_bins_require_has_pion=False,
+                )
+                bl = compute_signal_baseline(
+                    results, data_sp, signal_classes=signal_classes, playlist=playlist,
+                    pion_bins_require_has_pion=False,
+                )
+                reco_E = compute_reco_baseline_recall_per_bin(
+                    y_pred, is_signal,
+                    data_sp["pion_E_MC"], data_sp["pion_E_MC_bins"], has_pion=None,
+                )
+                reco_th = compute_reco_baseline_recall_per_bin(
+                    y_pred, is_signal,
+                    data_sp["pion_theta_MC"], data_sp["pion_theta_MC_bins"],
+                    has_pion=None, finite_bin_var=True,
+                )
+                x_E = data_sp["pion_E_MC_bins_mid"]
+                x_th = data_sp["pion_theta_MC_bins_mid"]
+                fig_p = _figure_metrics_2x3_pion(
+                    metrics_pion,
+                    x_E,
+                    x_th,
+                    bl["E"],
+                    bl["theta"],
+                    fpr,
+                    reco_E,
+                    reco_th,
+                    "Baseline",
+                    baseline_fpr,
+                    suptitle_pion,
+                    clrs_dict_full,
+                )
+                _save_single_fig(fig_p, out_dir / f"eval_classification_light_{tag}_pion_kinematics_{playlist}.pdf")
+
+            # --- CC1π± ---
+            y_true_cc1pi = np.isin(pid, cc1pi_classes).astype(int)
+            y_pred_cc1pi = (
+                (n_muons == 1) & (n_charged_prongs == 1) & (improved_nmichel == 1)
+            ).astype(int)
+            tp = int(np.sum((y_pred_cc1pi == 1) & (y_true_cc1pi == 1)))
+            fp = int(np.sum((y_pred_cc1pi == 1) & (y_true_cc1pi == 0)))
+            tn = int(np.sum((y_pred_cc1pi == 0) & (y_true_cc1pi == 0)))
+            baseline_fpr_cc1pi = fp / (fp + tn) if (fp + tn) > 0 else float("nan")
+            _single_pion_bundle(
+                signal_classes=cc1pi_classes,
+                y_pred=y_pred_cc1pi,
+                baseline_fpr=baseline_fpr_cc1pi,
+                tag="cc1pi",
+                suptitle_q3=rf"$CC1\pi^\pm$ — AUPRC / AUROC / {_TPR_TITLE_Q3} vs. $q_3$ (playlist {playlist})",
+                suptitle_W=rf"$CC1\pi^\pm$ — AUPRC / AUROC / {_TPR_TITLE_Q3} vs. $W$ (playlist {playlist})",
+                suptitle_pion=rf"$CC1\pi^\pm$ — AUPRC / AUROC / {_TPR_TITLE_Q3} vs. pion kinematics (playlist {playlist})",
+            )
+
+            # --- CCπ⁰ ---
+            is_pizero_signal = baselines_pl["is_pizero_signal"][test_idx]
+            two_gamma_inv_mass = baselines_pl["two_gamma_invariant_mass"][test_idx]
+            n_michel = baselines_pl["improved_nmichel"][test_idx]
+            y_true_pi0 = np.isin(pid, cc1pi0_classes).astype(int)
+            y_pred_pi0 = (
+                (n_muons == 1) & (is_pizero_signal == 2)
+                & (np.abs(two_gamma_inv_mass - PI0_MASS) < DELTA_M)
+                & (n_michel == 0)
+            ).astype(int)
+            fp0 = int(np.sum((y_pred_pi0 == 1) & (y_true_pi0 == 0)))
+            tn0 = int(np.sum((y_pred_pi0 == 0) & (y_true_pi0 == 0)))
+            baseline_fpr_pi0 = fp0 / (fp0 + tn0) if (fp0 + tn0) > 0 else float("nan")
+            _single_pion_bundle(
+                signal_classes=cc1pi0_classes,
+                y_pred=y_pred_pi0,
+                baseline_fpr=baseline_fpr_pi0,
+                tag="cc1pi0",
+                suptitle_q3=rf"$CC\pi^0$ — AUPRC / AUROC / {_TPR_TITLE_Q3} vs. $q_3$ (playlist {playlist})",
+                suptitle_W=rf"$CC\pi^0$ — AUPRC / AUROC / {_TPR_TITLE_Q3} vs. $W$ (playlist {playlist})",
+                suptitle_pion=rf"$CC\pi^0$ — AUPRC / AUROC / {_TPR_TITLE_Q3} vs. pion kinematics (playlist {playlist})",
+            )
+
+        if do_q3:
+            y_true_ccnpi = np.isin(pid, multi_pi_classes).astype(int)
+            y_pred_ccnpi = (
+                (n_muons == 1) & (n_charged_prongs >= 1) & (improved_nmichel >= 1)
+            ).astype(int)
+            fpn = int(np.sum((y_pred_ccnpi == 1) & (y_true_ccnpi == 0)))
+            tnn = int(np.sum((y_pred_ccnpi == 0) & (y_true_ccnpi == 0)))
+            baseline_fpr_ccnpi = fpn / (fpn + tnn) if (fpn + tnn) > 0 else float("nan")
+            if np.isfinite(baseline_fpr_ccnpi):
+                fpr_n = [baseline_fpr_ccnpi]
+
+                metrics_q3 = compute_all_metrics_q3(
+                    results, data, signal_classes=multi_pi_classes, fixed_fpr=fpr_n, playlist=playlist,
+                )
+                bl_q3 = compute_signal_baseline(
+                    results, data, signal_classes=multi_pi_classes, playlist=playlist,
+                    pion_bins_require_has_pion=False,
+                )["q3"]
+                is_signal_ccnpi = y_true_ccnpi == 1
+                reco_q3 = compute_reco_baseline_recall_per_bin(
+                    y_pred_ccnpi, is_signal_ccnpi, data["q3_GeV"], data["q3_bin_edges"],
+                )
+                fig_n = _figure_metrics_1x3(
+                    metrics_q3,
+                    data["q3_bin_mids"],
+                    r"True $q_3$ [GeV]",
+                    bl_q3,
+                    fpr_n,
+                    reco_q3,
+                    "Baseline",
+                    rf"CCN$\pi$ — AUPRC / AUROC / {_TPR_TITLE_Q3} vs. $q_3$ (playlist {playlist})",
+                    clrs_dict_full,
+                    log_x=False,
+                    reco_baseline_global_fpr=baseline_fpr_ccnpi,
+                )
+                _save_single_fig(fig_n, out_dir / f"eval_classification_light_ccnpi_q3_{playlist}.pdf")
+
+                if data_w is not None:
+                    metrics_W = compute_all_metrics_W(
+                        results,
+                        data_w,
+                        signal_classes=multi_pi_classes,
+                        fixed_fpr=fpr_n,
+                        playlist=playlist,
+                        use_global_fpr=True,
+                    )
+                    bl_W = compute_signal_baseline_W(
+                        results, data_w, signal_classes=multi_pi_classes, playlist=playlist,
+                    )
+                    reco_W = compute_reco_baseline_recall_per_bin(
+                        y_pred_ccnpi, is_signal_ccnpi, data_w["W_GeV"], data_w["W_bin_edges"],
+                    )
+                    fig_w = _figure_metrics_1x3(
+                        metrics_W,
+                        data_w["W_bin_mids"],
+                        r"True hadronic $W$ [GeV]",
+                        bl_W,
+                        fpr_n,
+                        reco_W,
+                        "Baseline",
+                        rf"CCN$\pi$ — AUPRC / AUROC / {_TPR_TITLE_Q3} vs. $W$ (playlist {playlist})",
+                        clrs_dict_full,
+                        log_x=False,
+                        reco_baseline_global_fpr=baseline_fpr_ccnpi,
+                    )
+                    _save_single_fig(fig_w, out_dir / f"eval_classification_light_ccnpi_W_{playlist}.pdf")
+
+
+# --- Legacy notebook helpers (multi-panel counts / TPR); not used by ``save_light_classification_pdfs``. ---
 
 
 def per_bin_total_and_signal(
@@ -52,6 +434,8 @@ def per_bin_total_and_signal(
     has_pion: np.ndarray | None = None,
     require_finite_bin_var: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:
+    from src.eval.classification_plots import mc_value_in_bin
+
     n_tot, n_sig = [], []
     for i in range(len(bin_edges) - 1):
         bm = mc_value_in_bin(bin_var, bin_edges, i, require_finite=require_finite_bin_var)
@@ -85,6 +469,13 @@ def plot_histogram_counts(
     leg_title: str | None = None,
     n_bg_global: int | None = None,
 ) -> None:
+    COLOR_N_TOTAL = "#9e9e9e"
+    COLOR_N_SIGNAL = "#1f77b4"
+    HIST_EDGE = "0.25"
+    HIST_EDGELINE = 0.35
+    HIST_ALPHA_TOTAL = 0.55
+    HIST_ALPHA_SIGNAL = 0.9
+
     edges = np.asarray(bin_edges, dtype=float)
     w = np.diff(edges)
     x0 = edges[:-1]
@@ -110,7 +501,9 @@ def plot_histogram_counts(
     ax.set_title(r"Kinematic bin counts (ROC uses global $N_{\mathrm{bkg}}$)")
     ax.grid(True, axis="y", alpha=0.35)
     if leg_title is not None:
-        _apply_legend_title(ax, leg_title)
+        leg = ax.legend(fontsize=7, title=leg_title)
+        if leg.get_title() is not None:
+            leg.get_title().set_fontsize(8)
 
 
 def plot_sb_stairs(
@@ -122,6 +515,7 @@ def plot_sb_stairs(
     leg_title: str | None = None,
     y_title: str | None = None,
 ) -> None:
+    COLOR_SB = "#2ca02c"
     edges = np.asarray(bin_edges, dtype=float)
     sb = np.asarray(sb, dtype=float)
     sb_plot = ma.masked_invalid(sb)
@@ -135,7 +529,9 @@ def plot_sb_stairs(
     ax.set_title(y_title)
     ax.grid(True, alpha=0.35)
     if leg_title is not None:
-        _apply_legend_title(ax, leg_title)
+        leg = ax.legend(fontsize=7, title=leg_title)
+        if leg.get_title() is not None:
+            leg.get_title().set_fontsize(8)
 
 
 def plot_tpr_fixed_fpr_two_panel(
@@ -155,6 +551,9 @@ def plot_tpr_fixed_fpr_two_panel(
     log_x_left=False,
     colors=None,
 ):
+    def _legend_title_playlist_task(_playlist: str, task_line2: str) -> str:
+        return f"Minerva Open Data Playlist 1A/1B\n{task_line2}"
+
     fig, axes = plt.subplots(1, 2, figsize=(12, 4.8), tight_layout=True)
     ax_l, ax_r = axes[0], axes[1]
     leg_title = _legend_title_playlist_task(playlist, task_legend_line2)
@@ -187,39 +586,9 @@ def plot_tpr_fixed_fpr_two_panel(
 
     for ax in (ax_l, ax_r):
         ax.grid(True)
-        _apply_legend_title(ax, leg_title)
-
-    fig.suptitle(title, fontsize=14)
-    return fig
-
-
-def plot_tpr_fixed_fpr_single_panel(
-    metrics,
-    x,
-    fixed_fpr,
-    xlabel,
-    reco_baseline_tpr,
-    reco_label,
-    title,
-    playlist: str,
-    task_legend_line2: str,
-    colors=None,
-):
-    fig, ax = plt.subplots(1, 1, figsize=(6.8, 4.8), tight_layout=True)
-    leg_title = _legend_title_playlist_task(playlist, task_legend_line2)
-
-    for model_name, agg in metrics.items():
-        clr = {} if colors is None else {"color": colors.get(model_name)}
-        for fpr_val in fixed_fpr:
-            key = f"tpr@{fpr_val}"
-            _plot_metric_line(ax, x, agg[key], f"{model_name} (FPR={fpr_val:.0%})", True, **clr)
-
-    ax.plot(x, reco_baseline_tpr, "s--", color="black", label=reco_label)
-    ax.set_xlabel(xlabel)
-    ax.set_ylabel("Efficiency (TPR)")
-    ax.set_title("TPR @ fixed FPR")
-    ax.grid(True)
-    _apply_legend_title(ax, leg_title)
+        leg = ax.legend(fontsize=7, title=leg_title)
+        if leg.get_title() is not None:
+            leg.get_title().set_fontsize(8)
 
     fig.suptitle(title, fontsize=14)
     return fig
@@ -238,6 +607,9 @@ def plot_counts_sb_two_panel(
     log_x_left: bool = False,
     n_bg_global: int | None = None,
 ):
+    def _legend_title_playlist_task(_playlist: str, task_line2: str) -> str:
+        return f"Minerva Open Data Playlist 1A/1B\n{task_line2}"
+
     fig, axes = plt.subplots(2, 2, figsize=(12, 9), tight_layout=True)
     leg_title = _legend_title_playlist_task(playlist, task_legend_line2)
 
@@ -271,257 +643,3 @@ def plot_counts_sb_two_panel(
 
     fig.suptitle(title, fontsize=14)
     return fig
-
-
-def plot_counts_sb_single_panel(
-    bin_edges: np.ndarray,
-    n_total_signal: tuple[np.ndarray, np.ndarray],
-    xlabel: str,
-    title: str,
-    playlist: str,
-    task_legend_line2: str,
-    n_bg_global: int | None = None,
-):
-    fig, axes = plt.subplots(1, 2, figsize=(12, 4.8), tight_layout=True)
-    leg_title = _legend_title_playlist_task(playlist, task_legend_line2)
-    n_tot, n_sig = n_total_signal
-    if n_bg_global is not None:
-        sb = sb_ratio_vs_global_bkg(n_sig, n_bg_global)
-        sb_title = r"$S/B$ with $B = N_{\mathrm{bkg}}^{\mathrm{glob}}$ (all non-signal, ROC)"
-    else:
-        sb = sb_ratio(n_tot, n_sig)
-        sb_title = None
-
-    plot_histogram_counts(
-        axes[0], bin_edges, n_tot, n_sig, xlabel,
-        log_x=False, leg_title=leg_title, n_bg_global=n_bg_global,
-    )
-    plot_sb_stairs(
-        axes[1], bin_edges, sb, xlabel,
-        log_x=False, leg_title=leg_title, y_title=sb_title,
-    )
-
-    fig.suptitle(title, fontsize=14)
-    return fig
-
-
-def save_light_classification_pdfs(
-    out_dir: Path,
-    results: dict,
-    data_by_playlist: dict,
-    clrs_dict_full: dict[str, str],
-    playlists: list[str],
-    components: tuple[LightComponent, ...] = ("pion", "q3"),
-) -> None:
-    """Write light-notebook PDFs under *out_dir* (typically ``.../classification/light/``)."""
-    out_dir.mkdir(parents=True, exist_ok=True)
-    do_pion = "pion" in components
-    do_q3 = "q3" in components
-
-    cc1pi_classes = [0]
-    cc1pi0_classes = [2]
-    multi_pi_classes = [0, 1]
-    PI0_MASS = 134.977
-    DELTA_M = PI0_MASS
-
-    for playlist in playlists:
-        data = data_by_playlist[playlist]
-        figs_tpr: list = []
-        figs_counts: list = []
-
-        test_idx = data["test_idx"][playlist]
-        baselines_pl = data["baselines"][playlist]
-        first_model = next(iter(results))
-        run0 = results[first_model][0][playlist]
-        pid = run0["pid"]
-        n_muons = baselines_pl["n_muons"][test_idx]
-        n_charged_prongs = baselines_pl["n_charged_prongs"][test_idx]
-        improved_nmichel = baselines_pl["improved_nmichel"][test_idx]
-
-        if do_pion:
-            data_cc1pi = data_with_signal_pion_bins(
-                data, pid, cc1pi_classes,
-                pion_quantile_require_has_pion=False,
-                pion_bin_edge_method="equal_frequency",
-            )
-            y_true_cc1pi = np.isin(pid, cc1pi_classes).astype(int)
-            y_pred_cc1pi = (
-                (n_muons == 1) & (n_charged_prongs == 1) & (improved_nmichel == 1)
-            ).astype(int)
-
-            tp = int(np.sum((y_pred_cc1pi == 1) & (y_true_cc1pi == 1)))
-            fp = int(np.sum((y_pred_cc1pi == 1) & (y_true_cc1pi == 0)))
-            fn = int(np.sum((y_pred_cc1pi == 0) & (y_true_cc1pi == 1)))
-            tn = int(np.sum((y_pred_cc1pi == 0) & (y_true_cc1pi == 0)))
-            baseline_fpr_cc1pi = fp / (fp + tn) if (fp + tn) > 0 else float("nan")
-
-            metrics_cc1pi = compute_all_metrics(
-                results, data_cc1pi, signal_classes=cc1pi_classes,
-                fixed_fpr=[baseline_fpr_cc1pi], playlist=playlist,
-                pion_bins_require_has_pion=False,
-            )
-            is_signal_cc1pi = y_true_cc1pi == 1
-            reco_baseline_tpr_cc1pi = {
-                "E": compute_reco_baseline_recall_per_bin(
-                    y_pred_cc1pi, is_signal_cc1pi,
-                    data_cc1pi["pion_E_MC"], data_cc1pi["pion_E_MC_bins"], has_pion=None,
-                ),
-                "theta": compute_reco_baseline_recall_per_bin(
-                    y_pred_cc1pi, is_signal_cc1pi,
-                    data_cc1pi["pion_theta_MC"], data_cc1pi["pion_theta_MC_bins"],
-                    has_pion=None, finite_bin_var=True,
-                ),
-            }
-            x_E = data_cc1pi["pion_E_MC_bins_mid"]
-            x_th = data_cc1pi["pion_theta_MC_bins_mid"]
-            n_bg_cc1pi = int((y_true_cc1pi == 0).sum())
-
-            figs_tpr.append(
-                plot_tpr_fixed_fpr_two_panel(
-                    metrics_cc1pi, x_E, x_th, "E", "theta", [baseline_fpr_cc1pi],
-                    r"True $E_\pi$ [GeV]", r"$\theta_\pi$ [rad]",
-                    reco_baseline_tpr_cc1pi, "Baseline",
-                    title=r"$CC1\pi^\pm$ TPR @ fixed FPR",
-                    playlist=playlist, task_legend_line2=r"$CC1\pi^\pm$ tagging",
-                    log_x_left=True, colors=clrs_dict_full,
-                )
-            )
-            n_tot_E, n_sig_E = per_bin_total_and_signal(
-                is_signal_cc1pi, data_cc1pi["pion_E_MC"], data_cc1pi["pion_E_MC_bins"], has_pion=None,
-            )
-            n_tot_th, n_sig_th = per_bin_total_and_signal(
-                is_signal_cc1pi, data_cc1pi["pion_theta_MC"], data_cc1pi["pion_theta_MC_bins"],
-                has_pion=None, require_finite_bin_var=True,
-            )
-            figs_counts.append(
-                plot_counts_sb_two_panel(
-                    data_cc1pi["pion_E_MC_bins"], data_cc1pi["pion_theta_MC_bins"],
-                    (n_tot_E, n_sig_E), (n_tot_th, n_sig_th),
-                    r"True $E_\pi$ [GeV]", r"$\theta_\pi$ [rad]",
-                    title=r"$CC1\pi^\pm$ bin counts and $S/B$",
-                    playlist=playlist, task_legend_line2=r"$CC1\pi^\pm$ tagging",
-                    log_x_left=True, n_bg_global=n_bg_cc1pi,
-                )
-            )
-
-            is_pizero_signal = baselines_pl["is_pizero_signal"][test_idx]
-            two_gamma_inv_mass = baselines_pl["two_gamma_invariant_mass"][test_idx]
-            n_michel = baselines_pl["improved_nmichel"][test_idx]
-
-            data_pi0 = data_with_signal_pion_bins(
-                data, pid, cc1pi0_classes,
-                pion_quantile_require_has_pion=False,
-                pion_bin_edge_method="equal_frequency",
-            )
-            y_true_pi0 = np.isin(pid, cc1pi0_classes).astype(int)
-            y_pred_pi0 = (
-                (n_muons == 1) & (is_pizero_signal == 2)
-                & (np.abs(two_gamma_inv_mass - PI0_MASS) < DELTA_M)
-                & (n_michel == 0)
-            ).astype(int)
-
-            tp0 = int(np.sum((y_pred_pi0 == 1) & (y_true_pi0 == 1)))
-            fp0 = int(np.sum((y_pred_pi0 == 1) & (y_true_pi0 == 0)))
-            tn0 = int(np.sum((y_pred_pi0 == 0) & (y_true_pi0 == 0)))
-            baseline_fpr_pi0 = fp0 / (fp0 + tn0) if (fp0 + tn0) > 0 else float("nan")
-
-            metrics_pi0 = compute_all_metrics(
-                results, data_pi0, signal_classes=cc1pi0_classes,
-                fixed_fpr=[baseline_fpr_pi0], playlist=playlist,
-                pion_bins_require_has_pion=False,
-            )
-            is_signal_pi0 = y_true_pi0 == 1
-            reco_baseline_tpr_pi0 = {
-                "E": compute_reco_baseline_recall_per_bin(
-                    y_pred_pi0, is_signal_pi0,
-                    data_pi0["pion_E_MC"], data_pi0["pion_E_MC_bins"], has_pion=None,
-                ),
-                "theta": compute_reco_baseline_recall_per_bin(
-                    y_pred_pi0, is_signal_pi0,
-                    data_pi0["pion_theta_MC"], data_pi0["pion_theta_MC_bins"],
-                    has_pion=None, finite_bin_var=True,
-                ),
-            }
-            x_E0 = data_pi0["pion_E_MC_bins_mid"]
-            x_th0 = data_pi0["pion_theta_MC_bins_mid"]
-            n_bg_pi0 = int((y_true_pi0 == 0).sum())
-
-            figs_tpr.append(
-                plot_tpr_fixed_fpr_two_panel(
-                    metrics_pi0, x_E0, x_th0, "E", "theta", [baseline_fpr_pi0],
-                    r"True $E_\pi$ [GeV]", r"$\theta_\pi$ [rad]",
-                    reco_baseline_tpr_pi0, "Baseline",
-                    title=r"$CC\pi^0$ TPR @ fixed FPR",
-                    playlist=playlist, task_legend_line2=r"$CC\pi^0$ tagging",
-                    log_x_left=True, colors=clrs_dict_full,
-                )
-            )
-            n_tot_E0, n_sig_E0 = per_bin_total_and_signal(
-                is_signal_pi0, data_pi0["pion_E_MC"], data_pi0["pion_E_MC_bins"], has_pion=None,
-            )
-            n_tot_th0, n_sig_th0 = per_bin_total_and_signal(
-                is_signal_pi0, data_pi0["pion_theta_MC"], data_pi0["pion_theta_MC_bins"],
-                has_pion=None, require_finite_bin_var=True,
-            )
-            figs_counts.append(
-                plot_counts_sb_two_panel(
-                    data_pi0["pion_E_MC_bins"], data_pi0["pion_theta_MC_bins"],
-                    (n_tot_E0, n_sig_E0), (n_tot_th0, n_sig_th0),
-                    r"True $E_\pi$ [GeV]", r"$\theta_\pi$ [rad]",
-                    title=r"$CC\pi^0$ bin counts and $S/B$",
-                    playlist=playlist, task_legend_line2=r"$CC\pi^0$ tagging",
-                    log_x_left=True, n_bg_global=n_bg_pi0,
-                )
-            )
-
-        if do_q3:
-            y_true_ccnpi = np.isin(pid, multi_pi_classes).astype(int)
-            y_pred_ccnpi = (
-                (n_muons == 1) & (n_charged_prongs >= 1) & (improved_nmichel >= 1)
-            ).astype(int)
-
-            fpn = int(np.sum((y_pred_ccnpi == 1) & (y_true_ccnpi == 0)))
-            tnn = int(np.sum((y_pred_ccnpi == 0) & (y_true_ccnpi == 0)))
-            baseline_fpr_ccnpi = fpn / (fpn + tnn) if (fpn + tnn) > 0 else float("nan")
-
-            metrics_q3 = compute_all_metrics_q3(
-                results, data, signal_classes=multi_pi_classes,
-                fixed_fpr=[baseline_fpr_ccnpi], playlist=playlist,
-            )
-            is_signal_ccnpi = y_true_ccnpi == 1
-            reco_baseline_tpr_q3 = compute_reco_baseline_recall_per_bin(
-                y_pred_ccnpi, is_signal_ccnpi, data["q3_GeV"], data["q3_bin_edges"],
-            )
-            x_q3 = data["q3_bin_mids"]
-            n_bg_ccnpi = int((y_true_ccnpi == 0).sum())
-
-            figs_tpr.append(
-                plot_tpr_fixed_fpr_single_panel(
-                    metrics_q3, x_q3, [baseline_fpr_ccnpi], r"$q_{3}^{\mathrm{true}}$ [GeV]",
-                    reco_baseline_tpr_q3, "Baseline",
-                    title=r"CCN$\pi$ TPR @ fixed FPR vs. $q_3$",
-                    playlist=playlist, task_legend_line2=r"CCN$\pi$ tagging",
-                    colors=clrs_dict_full,
-                )
-            )
-            n_tot_q3, n_sig_q3 = per_bin_total_and_signal(
-                is_signal_ccnpi, data["q3_GeV"], data["q3_bin_edges"], has_pion=None,
-            )
-            figs_counts.append(
-                plot_counts_sb_single_panel(
-                    data["q3_bin_edges"], (n_tot_q3, n_sig_q3),
-                    r"$q_{3}^{\mathrm{true}}$ [GeV]",
-                    title=r"CCN$\pi$ bin counts and $S/B$ vs. $q_3$",
-                    playlist=playlist, task_legend_line2=r"CCN$\pi$ tagging",
-                    n_bg_global=n_bg_ccnpi,
-                )
-            )
-
-        if figs_tpr:
-            out_tpr = out_dir / f"eval_classification_light_tpr_fixed_fpr_{playlist}_{'_'.join(components)}.pdf"
-            save_figures_to_pdf(figs_tpr, out_tpr)
-            print("Saved:", out_tpr)
-        if figs_counts:
-            out_ct = out_dir / f"eval_classification_light_counts_sb_{playlist}_{'_'.join(components)}.pdf"
-            save_figures_to_pdf(figs_counts, out_ct)
-            print("Saved:", out_ct)

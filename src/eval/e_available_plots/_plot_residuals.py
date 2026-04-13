@@ -1,4 +1,5 @@
 """Residual histograms vs energy and vs q3."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -11,6 +12,7 @@ from ._grouped import _resolve_color_map, _SEED_SEP
 from ._constants import DEFAULT_BASELINE_KEY
 from ._load import _build_event_mask, load_eval_data
 from ._titles import _Etrue_bin_title, _q3_bin_title
+
 
 def plot_residuals_by_energy(
     CKPT_DIR: str | Path,
@@ -33,7 +35,8 @@ def plot_residuals_by_energy(
 
     if data is None:
         data = load_eval_data(
-            CKPT_DIR, training_names,
+            CKPT_DIR,
+            training_names,
             playlists=playlists,
             baseline_ref=baseline_ref,
             baseline_run=baseline_run,
@@ -61,12 +64,19 @@ def plot_residuals_by_energy(
     if n_cols == 1:
         ax = ax[:, np.newaxis]
 
-    residual_bins_list = [np.linspace(-1, 1, 100), np.linspace(-5, 5, 100), np.linspace(-10, 10, 100), np.linspace(-10, 10, 100)]
+    residual_bins_list = [
+        np.linspace(-1, 1, 100),
+        np.linspace(-5, 5, 100),
+        np.linspace(-10, 10, 100),
+        np.linspace(-10, 10, 100),
+    ]
     ratio_bins = np.linspace(0, 3, 300)
     ratio_bins_wide = np.linspace(0, 10, 300)
 
     if has_baselines:
-        mask_sel = _build_event_mask(dp, Enu_filters, Enu_baselines, baseline_key, use_cc_selection)
+        mask_sel = _build_event_mask(
+            dp, Enu_filters, Enu_baselines, baseline_key, use_cc_selection
+        )
 
     for i in range(min(n_cols, len(residual_bins_list))):
         elow, ehigh = energy_bins[i], energy_bins[i + 1]
@@ -78,9 +88,16 @@ def plot_residuals_by_energy(
             baseline = Enu_baselines[dp][baseline_key][mask]
             valid = true > 0
             ratio_bl = baseline[valid] / true[valid]
-            ax[0, i].hist(baseline - true, bins=residual_bins_list[i], histtype="step", label="Baseline")
+            ax[0, i].hist(
+                baseline - true,
+                bins=residual_bins_list[i],
+                histtype="step",
+                label="Baseline",
+            )
             ax[1, i].hist(ratio_bl, bins=ratio_bins, histtype="step", label="Baseline")
-            ax[2, i].hist(ratio_bl, bins=ratio_bins_wide, histtype="step", label="Baseline")
+            ax[2, i].hist(
+                ratio_bl, bins=ratio_bins_wide, histtype="step", label="Baseline"
+            )
 
         for loss in results:
             for model in results[loss]:
@@ -90,9 +107,18 @@ def plot_residuals_by_energy(
                     reco = E_pred_dict[dp][loss][model][mask]
                     ratio_model = reco[valid] / true[valid]
                     mlab = f"{model} ({loss})"
-                    ax[0, i].hist(reco - true, bins=residual_bins_list[i], histtype="step", label=mlab)
-                    ax[1, i].hist(ratio_model, bins=ratio_bins, histtype="step", label=mlab)
-                    ax[2, i].hist(ratio_model, bins=ratio_bins_wide, histtype="step", label=mlab)
+                    ax[0, i].hist(
+                        reco - true,
+                        bins=residual_bins_list[i],
+                        histtype="step",
+                        label=mlab,
+                    )
+                    ax[1, i].hist(
+                        ratio_model, bins=ratio_bins, histtype="step", label=mlab
+                    )
+                    ax[2, i].hist(
+                        ratio_model, bins=ratio_bins_wide, histtype="step", label=mlab
+                    )
 
         ax[0, i].set(
             xlabel=r"$E_{\mathrm{available}}^{\mathrm{reco}} - E_{\mathrm{available}}^{\mathrm{true}}$ [GeV]",
@@ -136,6 +162,7 @@ def plot_residuals_by_energy(
 # (new) Residuals and ratios by q3 bin
 # ---------------------------------------------------------------------------
 
+
 def plot_residuals_by_q3(
     CKPT_DIR: str | Path,
     training_names: dict[str, dict[str, str]],
@@ -176,7 +203,8 @@ def plot_residuals_by_q3(
 
     if data is None:
         data = load_eval_data(
-            CKPT_DIR, training_names,
+            CKPT_DIR,
+            training_names,
             playlists=playlists,
             baseline_ref=baseline_ref,
             baseline_run=baseline_run,
@@ -204,13 +232,17 @@ def plot_residuals_by_q3(
             f"No baselines / filters for dataset '{dp}' – plot_residuals_by_q3 will be empty."
         )
 
-    q3 = Enu_filters[dp]["q3"] if dp in Enu_filters and "q3" in Enu_filters[dp] else None
+    q3 = (
+        Enu_filters[dp]["q3"] if dp in Enu_filters and "q3" in Enu_filters[dp] else None
+    )
     if q3 is None:
         warnings.warn(f"No q3 information for dataset '{dp}'.")
         return plt.figure()
 
     if has_baselines:
-        mask_sel = _build_event_mask(dp, Enu_filters, Enu_baselines, baseline_key, use_cc_selection)
+        mask_sel = _build_event_mask(
+            dp, Enu_filters, Enu_baselines, baseline_key, use_cc_selection
+        )
     else:
         # Fallback: just select events with positive truth energy
         mask_sel = mc_E[dp] > 0
@@ -244,7 +276,8 @@ def plot_residuals_by_q3(
             "color", ["C0", "C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9"]
         )
         color_by_model_base = {
-            m: cycle_cols[i % len(cycle_cols)] for i, m in enumerate(model_bases_ordered)
+            m: cycle_cols[i % len(cycle_cols)]
+            for i, m in enumerate(model_bases_ordered)
         }
 
     if legend_title is None:

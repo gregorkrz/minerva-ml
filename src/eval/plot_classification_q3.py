@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Classification vs q3, confusion matrices, CCNπ q₃ panels; plus light q₃ appendix PDFs.
+"""Classification vs q3, confusion matrices, CCNπ q₃ panels; plus light appendix PDFs.
 
 Pickles default under ``<repo>/<--out-dir>/eval_data/``; PDFs under
-``<repo>/<--plots-dir>/classification/q3/`` and ``.../classification/light/``.
+``<repo>/<--plots-dir>/classification/q3/`` and ``.../classification/light/``
+(``eval_classification_light_ccnpi_q3_<pl>.pdf`` and ``..._W_<pl>.pdf`` when *W* is in the pickle).
 """
 
 from __future__ import annotations
@@ -80,6 +81,7 @@ def main(argv: list[str] | None = None) -> None:
 
     results = clf["results"]
     data_by_playlist = clf["data_by_playlist"]
+    data_w_by_playlist = clf.get("data_w_by_playlist")
     clrs = clf["clrs_dict_full"]
     playlists = clf["playlists"]
 
@@ -226,7 +228,13 @@ def main(argv: list[str] | None = None) -> None:
         print("Saved:", out_dir / f"eval_Npi_tagging_{playlist}.pdf")
 
     save_light_classification_pdfs(
-        light_dir, results, data_by_playlist, clrs, playlists, components=("q3",),
+        light_dir,
+        results,
+        data_by_playlist,
+        clrs,
+        playlists,
+        components=("q3",),
+        data_w_by_playlist=data_w_by_playlist,
     )
 
 

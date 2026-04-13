@@ -18,7 +18,7 @@ from ._constants import (
     _tpr_column_title_vs_kinematics,
     _tpr_line_legend_label,
 )
-from ._binning import mc_value_in_bin
+from ._metrics_binned import mc_value_in_bin
 from ._metrics_tasks import (
     compute_all_metrics,
     compute_all_metrics_q3,

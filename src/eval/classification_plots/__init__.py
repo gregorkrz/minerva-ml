@@ -19,12 +19,7 @@ Example::
 
 from __future__ import annotations
 
-from ._binning import (
-    data_with_signal_pion_bins,
-    equal_frequency_bin_edges,
-    get_signal_probabilities,
-    mc_value_in_bin,
-)
+from ._binning import data_with_signal_pion_bins, equal_frequency_bin_edges
 from ._constants import (
     CLASSIFICATION_PERFORMANCE_LEGEND_TITLE,
     DEFAULT_FIXED_FPR,
@@ -48,6 +43,8 @@ from ._metrics_binned import (
     compute_binned_metrics_q3,
     compute_binned_metrics_single,
     compute_binned_metrics_W,
+    get_signal_probabilities,
+    mc_value_in_bin,
 )
 from ._metrics_tasks import (
     compute_all_metrics,

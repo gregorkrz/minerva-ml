@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Classification vs pion kinematics (E, θ), CC1π⁰, π⁰ Δm scan; plus light pion appendix PDFs.
+"""Classification vs pion kinematics (E, θ), CC1π⁰, π⁰ Δm scan; plus light appendix PDFs.
 
 Pickles default under ``<repo>/<--out-dir>/eval_data/``; PDFs under
-``<repo>/<--plots-dir>/classification/pions/`` and ``.../classification/light/``.
+``<repo>/<--plots-dir>/classification/pions/`` and ``.../classification/light/``
+(per playlist: ``eval_classification_light_{cc1pi,cc1pi0}_{q3,W,pion_kinematics}_<pl>.pdf``).
 """
 
 from __future__ import annotations
@@ -111,6 +112,7 @@ def main(argv: list[str] | None = None) -> None:
 
     results = clf["results"]
     data_by_playlist = clf["data_by_playlist"]
+    data_w_by_playlist = clf.get("data_w_by_playlist")
     clrs = clf["clrs_dict_full"]
     playlists = clf["playlists"]
 
@@ -373,7 +375,13 @@ def main(argv: list[str] | None = None) -> None:
         print("Saved:", fp)
 
     save_light_classification_pdfs(
-        light_dir, results, data_by_playlist, clrs, playlists, components=("pion",),
+        light_dir,
+        results,
+        data_by_playlist,
+        clrs,
+        playlists,
+        components=("pion",),
+        data_w_by_playlist=data_w_by_playlist,
     )
 
 

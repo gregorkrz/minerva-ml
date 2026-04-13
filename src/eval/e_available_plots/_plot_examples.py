@@ -1,4 +1,5 @@
 """Example scatter and scaling-law plots."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -14,8 +15,9 @@ from ._grouped import (
     _resolve_color_map,
     flatten_grouped_training_names,
     load_eval_data_grouped,
-    _SEED_SEP
+    _SEED_SEP,
 )
+
 
 def plot_example_E_pred_true(
     CKPT_DIR: str | Path,
@@ -32,7 +34,7 @@ def plot_example_E_pred_true(
     suppress_errors: bool = False,
     verbose: bool = True,
     colors: dict[str, Any] | None = None,
-    transform = None,
+    transform=None,
     first_seed_only: bool = True,
 ) -> plt.Figure:
     """Scatter *E_true* vs *E_pred* for a random subset of selected events (debug).
@@ -84,7 +86,9 @@ def plot_example_E_pred_true(
         ax.text(0.5, 0.5, f"No Enu_filters for {dp}", ha="center", va="center")
         return fig
 
-    mask_sel = _build_event_mask(dp, Enu_filters, Enu_baselines, baseline_key, use_cc_selection)
+    mask_sel = _build_event_mask(
+        dp, Enu_filters, Enu_baselines, baseline_key, use_cc_selection
+    )
 
     entries: list[tuple[str, str, str, np.ndarray, np.ndarray]] = []
     all_labels: list[str] = []
@@ -97,7 +101,9 @@ def plot_example_E_pred_true(
                 flat_key = f"{config_label}{_SEED_SEP}{s}"
                 if flat_key not in E_pred_dict.get(dp, {}).get(loss, {}):
                     if verbose:
-                        print(f"  [skip] {flat_key} not in E_pred_dict['{dp}']['{loss}']")
+                        print(
+                            f"  [skip] {flat_key} not in E_pred_dict['{dp}']['{loss}']"
+                        )
                     continue
                 true_vec = np.asarray(E_true_dict[dp][loss][flat_key]).flatten()
                 pred_vec = np.asarray(E_pred_dict[dp][loss][flat_key]).flatten()
@@ -157,7 +163,9 @@ def plot_example_E_pred_true(
             print(f"{'i':>3}  {'E_true':>12}  {'E_pred':>12}  {'pred/true':>10}")
             for j in range(len(t)):
                 ratio = p[j] / t[j] if t[j] != 0 else float("nan")
-                print(f"{j:3d}  {float(t[j]):12.6g}  {float(p[j]):12.6g}  {ratio:10.6g}")
+                print(
+                    f"{j:3d}  {float(t[j]):12.6g}  {float(p[j]):12.6g}  {ratio:10.6g}"
+                )
 
     fig.suptitle(
         f"{dp}: {n_examples} random selected events per method "
@@ -224,12 +232,19 @@ def plot_scaling_law(
             y_std = v[std_key][bin_idx]
             color = color_map.get(config_label, "tab:gray")
             ax.errorbar(
-                n_samples, y_mean, yerr=y_std, fmt="o",
-                color=color, capsize=4,
+                n_samples,
+                y_mean,
+                yerr=y_std,
+                fmt="o",
+                color=color,
+                capsize=4,
             )
             ax.annotate(
-                config_label, (n_samples, y_mean),
-                textcoords="offset points", xytext=(6, 4), fontsize=7,
+                config_label,
+                (n_samples, y_mean),
+                textcoords="offset points",
+                xytext=(6, 4),
+                fontsize=7,
                 color=color,
             )
 
