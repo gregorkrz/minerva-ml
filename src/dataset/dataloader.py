@@ -11,22 +11,48 @@ from pathlib import Path
 import torch._dynamo
 from dataclasses import dataclass, field
 
+
 @dataclass
 class Task:
-    type: str = field(default="regression") # "regression" or "classifier"
-    regress_log: bool = field(default=True) # If True, it will apply log transformation to the regression target
-    classification_event_type: bool = field(default=False) # If True, it will classify the event type (1, 2, 3, 4, 7, 8)
-    classification_current: bool = field(default=False) # If True, it will classify the event current (1, 2)
-    classification_cc_1pi: bool = field(default=False) # If True, it will classify the event type [0, 1, 2]: 0=other, 1=CC pi+, 2=CC pi-
-    classification_n_pions: bool = field(default=False) # If True, it will classify whether the event is multi-pion or not (>1 pion produced)
-    classification_CC1orNPi: bool = field(default=False) # If True, it will classify CC 1pi or n pions, according to signal definition in Eberly et al. 2015
-    class_idx: list[int] = field(default=None) # List of class indices for the classification task # e.g. [1, 2, 3] means 3 classes: 1, 2, 3
-    class_idx_map: dict[int, int] = field(default=None) # Map of class indices to class labels
-    class_label_idx: int = field(default=None) # Index of the label in the truth_labels tensor for the classification task
-    class_weights: torch.Tensor = field(default=None) # Weights for the classification task
-    regress_E_available: bool = field(default=False) # If True, it will regress the available energy of the event
-    regress_E_available_no_muon: bool = field(default=False) # If True, it will regress the available energy of the event, without the muon energy
-    
+    type: str = field(default="regression")  # "regression" or "classifier"
+    regress_log: bool = field(
+        default=True
+    )  # If True, it will apply log transformation to the regression target
+    classification_event_type: bool = field(
+        default=False
+    )  # If True, it will classify the event type (1, 2, 3, 4, 7, 8)
+    classification_current: bool = field(
+        default=False
+    )  # If True, it will classify the event current (1, 2)
+    classification_cc_1pi: bool = field(
+        default=False
+    )  # If True, it will classify the event type [0, 1, 2]: 0=other, 1=CC pi+, 2=CC pi-
+    classification_n_pions: bool = field(
+        default=False
+    )  # If True, it will classify whether the event is multi-pion or not (>1 pion produced)
+    classification_CC1orNPi: bool = field(
+        default=False
+    )  # If True, it will classify CC 1pi or n pions, according to signal definition in Eberly et al. 2015
+    class_idx: list[int] = field(
+        default=None
+    )  # List of class indices for the classification task # e.g. [1, 2, 3] means 3 classes: 1, 2, 3
+    class_idx_map: dict[int, int] = field(
+        default=None
+    )  # Map of class indices to class labels
+    class_label_idx: int = field(
+        default=None
+    )  # Index of the label in the truth_labels tensor for the classification task
+    class_weights: torch.Tensor = field(
+        default=None
+    )  # Weights for the classification task
+    regress_E_available: bool = field(
+        default=False
+    )  # If True, it will regress the available energy of the event
+    regress_E_available_no_muon: bool = field(
+        default=False
+    )  # If True, it will regress the available energy of the event, without the muon energy
+
+
 def _pad_or_truncate(tensor, target_len):
     if tensor.shape[0] == target_len:
         return tensor
@@ -57,7 +83,14 @@ def collate_point_cloud(batch, max_particles=33):
     result = {"X": point_clouds, "y": labels, "attention_mask": attention_masks}
 
     # Optional fields: only stack if present in all items
-    optional_fields = ["cond", "pid", "add_info", "data_pid", "vertex_pid", "energy_sums"]
+    optional_fields = [
+        "cond",
+        "pid",
+        "add_info",
+        "data_pid",
+        "vertex_pid",
+        "energy_sums",
+    ]
     for field in optional_fields:
         if not all(field in item and item[field] is not None for item in batch):
             result[field] = None
@@ -77,14 +110,22 @@ def collate_point_cloud(batch, max_particles=33):
         result[field] = torch.stack(values)
     return result
 
-def get_class_counts(class_idx, label_idx_to_class_idx, files_truth_labels, truth_labels_idx):
+
+def get_class_counts(
+    class_idx, label_idx_to_class_idx, files_truth_labels, truth_labels_idx
+):
     n_class = len(class_idx)
     class_counts = np.zeros(n_class)
     for file_idx in range(len(files_truth_labels)):
-        labels = files_truth_labels[file_idx][:, truth_labels_idx] # labels contain 1's and 2's, rewrite them into 0's and 1's based on class_idx indices of 1 and 2 in there
-        labels = np.array([label_idx_to_class_idx[int(label.item())] for label in labels])
+        labels = files_truth_labels[file_idx][
+            :, truth_labels_idx
+        ]  # labels contain 1's and 2's, rewrite them into 0's and 1's based on class_idx indices of 1 and 2 in there
+        labels = np.array(
+            [label_idx_to_class_idx[int(label.item())] for label in labels]
+        )
         class_counts += np.bincount(labels, minlength=n_class)
     return class_counts
+
 
 def get_CC1orNPi_labels(file_truth_labels):
     # Generate labels for CC 1pi or n pions, according to signal definition in Eberly et al. 2015, on the fly
@@ -95,12 +136,13 @@ def get_CC1orNPi_labels(file_truth_labels):
     one_pi_plus = n_pi_plus == 1
     one_pi_minus = n_pi_minus == 1
     multi_pions = (n_pi_plus + n_pi_minus) > 1
-    labels[is_cc & one_pi_plus & ~one_pi_minus] = 0 # CC 1pi+
-    labels[is_cc & one_pi_minus & ~one_pi_plus] = 1 # CC 1pi-
-    labels[is_cc & multi_pions] = 2 # CC N Pi +-
-    labels[~is_cc] = 3 # Not CC
-    labels[is_cc & ((n_pi_plus + n_pi_minus) == 0)] = 4 # CC other
-    return labels # Labels: 0=CC 1pi+, 1=CC 1pi-, 2=CC N charged pions-, 3=OTHER
+    labels[is_cc & one_pi_plus & ~one_pi_minus] = 0  # CC 1pi+
+    labels[is_cc & one_pi_minus & ~one_pi_plus] = 1  # CC 1pi-
+    labels[is_cc & multi_pions] = 2  # CC N Pi +-
+    labels[~is_cc] = 3  # Not CC
+    labels[is_cc & ((n_pi_plus + n_pi_minus) == 0)] = 4  # CC other
+    return labels  # Labels: 0=CC 1pi+, 1=CC 1pi-, 2=CC N charged pions-, 3=OTHER
+
 
 def get_Pi_labels_v2(file_truth_labels):
     # label0 = CC, 1 charged pion, the rest whatever
@@ -112,12 +154,15 @@ def get_Pi_labels_v2(file_truth_labels):
     n_pi_plus = file_truth_labels[:, 5]
     n_pi_minus = file_truth_labels[:, 6]
     n_pi_zero = file_truth_labels[:, 10]
-    labels = torch.ones(len(file_truth_labels), dtype=torch.long)*4 # 4 is the label for other
+    labels = (
+        torch.ones(len(file_truth_labels), dtype=torch.long) * 4
+    )  # 4 is the label for other
     labels[is_cc & (n_pi_plus == 1) & (n_pi_minus == 0)] = 0
     labels[is_cc & ((n_pi_plus + n_pi_minus) > 1)] = 1
     labels[is_cc & ((n_pi_plus + n_pi_minus) == 0)] = 3
     labels[is_cc & (n_pi_zero == 1) & (n_pi_plus == 0) & (n_pi_minus == 0)] = 2
     return labels
+
 
 class HEPTorchDataset(Dataset):
     def __init__(
@@ -132,7 +177,7 @@ class HEPTorchDataset(Dataset):
         max_particles=150,
         task: Task = Task(),
         concat_additional_info=True,
-        use_energy_sums=False
+        use_energy_sums=False,
     ):
         """
         Args:
@@ -149,19 +194,35 @@ class HEPTorchDataset(Dataset):
         self.concat_additional_info = concat_additional_info
         self.use_energy_sums = use_energy_sums
         self.folder = folder
-        self.file_paths = sorted(list([os.path.join(folder, file) for file in os.listdir(folder) if file.endswith('.pb')]))
+        self.file_paths = sorted(
+            list(
+                [
+                    os.path.join(folder, file)
+                    for file in os.listdir(folder)
+                    if file.endswith(".pb")
+                ]
+            )
+        )
         print("Loading files into memory")
-        self.files = [torch.load(file, weights_only=True, mmap=False) for file in self.file_paths]
+        self.files = [
+            torch.load(file, weights_only=True, mmap=False) for file in self.file_paths
+        ]
         print("Files loaded into memory")
-        self.files_n_events = np.array([len(file["data"].offsets())-1 for file in self.files]) # -1 because the last offset is the total number of events
+        self.files_n_events = np.array(
+            [len(file["data"].offsets()) - 1 for file in self.files]
+        )  # -1 because the last offset is the total number of events
         self.files_n_events_sum = np.cumsum(self.files_n_events)
         self.files_values = [file["data"].values() for file in self.files]
         self.files_offsets = [file["data"].offsets() for file in self.files]
         # data_feature_dim: 10 = new format (data already has features+additional_info concat), 5 = legacy (data + data_additional_info)
         self.data_feature_dim = self.files_values[0].shape[1]
         if "data_additional_info" in self.files[0]:
-            self.files_values_additional_info = [file["data_additional_info"].values() for file in self.files]
-            self.files_offsets_additional_info = [file["data_additional_info"].offsets() for file in self.files]
+            self.files_values_additional_info = [
+                file["data_additional_info"].values() for file in self.files
+            ]
+            self.files_offsets_additional_info = [
+                file["data_additional_info"].offsets() for file in self.files
+            ]
         else:
             self.files_values_additional_info = None
             self.files_offsets_additional_info = None
@@ -169,7 +230,16 @@ class HEPTorchDataset(Dataset):
         self.files_truth_labels = [file["truth_labels"] for file in self.files]
         # add a column with CC1orNPi labels
         if task.classification_CC1orNPi:
-            self.files_truth_labels = [np.concatenate([file_truth_labels, get_Pi_labels_v2(file_truth_labels).reshape(-1, 1)], axis=1) for file_truth_labels in self.files_truth_labels]
+            self.files_truth_labels = [
+                np.concatenate(
+                    [
+                        file_truth_labels,
+                        get_Pi_labels_v2(file_truth_labels).reshape(-1, 1),
+                    ],
+                    axis=1,
+                )
+                for file_truth_labels in self.files_truth_labels
+            ]
         self.files_global_features = [file["global_features"] for file in self.files]
         self.global_feature_dim = self.files_global_features[0].shape[1]
         # Flatten truth and global features for single-index access (faster __getitem__)
@@ -184,7 +254,12 @@ class HEPTorchDataset(Dataset):
         if self.nevts <= 0:
             print("Number of events per file", self.files_n_events)
         if self.task.type == "classifier":
-            self.class_counts = get_class_counts(self.task.class_idx, self.task.class_idx_map, self.files_truth_labels, self.task.class_label_idx)
+            self.class_counts = get_class_counts(
+                self.task.class_idx,
+                self.task.class_idx_map,
+                self.files_truth_labels,
+                self.task.class_label_idx,
+            )
             self.class_weights = 1 / (self.class_counts / np.sum(self.class_counts))
             print("Class weights", self.class_weights)
         elif self.task.type == "regression":
@@ -231,7 +306,7 @@ class HEPTorchDataset(Dataset):
 
         if self.use_cond:
             sample["cond"] = self._global_flat[idx].float()
-        
+
         if self.use_pid:
             sample["pid"] = data[:, self.pid_idx].int()
         if self.data_feature_dim == 10:
@@ -289,10 +364,22 @@ def load_data(
     task: Task = Task(),
     concat_additional_info=True,
     event_sampler_random_state=42,
-    use_energy_sums=False
+    use_energy_sums=False,
 ):
-    supported_datasets = ["minerva_1A", "minerva_1B", "minerva_1C", "minerva_1D", "minerva_1E", "minerva_1F",
-    "minerva_1G", "minerva_1L", "minerva_1M", "minerva_1N", "minerva_1O", "minerva_1P"]
+    supported_datasets = [
+        "minerva_1A",
+        "minerva_1B",
+        "minerva_1C",
+        "minerva_1D",
+        "minerva_1E",
+        "minerva_1F",
+        "minerva_1G",
+        "minerva_1L",
+        "minerva_1M",
+        "minerva_1N",
+        "minerva_1O",
+        "minerva_1P",
+    ]
     if dataset_name not in supported_datasets:
         raise ValueError(
             f"Dataset '{dataset_name}' not supported. Choose from {supported_datasets}."
@@ -310,8 +397,8 @@ def load_data(
             max_particles=max_particles,
             task=task,
             concat_additional_info=concat_additional_info,
-            nevts=-1, # Here, keep the whole dataset, only later we will sample a subset of the data
-            use_energy_sums=use_energy_sums
+            nevts=-1,  # Here, keep the whole dataset, only later we will sample a subset of the data
+            use_energy_sums=use_energy_sums,
         )
         if nevts > 0 and nevts < len(data):
             print(f"Using a subset of the data: {nevts} events out of {len(data)}")
@@ -328,7 +415,7 @@ def load_data(
             drop_last=False,
             collate_fn=lambda x: collate_point_cloud(x, max_particles=max_particles),
             prefetch_factor=4 if distributed else None,
-            persistent_workers=distributed
+            persistent_workers=distributed,
         )
         if task.type == "classifier":
             base_ds = data.dataset if isinstance(data, Subset) else data
@@ -336,4 +423,6 @@ def load_data(
         else:
             return loader, None
     else:
-        raise ValueError(f"Dataset '{dataset_name}' not supported. Choose from {supported_datasets}.")
+        raise ValueError(
+            f"Dataset '{dataset_name}' not supported. Choose from {supported_datasets}."
+        )

@@ -1,4 +1,5 @@
 """Matplotlib figures for classification evaluation."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -26,12 +27,17 @@ from ._metrics_tasks import (
     compute_signal_baseline,
     compute_signal_baseline_W,
 )
-from ._reco_baseline import compute_reco_baseline_fpr_per_bin, compute_reco_baseline_recall_per_bin
+from ._reco_baseline import (
+    compute_reco_baseline_fpr_per_bin,
+    compute_reco_baseline_recall_per_bin,
+)
+
 
 def _set_xlim_w_metrics(ax: plt.Axes) -> None:
     """Set a consistent *W* [GeV] axis span on metric / histogram panels."""
     lo, hi = W_METRICS_XLIM_GEV
     ax.set_xlim(lo, hi)
+
 
 def _histogram_inttype_counts_with_positives(
     ax: plt.Axes,
@@ -160,7 +166,7 @@ def _plot_metric_line(
 ) -> None:
     """Plot mean line with optional +/-1 std band."""
     mean = agg["mean"]
-    line, = ax.plot(x, mean, "o-", label=label, **kwargs)
+    (line,) = ax.plot(x, mean, "o-", label=label, **kwargs)
     if uncertainties and len(agg["std"]) > 0:
         std = agg["std"]
         ax.fill_between(x, mean - std, mean + std, alpha=0.2, color=line.get_color())
@@ -187,9 +193,13 @@ def _format_axes_grid(
             ax.set_ylabel(col_labels[col])
             title_prefix = f"{row_titles[row]} — " if row_titles else ""
             if col < 2:
-                ax.set_title(f"{title_prefix}{col_labels[col]} vs. {xlabel.split('[')[0].strip()}")
+                ax.set_title(
+                    f"{title_prefix}{col_labels[col]} vs. {xlabel.split('[')[0].strip()}"
+                )
             else:
-                ax.set_title(f"{title_prefix}{tpr_title} vs. {xlabel.split('[')[0].strip()}")
+                ax.set_title(
+                    f"{title_prefix}{tpr_title} vs. {xlabel.split('[')[0].strip()}"
+                )
             ax.legend(fontsize=7)
             ax.grid(True)
             if log_x:
@@ -199,6 +209,7 @@ def _format_axes_grid(
 # ---------------------------------------------------------------------------
 # Top-level plotting functions
 # ---------------------------------------------------------------------------
+
 
 def plot_cc1pi_vs_pion_kinematics(
     all_metrics: dict[str, dict],
@@ -249,7 +260,9 @@ def plot_cc1pi_vs_pion_kinematics(
     if fixed_fpr is None:
         fixed_fpr = DEFAULT_FIXED_FPR
     if (results is None) ^ (signal_classes is None):
-        raise ValueError("results and signal_classes must both be set or both be omitted")
+        raise ValueError(
+            "results and signal_classes must both be set or both be omitted"
+        )
 
     tpr_title = _tpr_column_title_vs_kinematics(use_global_fpr)
     n_cols = 4 if results is not None else 3
@@ -287,55 +300,89 @@ def plot_cc1pi_vs_pion_kinematics(
             and signal_classes is not None
         ):
             fm = next(iter(results))
-            y_tb = get_signal_probabilities(results[fm][0], signal_classes, playlist)["ytrue"]
+            y_tb = get_signal_probabilities(results[fm][0], signal_classes, playlist)[
+                "ytrue"
+            ]
             if len(reco_baseline_pred) == len(y_tb):
                 fpr_for_legend = _global_reco_baseline_fpr(reco_baseline_pred, y_tb)
-        bl_tpr_label = _baseline_legend_with_global_fpr(reco_baseline_label, fpr_for_legend)
+        bl_tpr_label = _baseline_legend_with_global_fpr(
+            reco_baseline_label, fpr_for_legend
+        )
 
     # Random baseline (circle markers like models; dashed + gray to distinguish)
     axes[0, 0].plot(E_mid, baseline["E"], "o--", color="gray", label="Random baseline")
-    axes[1, 0].plot(theta_mid, baseline["theta"], "o--", color="gray", label="Random baseline")
+    axes[1, 0].plot(
+        theta_mid, baseline["theta"], "o--", color="gray", label="Random baseline"
+    )
 
     for model_name, metrics in sorted(all_metrics.items(), key=lambda kv: kv[0]):
         agg_E = metrics["E"]
         agg_theta = metrics["theta"]
         clr = {} if colors is None else {"color": colors.get(model_name)}
 
-        _plot_metric_line(axes[0, 0], E_mid, agg_E["auprc"], model_name, uncertainties, **clr)
-        _plot_metric_line(axes[1, 0], theta_mid, agg_theta["auprc"], model_name, uncertainties, **clr)
-        _plot_metric_line(axes[0, 1], E_mid, agg_E["auroc"], model_name, uncertainties, **clr)
-        _plot_metric_line(axes[1, 1], theta_mid, agg_theta["auroc"], model_name, uncertainties, **clr)
+        _plot_metric_line(
+            axes[0, 0], E_mid, agg_E["auprc"], model_name, uncertainties, **clr
+        )
+        _plot_metric_line(
+            axes[1, 0], theta_mid, agg_theta["auprc"], model_name, uncertainties, **clr
+        )
+        _plot_metric_line(
+            axes[0, 1], E_mid, agg_E["auroc"], model_name, uncertainties, **clr
+        )
+        _plot_metric_line(
+            axes[1, 1], theta_mid, agg_theta["auroc"], model_name, uncertainties, **clr
+        )
 
         for fpr_val in fixed_fpr:
             key = f"tpr@{fpr_val}"
             lbl = _tpr_line_legend_label(model_name, fpr_val, use_global_fpr)
             _plot_metric_line(
-                axes[0, 2], E_mid, agg_E[key],
-                lbl, uncertainties, **clr,
+                axes[0, 2],
+                E_mid,
+                agg_E[key],
+                lbl,
+                uncertainties,
+                **clr,
             )
             _plot_metric_line(
-                axes[1, 2], theta_mid, agg_theta[key],
-                lbl, uncertainties, **clr,
+                axes[1, 2],
+                theta_mid,
+                agg_theta[key],
+                lbl,
+                uncertainties,
+                **clr,
             )
 
     if reco_baseline_tpr is not None:
         if "E" in reco_baseline_tpr:
             axes[0, 2].plot(
-                E_mid, reco_baseline_tpr["E"], "s--", color="black",
+                E_mid,
+                reco_baseline_tpr["E"],
+                "s--",
+                color="black",
                 label=bl_tpr_label,
             )
         if "theta" in reco_baseline_tpr:
             axes[1, 2].plot(
-                theta_mid, reco_baseline_tpr["theta"], "s--", color="black",
+                theta_mid,
+                reco_baseline_tpr["theta"],
+                "s--",
+                color="black",
                 label=bl_tpr_label,
             )
 
     if n_cols == 4 and y_true_binary is not None:
         has_pion = data["has_pion"]
         hp_bin = has_pion if pion_bins_require_has_pion else None
-        plot_mask_e = has_pion if pion_bins_require_has_pion else np.ones(len(data["pion_E_MC"]), dtype=bool)
+        plot_mask_e = (
+            has_pion
+            if pion_bins_require_has_pion
+            else np.ones(len(data["pion_E_MC"]), dtype=bool)
+        )
         plot_mask_th = (
-            has_pion if pion_bins_require_has_pion else np.isfinite(data["pion_theta_MC"])
+            has_pion
+            if pion_bins_require_has_pion
+            else np.isfinite(data["pion_theta_MC"])
         )
         _histogram_inttype_counts_with_positives(
             axes[0, 3],
@@ -391,7 +438,7 @@ def plot_cc1pi_vs_pion_kinematics(
                 axh.set_xscale("log")
 
     if suptitle is None:
-        suptitle = fr"$CC1\pi^\pm$ tagging - MINERvA Open Data Playlist {playlist}"
+        suptitle = rf"$CC1\pi^\pm$ tagging - MINERvA Open Data Playlist {playlist}"
     fig.suptitle(suptitle, fontsize=14)
     return fig
 
@@ -433,19 +480,31 @@ def plot_multi_pion_vs_q3(
 
     for model_name, agg in sorted(all_metrics_q3.items(), key=lambda kv: kv[0]):
         clr = {} if colors is None else {"color": colors.get(model_name)}
-        _plot_metric_line(axes[0], q3_mid, agg["auprc"], model_name, uncertainties, **clr)
-        _plot_metric_line(axes[1], q3_mid, agg["auroc"], model_name, uncertainties, **clr)
+        _plot_metric_line(
+            axes[0], q3_mid, agg["auprc"], model_name, uncertainties, **clr
+        )
+        _plot_metric_line(
+            axes[1], q3_mid, agg["auroc"], model_name, uncertainties, **clr
+        )
         for fpr_val in fixed_fpr:
             key = f"tpr@{fpr_val}"
             _plot_metric_line(
-                axes[2], q3_mid, agg[key],
+                axes[2],
+                q3_mid,
+                agg[key],
                 _tpr_line_legend_label(model_name, fpr_val, use_global_fpr),
-                uncertainties, **clr,
+                uncertainties,
+                **clr,
             )
 
     if reco_baseline_tpr_q3 is not None:
-        axes[2].plot(q3_mid, reco_baseline_tpr_q3, "s--", color="black",
-                     label=reco_baseline_label)
+        axes[2].plot(
+            q3_mid,
+            reco_baseline_tpr_q3,
+            "s--",
+            color="black",
+            label=reco_baseline_label,
+        )
 
     col_labels = ["AUPRC", "AUROC", "Efficiency (TPR)"]
     for col, metric in enumerate(col_labels):
@@ -461,9 +520,7 @@ def plot_multi_pion_vs_q3(
         ax.grid(True)
 
     if title is None:
-        title = (
-            fr"$CCN\pi^\pm$ tagging ($N \geq 1$) - MINERvA Open Data Playlist {playlist}"
-        )
+        title = rf"$CCN\pi^\pm$ tagging ($N \geq 1$) - MINERvA Open Data Playlist {playlist}"
     fig.suptitle(title, fontsize=14)
     return fig
 
@@ -505,7 +562,9 @@ def plot_multi_classification_vs_W(
     if fixed_fpr is None:
         fixed_fpr = DEFAULT_FIXED_FPR
     if (results is None) ^ (signal_classes is None):
-        raise ValueError("results and signal_classes must both be set or both be omitted")
+        raise ValueError(
+            "results and signal_classes must both be set or both be omitted"
+        )
 
     tpr_title = _tpr_column_title_vs_kinematics(use_global_fpr)
     n_cols = 4 if results is not None else 3
@@ -518,19 +577,31 @@ def plot_multi_classification_vs_W(
 
     for model_name, agg in sorted(all_metrics_W.items(), key=lambda kv: kv[0]):
         clr = {} if colors is None else {"color": colors.get(model_name)}
-        _plot_metric_line(axes[0], w_mid, agg["auprc"], model_name, uncertainties, **clr)
-        _plot_metric_line(axes[1], w_mid, agg["auroc"], model_name, uncertainties, **clr)
+        _plot_metric_line(
+            axes[0], w_mid, agg["auprc"], model_name, uncertainties, **clr
+        )
+        _plot_metric_line(
+            axes[1], w_mid, agg["auroc"], model_name, uncertainties, **clr
+        )
         for fpr_val in fixed_fpr:
             key = f"tpr@{fpr_val}"
             _plot_metric_line(
-                axes[2], w_mid, agg[key],
+                axes[2],
+                w_mid,
+                agg[key],
                 _tpr_line_legend_label(model_name, fpr_val, use_global_fpr),
-                uncertainties, **clr,
+                uncertainties,
+                **clr,
             )
 
     if reco_baseline_tpr_W is not None:
         fpr_for_legend = reco_baseline_global_fpr
-        if fpr_for_legend is None and reco_baseline_pred is not None and results is not None and signal_classes is not None:
+        if (
+            fpr_for_legend is None
+            and reco_baseline_pred is not None
+            and results is not None
+            and signal_classes is not None
+        ):
             first_model = next(iter(results))
             y_tb = get_signal_probabilities(
                 results[first_model][0], signal_classes, playlist
@@ -587,9 +658,7 @@ def plot_multi_classification_vs_W(
         _set_xlim_w_metrics(ax_h)
 
     if title is None:
-        title = (
-            fr"$CCN\pi^\pm$ tagging ($N \geq 1$) - MINERvA Open Data Playlist {playlist}"
-        )
+        title = rf"$CCN\pi^\pm$ tagging ($N \geq 1$) - MINERvA Open Data Playlist {playlist}"
     fig.suptitle(title, fontsize=14)
     return fig
 
@@ -654,8 +723,10 @@ def plot_binned_by_inttype(
     y_true_binary = get_signal_probabilities(
         results[first_model][0], signal_classes, playlist
     )["ytrue"]
-    label_for_signal = signal_label if signal_label is not None else _default_signal_label(
-        signal_classes
+    label_for_signal = (
+        signal_label
+        if signal_label is not None
+        else _default_signal_label(signal_classes)
     )
 
     has_pion = data["has_pion"]
@@ -672,7 +743,11 @@ def plot_binned_by_inttype(
     elif x_var == "pion_E":
         hist_var = data["pion_E_MC"]
         bin_edges = data["pion_E_MC_bins"]
-        hist_pion_mask = has_pion if pion_bins_require_has_pion else np.ones(len(hist_var), dtype=bool)
+        hist_pion_mask = (
+            has_pion
+            if pion_bins_require_has_pion
+            else np.ones(len(hist_var), dtype=bool)
+        )
     elif x_var == "pion_theta":
         hist_var = data["pion_theta_MC"]
         bin_edges = data["pion_theta_MC_bins"]
@@ -710,8 +785,14 @@ def plot_binned_by_inttype(
         if n_events == 0:
             for col in range(4):
                 axes[row_idx, col].text(
-                    0.5, 0.5, "No data", transform=axes[row_idx, col].transAxes,
-                    ha="center", va="center", fontsize=14, color="gray",
+                    0.5,
+                    0.5,
+                    "No data",
+                    transform=axes[row_idx, col].transAxes,
+                    ha="center",
+                    va="center",
+                    fontsize=14,
+                    color="gray",
                 )
                 axes[row_idx, col].set_title(f"{int_name} (N=0)")
             if x_var == "W":
@@ -720,9 +801,7 @@ def plot_binned_by_inttype(
             continue
 
         n_signal = int(((y_true_binary == 1) & int_mask).sum())
-        no_signal_msg = (
-            f"No {label_for_signal} signal in this interaction type"
-        )
+        no_signal_msg = f"No {label_for_signal} signal in this interaction type"
 
         if n_signal == 0:
             for col in (0, 1, 2):
@@ -754,7 +833,9 @@ def plot_binned_by_inttype(
             )
             ax_h.set_xlabel(xlabel)
             ax_h.set_ylabel("Events")
-            ax_h.set_title(f"{int_name} (N={n_events:,}) — events (orange = signal, bottom)")
+            ax_h.set_title(
+                f"{int_name} (N={n_events:,}) — events (orange = signal, bottom)"
+            )
             if x_var == "W":
                 _set_xlim_w_metrics(ax_h)
             continue
@@ -783,7 +864,11 @@ def plot_binned_by_inttype(
             )
         elif x_var == "W":
             bl_values = compute_signal_baseline_W(
-                results, data, signal_classes, int_mask, playlist,
+                results,
+                data,
+                signal_classes,
+                int_mask,
+                playlist,
             )
             all_agg = compute_all_metrics_W(
                 results,
@@ -812,18 +897,27 @@ def plot_binned_by_inttype(
             all_agg = {mn: m[sub_key] for mn, m in all_agg_full.items()}
 
         # Random baseline (circle markers like models; dashed + gray to distinguish)
-        axes[row_idx, 0].plot(x_mid, bl_values, "o--", color="gray", label="Random baseline")
+        axes[row_idx, 0].plot(
+            x_mid, bl_values, "o--", color="gray", label="Random baseline"
+        )
 
         for model_name, agg in sorted(all_agg.items(), key=lambda kv: kv[0]):
             clr = {} if colors is None else {"color": colors.get(model_name)}
-            _plot_metric_line(axes[row_idx, 0], x_mid, agg["auprc"], model_name, uncertainties, **clr)
-            _plot_metric_line(axes[row_idx, 1], x_mid, agg["auroc"], model_name, uncertainties, **clr)
+            _plot_metric_line(
+                axes[row_idx, 0], x_mid, agg["auprc"], model_name, uncertainties, **clr
+            )
+            _plot_metric_line(
+                axes[row_idx, 1], x_mid, agg["auroc"], model_name, uncertainties, **clr
+            )
             for fpr_val in fixed_fpr:
                 key = f"tpr@{fpr_val}"
                 _plot_metric_line(
-                    axes[row_idx, 2], x_mid, agg[key],
+                    axes[row_idx, 2],
+                    x_mid,
+                    agg[key],
                     _tpr_line_legend_label(model_name, fpr_val, use_global_fpr),
-                    uncertainties, **clr,
+                    uncertainties,
+                    **clr,
                 )
 
         # Reconstruction baseline on TPR panel
@@ -831,17 +925,24 @@ def plot_binned_by_inttype(
             is_signal_masked = (y_true_binary == 1) & int_mask
             if x_var == "q3":
                 reco_bl = compute_reco_baseline_recall_per_bin(
-                    reco_baseline_pred, is_signal_masked,
-                    data["q3_GeV"], data["q3_bin_edges"],
+                    reco_baseline_pred,
+                    is_signal_masked,
+                    data["q3_GeV"],
+                    data["q3_bin_edges"],
                 )
             elif x_var == "W":
                 reco_bl = compute_reco_baseline_recall_per_bin(
-                    reco_baseline_pred, is_signal_masked,
-                    data["W_GeV"], data["W_bin_edges"],
+                    reco_baseline_pred,
+                    is_signal_masked,
+                    data["W_GeV"],
+                    data["W_bin_edges"],
                 )
             else:
                 var_key = {"pion_E": "pion_E_MC", "pion_theta": "pion_theta_MC"}[x_var]
-                edges_key = {"pion_E": "pion_E_MC_bins", "pion_theta": "pion_theta_MC_bins"}[x_var]
+                edges_key = {
+                    "pion_E": "pion_E_MC_bins",
+                    "pion_theta": "pion_theta_MC_bins",
+                }[x_var]
                 reco_bl = compute_reco_baseline_recall_per_bin(
                     reco_baseline_pred,
                     is_signal_masked,
@@ -850,7 +951,9 @@ def plot_binned_by_inttype(
                     has_pion=data["has_pion"] if pion_bins_require_has_pion else None,
                 )
             # FPR in legend: same interaction-type (and pion/hist) slice as this row's histogram
-            fpr_row = _reco_baseline_fpr_on_mask(reco_baseline_pred, y_true_binary, plot_mask)
+            fpr_row = _reco_baseline_fpr_on_mask(
+                reco_baseline_pred, y_true_binary, plot_mask
+            )
             bl_lbl = _baseline_legend_with_global_fpr(reco_baseline_label, fpr_row)
             axes[row_idx, 2].plot(x_mid, reco_bl, "s--", color="black", label=bl_lbl)
 
@@ -861,7 +964,9 @@ def plot_binned_by_inttype(
             ax.set_xlabel(xlabel)
             ax.set_ylabel(metric)
             if col < 2:
-                ax.set_title(f"{int_name} (N={n_events:,}) — {metric} vs. {xlabel.split('[')[0].strip()}")
+                ax.set_title(
+                    f"{int_name} (N={n_events:,}) — {metric} vs. {xlabel.split('[')[0].strip()}"
+                )
             else:
                 ax.set_title(
                     f"{int_name} (N={n_events:,}) — {tpr_title} vs. {xlabel.split('[')[0].strip()}"
@@ -889,7 +994,9 @@ def plot_binned_by_inttype(
         )
         ax_h.set_xlabel(xlabel)
         ax_h.set_ylabel("Events")
-        ax_h.set_title(f"{int_name} (N={n_events:,}) — events (orange = signal, bottom)")
+        ax_h.set_title(
+            f"{int_name} (N={n_events:,}) — events (orange = signal, bottom)"
+        )
         if x_var == "W":
             _set_xlim_w_metrics(ax_h)
 
@@ -941,7 +1048,11 @@ def plot_event_counts_by_inttype(
     elif x_var == "W":
         kin_mask = np.ones(len(var), dtype=bool)
     elif x_var == "pion_E":
-        kin_mask = data["has_pion"] if pion_bins_require_has_pion else np.ones(len(var), dtype=bool)
+        kin_mask = (
+            data["has_pion"]
+            if pion_bins_require_has_pion
+            else np.ones(len(var), dtype=bool)
+        )
     else:
         kin_mask = data["has_pion"] if pion_bins_require_has_pion else np.isfinite(var)
 
@@ -959,14 +1070,25 @@ def plot_event_counts_by_inttype(
         n_plotted = int(counts.sum())
 
         widths = np.diff(bin_edges)
-        ax.bar(bin_edges[:-1], counts, width=widths, align="edge",
-               edgecolor="black", linewidth=0.5, alpha=0.7)
+        ax.bar(
+            bin_edges[:-1],
+            counts,
+            width=widths,
+            align="edge",
+            edgecolor="black",
+            linewidth=0.5,
+            alpha=0.7,
+        )
 
         for i, c in enumerate(counts):
             if c > 0:
                 ax.text(
-                    bin_edges[i] + widths[i] / 2, c, str(c),
-                    ha="center", va="bottom", fontsize=7,
+                    bin_edges[i] + widths[i] / 2,
+                    c,
+                    str(c),
+                    ha="center",
+                    va="bottom",
+                    fontsize=7,
                 )
 
         ax.set_xlabel(xlabel)
@@ -985,6 +1107,7 @@ def plot_event_counts_by_inttype(
 # ---------------------------------------------------------------------------
 # PRC curves
 # ---------------------------------------------------------------------------
+
 
 def _compute_prc_curves(
     results: dict[str, list[dict]],
@@ -1058,8 +1181,13 @@ def plot_prc_curves(
     fig, axes = plt.subplots(1, 2, figsize=(16, 7), tight_layout=True)
 
     for ax in axes:
-        ax.axhline(signal_frac, color="gray", linestyle="--", linewidth=1,
-                    label="Random baseline")
+        ax.axhline(
+            signal_frac,
+            color="gray",
+            linestyle="--",
+            linewidth=1,
+            label="Random baseline",
+        )
 
     for model_name, c in sorted(curves.items(), key=lambda kv: kv[0]):
         rec = c["recall"]
@@ -1080,7 +1208,7 @@ def plot_prc_curves(
             else:
                 r, p, s = rec, prec_mean, prec_std
 
-            line, = ax.plot(r, p, "-", label=label, **clr)
+            (line,) = ax.plot(r, p, "-", label=label, **clr)
             if uncertainties:
                 ax.fill_between(r, p - s, p + s, alpha=0.2, color=line.get_color())
 
@@ -1093,7 +1221,7 @@ def plot_prc_curves(
         ax.set_xlim(0, 1)
         if scale == "log":
             ax.set_yscale("log")
-            #ax.set_xscale("log")
+            # ax.set_xscale("log")
             ax.set_ylim(bottom=signal_frac * 0.5, top=1.05)
         else:
             ax.set_ylim(0, 1)
@@ -1104,13 +1232,14 @@ def plot_prc_curves(
 # Multi-figure PDF export
 # ---------------------------------------------------------------------------
 
+
 def save_figures_to_pdf(figures: list[plt.Figure], path: str | Path) -> None:
     """Save a list of matplotlib figures into a single multi-page PDF."""
     from matplotlib.backends.backend_pdf import PdfPages
+
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with PdfPages(path) as pdf:
         for fig in figures:
             pdf.savefig(fig, bbox_inches="tight")
     print(f"Saved {len(figures)} page(s) to {path}")
-

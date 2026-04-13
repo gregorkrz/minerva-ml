@@ -34,7 +34,11 @@ from src.eval._constants import (
     EVAL_DATA_SUBDIR,
     repo_output_path,
 )
-from src.eval.classification_plots import CLASSIFICATION_PERFORMANCE_LEGEND_TITLE
+from src.eval.classification_plots import (
+    CLASSIFICATION_PERFORMANCE_LEGEND_TITLE,
+    DEFAULT_FIXED_FPR,
+    get_signal_probabilities,
+)
 
 
 def _pickle_path(out_dir: Path, flag: str) -> Path:
@@ -68,6 +72,16 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--classification-pickle", type=Path, default=None)
     args = ap.parse_args(argv)
 
+    # Random / uninformative score (independent of label): ROC is the diagonal, so
+    # TPR on signal equals FPR on background at the same threshold; fixing FPR=α
+    # implies TPR=α in expectation (“perturb positives at random” → no extra skill).
+    print(
+        "Random baseline TPR/FPR: for scores independent of truth (same notion as "
+        "the gray “Random baseline” in AUPRC), expected TPR equals FPR at every "
+        "operating point. Fixed-FPR targets used in these figures: "
+        f"{list(DEFAULT_FIXED_FPR)!r} → random TPR equals each target FPR."
+    )
+
     data_root = repo_output_path(_REPO_ROOT, Path(args.out_dir or DEFAULT_OUT_DIR))
     plots_root = repo_output_path(_REPO_ROOT, args.plots_dir)
     light_dir = plots_root / "classification" / "light"
@@ -89,6 +103,20 @@ def main(argv: list[str] | None = None) -> None:
         components = ("q3",)
     else:
         components = ("pion",)
+
+    first_model = next(iter(results))
+    run0 = results[first_model][0]
+    for playlist in playlists:
+        bits: list[str] = []
+        if "pion" in components:
+            for name, classes in (("CC1π±", [0]), ("CCπ⁰", [2])):
+                y = get_signal_probabilities(run0, classes, playlist)["ytrue"]
+                bits.append(f"{name} P(signal)={float(y.mean()):.6g} (n={len(y):,})")
+        if "q3" in components:
+            y = get_signal_probabilities(run0, [0, 1], playlist)["ytrue"]
+            bits.append(f"CCNπ P(signal)={float(y.mean()):.6g} (n={len(y):,})")
+        if bits:
+            print(f"Playlist {playlist} — overall signal fraction: " + "; ".join(bits))
 
     save_light_classification_pdfs(
         light_dir,

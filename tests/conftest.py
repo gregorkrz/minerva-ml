@@ -31,7 +31,9 @@ def synthetic_data_dir(tmp_path_factory):
         truth_labels[:, 0] = torch.FloatTensor(n_events).uniform_(1000, 10000)
         int_types = torch.tensor([1, 2, 3, 4, 8])
         truth_labels[:, 1] = int_types[torch.randint(0, 5, (n_events,))].float()
-        truth_labels[:, 3] = torch.tensor([1, 2])[torch.randint(0, 2, (n_events,))].float()
+        truth_labels[:, 3] = torch.tensor([1, 2])[
+            torch.randint(0, 2, (n_events,))
+        ].float()
         truth_labels[:, 5] = torch.randint(0, 3, (n_events,)).float()
         truth_labels[:, 6] = torch.randint(0, 3, (n_events,)).float()
         truth_labels[:, 8] = torch.FloatTensor(n_events).uniform_(0, 5000)
@@ -41,7 +43,11 @@ def synthetic_data_dir(tmp_path_factory):
         global_features = torch.randn(n_events, 16)
 
         torch.save(
-            {"data": data, "truth_labels": truth_labels, "global_features": global_features},
+            {
+                "data": data,
+                "truth_labels": truth_labels,
+                "global_features": global_features,
+            },
             split_dir / "0.pb",
         )
 

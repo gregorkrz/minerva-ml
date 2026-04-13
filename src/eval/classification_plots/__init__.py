@@ -63,7 +63,10 @@ from ._plotting import (
     plot_prc_curves,
     save_figures_to_pdf,
 )
-from ._reco_baseline import compute_reco_baseline_fpr_per_bin, compute_reco_baseline_recall_per_bin
+from ._reco_baseline import (
+    compute_reco_baseline_fpr_per_bin,
+    compute_reco_baseline_recall_per_bin,
+)
 
 __all__ = [
     "CLASSIFICATION_PERFORMANCE_LEGEND_TITLE",

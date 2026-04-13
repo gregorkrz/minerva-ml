@@ -26,7 +26,19 @@ def get_env_vars():
     return env_commands
 
 
-def generate_cmd(data_cap=-1, seed=42, task="regression", model="Transformer1", bs=2048, max_steps=250000, grad_accum_steps=1, continue_from="", resume_run_id="", resume_run_name="", model_n_layers=4):
+def generate_cmd(
+    data_cap=-1,
+    seed=42,
+    task="regression",
+    model="Transformer1",
+    bs=2048,
+    max_steps=250000,
+    grad_accum_steps=1,
+    continue_from="",
+    resume_run_id="",
+    resume_run_name="",
+    model_n_layers=4,
+):
     if continue_from:
         base = f"python -m src.scripts.train --resume {continue_from} -name {resume_run_name} --resume-run-id {resume_run_id} --max_steps 1000000"
         return base.format(continue_from=continue_from)
@@ -58,9 +70,15 @@ def generate_cmd(data_cap=-1, seed=42, task="regression", model="Transformer1", 
     elif model == "BERT-tiny":
         name = f"Run_1703_BERT_tiny_{task}_{data_cap}_seed{seed}"
         extra = " --use-bert tiny --zero-cond-feature 2 "
-    elif model in ("Transformer1", "Transformer1NR", "Transformer2", "Transformer3", "Transformer3NR"):
+    elif model in (
+        "Transformer1",
+        "Transformer1NR",
+        "Transformer2",
+        "Transformer3",
+        "Transformer3NR",
+    ):
         name = f"Run_1703_{task}_{model}_data_cap_{data_cap}_seed_{seed}"
-        #extra = " --zero-cond-feature 2 "
+        # extra = " --zero-cond-feature 2 "
         extra = ""
         if model == "Transformer1NR":
             extra = " --zero-cond-feature 2 "
@@ -80,12 +98,27 @@ def generate_cmd(data_cap=-1, seed=42, task="regression", model="Transformer1", 
     else:
         raise ValueError(f"Invalid model: {model}")
     cap = f" -cap {data_cap} " if data_cap > 0 else ""
-    return base.format(bs=bs, task=task, detailed_task=detailed_task, name=name, cap=cap, seed=seed, max_steps=max_steps, extra=extra, grad_accum_steps=grad_accum_steps,
-    model_dim=model_dim, model_depth=model_depth, model_n_heads=model_n_heads, model_dropout=model_dropout, model_attn_dropout=model_attn_dropout, model_n_layers=model_n_layers)
+    return base.format(
+        bs=bs,
+        task=task,
+        detailed_task=detailed_task,
+        name=name,
+        cap=cap,
+        seed=seed,
+        max_steps=max_steps,
+        extra=extra,
+        grad_accum_steps=grad_accum_steps,
+        model_dim=model_dim,
+        model_depth=model_depth,
+        model_n_heads=model_n_heads,
+        model_dropout=model_dropout,
+        model_attn_dropout=model_attn_dropout,
+        model_n_layers=model_n_layers,
+    )
 
 
 def get_cmds_and_slurm_times():
-    times_data_cap = { # for 20k: for OLS_RW 100 minutes, for the rest OLS 50 minutes
+    times_data_cap = {  # for 20k: for OLS_RW 100 minutes, for the rest OLS 50 minutes
         "20000": {
             "OLS_RW": "01:30:00",
             "OLS": "00:50:00",
@@ -93,7 +126,7 @@ def get_cmds_and_slurm_times():
             "OLM_FB": "00:50:00",
             "BERT-tiny": "00:50:00",
             "Transformer1": "00:20:00",
-            "Transformer1NR": "00:20:00"
+            "Transformer1NR": "00:20:00",
         },
         "50000": {
             "OLS_RW": "03:00:00",
@@ -104,7 +137,7 @@ def get_cmds_and_slurm_times():
             "Transformer1": "00:20:00",
             "Transformer1NR": "00:20:00",
         },
-        "100000":{
+        "100000": {
             "OLS_RW": "04:00:00",
             "Transformer1": "00:20:00",
             "Transformer1NR": "00:20:00",
@@ -121,7 +154,7 @@ def get_cmds_and_slurm_times():
             "BERT-tiny": "01:30:00",
             "Transformer1": "00:20:00",
             "Transformer1NR": "00:20:00",
-        }
+        },
     }
     cmds = []
     slurm_times = []
@@ -169,13 +202,22 @@ def get_cmds_and_slurm_times():
                         "regression": 500000,
                         "classifier": 500000,
                     }
-                    cmd = generate_cmd(data_cap=data_cap, seed=seed, task=task, model=model, max_steps=max_steps[task], bs=bs, grad_accum_steps=grad_accum_steps)
+                    cmd = generate_cmd(
+                        data_cap=data_cap,
+                        seed=seed,
+                        task=task,
+                        model=model,
+                        max_steps=max_steps[task],
+                        bs=bs,
+                        grad_accum_steps=grad_accum_steps,
+                    )
                     cmds.append(cmd)
     return cmds, slurm_times
 
+
 def get_cmds_and_slurm_times_continue():
     # Use this to continue runs that were cut short. TODO: change run names and wandb IDs
-    '''to_resume = [
+    """to_resume = [
         "Run_1703_OLM_regression_-1_seed50_20260328_115708",
         "Run_1703_OLS_RW_regression_-1_seed50_20260327_174607"
     ]
@@ -186,13 +228,22 @@ def get_cmds_and_slurm_times_continue():
     run_ids = [
         "ofpk105k",
         "rd9azt5b"
-    ]'''
+    ]"""
     to_resume = [
-        "Run_1703_OLM_classifier_-1_seed51_20260331_151803","Run_1703_OLS_RW_classifier_-1_seed50_20260329_201841", "Run_1703_OLM_classifier_-1_seed50_20260330_172545",
-        "Run_1703_OLS_RW_regression_-1_seed51_20260330_201339", "Run_1703_OLM_regression_-1_seed51_20260330_220131", "Run_1703_OLS_RW_classifier_-1_seed51_20260330_234443",
-        "Run_1703_OLS_RW_regression_-1_seed52_20260330_235131", "Run_1703_OLS_RW_classifier_-1_seed52_20260331_014742", "Run_1703_OLS_RW_regression_-1_seed53_20260331_022931",
-        "Run_1703_OLM_classifier_-1_seed51_20260331_151803", "Run_1703_OLM_regression_-1_seed52_20260331_164052", "Run_1703_OLM_classifier_-1_seed52_20260401_010518",
-        "Run_1703_OLM_regression_-1_seed53_20260401_033613", "Run_1703_OLS_RW_classifier_-1_seed53_20260401_050053"
+        "Run_1703_OLM_classifier_-1_seed51_20260331_151803",
+        "Run_1703_OLS_RW_classifier_-1_seed50_20260329_201841",
+        "Run_1703_OLM_classifier_-1_seed50_20260330_172545",
+        "Run_1703_OLS_RW_regression_-1_seed51_20260330_201339",
+        "Run_1703_OLM_regression_-1_seed51_20260330_220131",
+        "Run_1703_OLS_RW_classifier_-1_seed51_20260330_234443",
+        "Run_1703_OLS_RW_regression_-1_seed52_20260330_235131",
+        "Run_1703_OLS_RW_classifier_-1_seed52_20260331_014742",
+        "Run_1703_OLS_RW_regression_-1_seed53_20260331_022931",
+        "Run_1703_OLM_classifier_-1_seed51_20260331_151803",
+        "Run_1703_OLM_regression_-1_seed52_20260331_164052",
+        "Run_1703_OLM_classifier_-1_seed52_20260401_010518",
+        "Run_1703_OLM_regression_-1_seed53_20260401_033613",
+        "Run_1703_OLS_RW_classifier_-1_seed53_20260401_050053",
     ]
     names = [
         "Run_1703_OLM_classifier_-1_seed51",
@@ -211,15 +262,29 @@ def get_cmds_and_slurm_times_continue():
         "Run_1703_OLS_RW_classifier_-1_seed53",
     ]
     run_ids = [
-        "kdzhg3i3", "kdzhg3i3", "qwmm0fhb", "3vpr9i0q", "3vpr9i0q", "u5zspjc5", "jrb9mx10",
-        "vyb2ys44", "j1fg2w1i", "kdzhg3i3", "45tqa47o", "k6dp4wc1", "2n7dxql3", "fgarftde"
+        "kdzhg3i3",
+        "kdzhg3i3",
+        "qwmm0fhb",
+        "3vpr9i0q",
+        "3vpr9i0q",
+        "u5zspjc5",
+        "jrb9mx10",
+        "vyb2ys44",
+        "j1fg2w1i",
+        "kdzhg3i3",
+        "45tqa47o",
+        "k6dp4wc1",
+        "2n7dxql3",
+        "fgarftde",
     ]
     CKPT_DIR = "/global/cfs/cdirs/m3246/gregork/checkpoints"
     cmds = []
     slurm_times = []
     for i, ckpt in enumerate(to_resume):
         ckpt_path = os.path.join(CKPT_DIR, ckpt, "best_model.pt")
-        cmd = generate_cmd(continue_from=ckpt_path, resume_run_name=names[i], resume_run_id=run_ids[i])
+        cmd = generate_cmd(
+            continue_from=ckpt_path, resume_run_name=names[i], resume_run_id=run_ids[i]
+        )
         cmds.append(cmd)
         slurm_times.append("12:00:00")
     return cmds, slurm_times
@@ -231,25 +296,30 @@ if __name__ == "__main__":
     cmds, slurm_times = get_cmds_and_slurm_times()
     for i, cmd in enumerate(cmds):
         job_name = f"run_{i}_{dt.now().strftime('%Y%m%d_%H%M%S')}"
-        log_dir = f"/global/cfs/cdirs/m3246/gregork/Minerva/logs/run_100326/{job_name}.log"
+        log_dir = (
+            f"/global/cfs/cdirs/m3246/gregork/Minerva/logs/run_100326/{job_name}.log"
+        )
         error_dir = f"/global/cfs/cdirs/m3246/gregork/Minerva/logs/run_100326/{job_name}.error.log"
-        slurm_file = f"/global/cfs/cdirs/m3246/gregork/Minerva/slurm/run_100326/{job_name}.slurm"
+        slurm_file = (
+            f"/global/cfs/cdirs/m3246/gregork/Minerva/slurm/run_100326/{job_name}.slurm"
+        )
         os.makedirs(os.path.dirname(slurm_file), exist_ok=True)
         os.makedirs(os.path.dirname(log_dir), exist_ok=True)
         with open(slurm_file, "w") as f:
-            f.write(SLURM_TEMPLATE_GPU.format(
-                queue_name="shared",
-                time=slurm_times[i],
-                cpus_per_task=32,
-                gpus_per_node=1,
-                job_name=job_name,
-                log_dir=log_dir,
-                error_dir=error_dir,
-                commands=cmd,
-                env_vars=get_env_vars(),
-                container_image=CONTAINER_IMAGE,
-                ))
+            f.write(
+                SLURM_TEMPLATE_GPU.format(
+                    queue_name="shared",
+                    time=slurm_times[i],
+                    cpus_per_task=32,
+                    gpus_per_node=1,
+                    job_name=job_name,
+                    log_dir=log_dir,
+                    error_dir=error_dir,
+                    commands=cmd,
+                    env_vars=get_env_vars(),
+                    container_image=CONTAINER_IMAGE,
+                )
+            )
         print(f"Saved slurm file to {slurm_file}")
         os.system(f"sbatch {slurm_file}")
         print("Job submitted")
-

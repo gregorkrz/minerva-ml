@@ -105,7 +105,9 @@ def _figure_metrics_1x3(
 ) -> plt.Figure:
     """One row: AUPRC | AUROC | TPR vs a common *x* (global FPR only)."""
     fig, axes = plt.subplots(1, 3, figsize=(14.5, 4.6), constrained_layout=True)
-    axes[0].plot(x, baseline_auprc, "o--", color="gray", label="Random baseline", zorder=1)
+    axes[0].plot(
+        x, baseline_auprc, "o--", color="gray", label="Random baseline", zorder=1
+    )
 
     for model_name, agg in sorted(all_metrics.items(), key=lambda kv: kv[0]):
         clr = {"color": colors.get(model_name, "tab:gray")}
@@ -118,7 +120,8 @@ def _figure_metrics_1x3(
 
     bl_lbl = (
         _baseline_legend_with_global_fpr(reco_label, reco_baseline_global_fpr)
-        if reco_baseline_global_fpr is not None and np.isfinite(reco_baseline_global_fpr)
+        if reco_baseline_global_fpr is not None
+        and np.isfinite(reco_baseline_global_fpr)
         else reco_label
     )
     axes[2].plot(x, reco_baseline_tpr, "s--", color="black", label=bl_lbl, zorder=2)
@@ -152,8 +155,12 @@ def _figure_metrics_2x3_pion(
     """Two rows: pion *E* (top) and *θ* (bottom); matches ``plot_cc1pi_vs_pion_kinematics`` (3-col part)."""
     fig, axes = plt.subplots(2, 3, figsize=(14.5, 8.0), constrained_layout=True)
 
-    axes[0, 0].plot(x_E, baseline_E, "o--", color="gray", label="Random baseline", zorder=1)
-    axes[1, 0].plot(x_theta, baseline_theta, "o--", color="gray", label="Random baseline", zorder=1)
+    axes[0, 0].plot(
+        x_E, baseline_E, "o--", color="gray", label="Random baseline", zorder=1
+    )
+    axes[1, 0].plot(
+        x_theta, baseline_theta, "o--", color="gray", label="Random baseline", zorder=1
+    )
 
     for model_name, m in sorted(all_metrics.items(), key=lambda kv: kv[0]):
         clr = {"color": colors.get(model_name, "tab:gray")}
@@ -170,7 +177,9 @@ def _figure_metrics_2x3_pion(
 
     bl_lbl = _baseline_legend_with_global_fpr(reco_label, reco_baseline_global_fpr)
     axes[0, 2].plot(x_E, reco_tpr_E, "s--", color="black", label=bl_lbl, zorder=2)
-    axes[1, 2].plot(x_theta, reco_tpr_theta, "s--", color="black", label=bl_lbl, zorder=2)
+    axes[1, 2].plot(
+        x_theta, reco_tpr_theta, "s--", color="black", label=bl_lbl, zorder=2
+    )
 
     for col, metric in enumerate(_COL_LABELS):
         ax0 = axes[0, col]
@@ -238,22 +247,34 @@ def save_light_classification_pdfs(
                     return
                 fpr = [baseline_fpr]
                 data_sp = data_with_signal_pion_bins(
-                    data, pid, signal_classes,
+                    data,
+                    pid,
+                    signal_classes,
                     pion_quantile_require_has_pion=False,
                     pion_bin_edge_method="equal_frequency",
                 )
 
                 metrics_q3 = compute_all_metrics_q3(
-                    results, data, signal_classes=signal_classes, fixed_fpr=fpr, playlist=playlist,
+                    results,
+                    data,
+                    signal_classes=signal_classes,
+                    fixed_fpr=fpr,
+                    playlist=playlist,
                 )
                 bl_q3 = compute_signal_baseline(
-                    results, data, signal_classes=signal_classes, playlist=playlist,
+                    results,
+                    data,
+                    signal_classes=signal_classes,
+                    playlist=playlist,
                     pion_bins_require_has_pion=False,
                 )["q3"]
                 y_true = np.isin(pid, signal_classes).astype(int)
                 is_signal = y_true == 1
                 reco_q3 = compute_reco_baseline_recall_per_bin(
-                    y_pred, is_signal, data["q3_GeV"], data["q3_bin_edges"],
+                    y_pred,
+                    is_signal,
+                    data["q3_GeV"],
+                    data["q3_bin_edges"],
                 )
                 x_q3 = data["q3_bin_mids"]
                 fig = _figure_metrics_1x3(
@@ -268,7 +289,9 @@ def save_light_classification_pdfs(
                     log_x=False,
                     reco_baseline_global_fpr=baseline_fpr,
                 )
-                _save_single_fig(fig, out_dir / f"eval_classification_light_{tag}_q3_{playlist}.pdf")
+                _save_single_fig(
+                    fig, out_dir / f"eval_classification_light_{tag}_q3_{playlist}.pdf"
+                )
 
                 if data_w is not None:
                     metrics_W = compute_all_metrics_W(
@@ -280,10 +303,16 @@ def save_light_classification_pdfs(
                         use_global_fpr=True,
                     )
                     bl_W = compute_signal_baseline_W(
-                        results, data_w, signal_classes=signal_classes, playlist=playlist,
+                        results,
+                        data_w,
+                        signal_classes=signal_classes,
+                        playlist=playlist,
                     )
                     reco_W = compute_reco_baseline_recall_per_bin(
-                        y_pred, is_signal, data_w["W_GeV"], data_w["W_bin_edges"],
+                        y_pred,
+                        is_signal,
+                        data_w["W_GeV"],
+                        data_w["W_bin_edges"],
                     )
                     x_W = data_w["W_bin_mids"]
                     fig_w = _figure_metrics_1x3(
@@ -298,24 +327,39 @@ def save_light_classification_pdfs(
                         log_x=False,
                         reco_baseline_global_fpr=baseline_fpr,
                     )
-                    _save_single_fig(fig_w, out_dir / f"eval_classification_light_{tag}_W_{playlist}.pdf")
+                    _save_single_fig(
+                        fig_w,
+                        out_dir / f"eval_classification_light_{tag}_W_{playlist}.pdf",
+                    )
                 metrics_pion = compute_all_metrics(
-                    results, data_sp, signal_classes=signal_classes,
-                    fixed_fpr=fpr, playlist=playlist,
+                    results,
+                    data_sp,
+                    signal_classes=signal_classes,
+                    fixed_fpr=fpr,
+                    playlist=playlist,
                     pion_bins_require_has_pion=False,
                 )
                 bl = compute_signal_baseline(
-                    results, data_sp, signal_classes=signal_classes, playlist=playlist,
+                    results,
+                    data_sp,
+                    signal_classes=signal_classes,
+                    playlist=playlist,
                     pion_bins_require_has_pion=False,
                 )
                 reco_E = compute_reco_baseline_recall_per_bin(
-                    y_pred, is_signal,
-                    data_sp["pion_E_MC"], data_sp["pion_E_MC_bins"], has_pion=None,
+                    y_pred,
+                    is_signal,
+                    data_sp["pion_E_MC"],
+                    data_sp["pion_E_MC_bins"],
+                    has_pion=None,
                 )
                 reco_th = compute_reco_baseline_recall_per_bin(
-                    y_pred, is_signal,
-                    data_sp["pion_theta_MC"], data_sp["pion_theta_MC_bins"],
-                    has_pion=None, finite_bin_var=True,
+                    y_pred,
+                    is_signal,
+                    data_sp["pion_theta_MC"],
+                    data_sp["pion_theta_MC_bins"],
+                    has_pion=None,
+                    finite_bin_var=True,
                 )
                 x_E = data_sp["pion_E_MC_bins_mid"]
                 x_th = data_sp["pion_theta_MC_bins_mid"]
@@ -332,7 +376,11 @@ def save_light_classification_pdfs(
                     baseline_fpr,
                     clrs_dict_full,
                 )
-                _save_single_fig(fig_p, out_dir / f"eval_classification_light_{tag}_pion_kinematics_{playlist}.pdf")
+                _save_single_fig(
+                    fig_p,
+                    out_dir
+                    / f"eval_classification_light_{tag}_pion_kinematics_{playlist}.pdf",
+                )
 
             # --- CC1π± ---
             y_true_cc1pi = np.isin(pid, cc1pi_classes).astype(int)
@@ -356,7 +404,8 @@ def save_light_classification_pdfs(
             n_michel = baselines_pl["improved_nmichel"][test_idx]
             y_true_pi0 = np.isin(pid, cc1pi0_classes).astype(int)
             y_pred_pi0 = (
-                (n_muons == 1) & (is_pizero_signal == 2)
+                (n_muons == 1)
+                & (is_pizero_signal == 2)
                 & (np.abs(two_gamma_inv_mass - PI0_MASS) < DELTA_M)
                 & (n_michel == 0)
             ).astype(int)
@@ -382,15 +431,25 @@ def save_light_classification_pdfs(
                 fpr_n = [baseline_fpr_ccnpi]
 
                 metrics_q3 = compute_all_metrics_q3(
-                    results, data, signal_classes=multi_pi_classes, fixed_fpr=fpr_n, playlist=playlist,
+                    results,
+                    data,
+                    signal_classes=multi_pi_classes,
+                    fixed_fpr=fpr_n,
+                    playlist=playlist,
                 )
                 bl_q3 = compute_signal_baseline(
-                    results, data, signal_classes=multi_pi_classes, playlist=playlist,
+                    results,
+                    data,
+                    signal_classes=multi_pi_classes,
+                    playlist=playlist,
                     pion_bins_require_has_pion=False,
                 )["q3"]
                 is_signal_ccnpi = y_true_ccnpi == 1
                 reco_q3 = compute_reco_baseline_recall_per_bin(
-                    y_pred_ccnpi, is_signal_ccnpi, data["q3_GeV"], data["q3_bin_edges"],
+                    y_pred_ccnpi,
+                    is_signal_ccnpi,
+                    data["q3_GeV"],
+                    data["q3_bin_edges"],
                 )
                 fig_n = _figure_metrics_1x3(
                     metrics_q3,
@@ -404,7 +463,10 @@ def save_light_classification_pdfs(
                     log_x=False,
                     reco_baseline_global_fpr=baseline_fpr_ccnpi,
                 )
-                _save_single_fig(fig_n, out_dir / f"eval_classification_light_ccnpi_q3_{playlist}.pdf")
+                _save_single_fig(
+                    fig_n,
+                    out_dir / f"eval_classification_light_ccnpi_q3_{playlist}.pdf",
+                )
 
                 if data_w is not None:
                     metrics_W = compute_all_metrics_W(
@@ -416,10 +478,16 @@ def save_light_classification_pdfs(
                         use_global_fpr=True,
                     )
                     bl_W = compute_signal_baseline_W(
-                        results, data_w, signal_classes=multi_pi_classes, playlist=playlist,
+                        results,
+                        data_w,
+                        signal_classes=multi_pi_classes,
+                        playlist=playlist,
                     )
                     reco_W = compute_reco_baseline_recall_per_bin(
-                        y_pred_ccnpi, is_signal_ccnpi, data_w["W_GeV"], data_w["W_bin_edges"],
+                        y_pred_ccnpi,
+                        is_signal_ccnpi,
+                        data_w["W_GeV"],
+                        data_w["W_bin_edges"],
                     )
                     fig_w = _figure_metrics_1x3(
                         metrics_W,
@@ -433,7 +501,10 @@ def save_light_classification_pdfs(
                         log_x=False,
                         reco_baseline_global_fpr=baseline_fpr_ccnpi,
                     )
-                    _save_single_fig(fig_w, out_dir / f"eval_classification_light_ccnpi_W_{playlist}.pdf")
+                    _save_single_fig(
+                        fig_w,
+                        out_dir / f"eval_classification_light_ccnpi_W_{playlist}.pdf",
+                    )
 
 
 # --- Legacy notebook helpers (multi-panel counts / TPR); not used by ``save_light_classification_pdfs``. ---
@@ -450,7 +521,9 @@ def per_bin_total_and_signal(
 
     n_tot, n_sig = [], []
     for i in range(len(bin_edges) - 1):
-        bm = mc_value_in_bin(bin_var, bin_edges, i, require_finite=require_finite_bin_var)
+        bm = mc_value_in_bin(
+            bin_var, bin_edges, i, require_finite=require_finite_bin_var
+        )
         if has_pion is not None:
             bm = bm & has_pion
         n_tot.append(int(bm.sum()))
@@ -492,18 +565,33 @@ def plot_histogram_counts(
     w = np.diff(edges)
     x0 = edges[:-1]
     ax.bar(
-        x0, n_tot, width=w, align="edge", color=COLOR_N_TOTAL, alpha=HIST_ALPHA_TOTAL,
-        edgecolor=HIST_EDGE, linewidth=HIST_EDGELINE,
+        x0,
+        n_tot,
+        width=w,
+        align="edge",
+        color=COLOR_N_TOTAL,
+        alpha=HIST_ALPHA_TOTAL,
+        edgecolor=HIST_EDGE,
+        linewidth=HIST_EDGELINE,
         label=r"$N_{\mathrm{in\,bin}}$ (all classes)",
     )
     ax.bar(
-        x0, n_sig, width=w, align="edge", color=COLOR_N_SIGNAL, alpha=HIST_ALPHA_SIGNAL,
-        edgecolor=HIST_EDGE, linewidth=HIST_EDGELINE,
+        x0,
+        n_sig,
+        width=w,
+        align="edge",
+        color=COLOR_N_SIGNAL,
+        alpha=HIST_ALPHA_SIGNAL,
+        edgecolor=HIST_EDGE,
+        linewidth=HIST_EDGELINE,
         label=r"$N_{\mathrm{signal\,in\,bin}}$",
     )
     if n_bg_global is not None and n_bg_global > 0:
         ax.axhline(
-            n_bg_global, color="#424242", linestyle="--", linewidth=1.4,
+            n_bg_global,
+            color="#424242",
+            linestyle="--",
+            linewidth=1.4,
             label=rf"$N_{{\mathrm{{bkg}}}}^{{\mathrm{{glob}}}} = {n_bg_global}$ (ROC negatives)",
         )
     if log_x:
@@ -575,16 +663,28 @@ def plot_tpr_fixed_fpr_two_panel(
         for fpr_val in fixed_fpr:
             key = f"tpr@{fpr_val}"
             _plot_metric_line(
-                ax_l, x_left, model_metrics[left_key][key],
-                f"{model_name} (FPR={fpr_val:.0%})", True, **clr,
+                ax_l,
+                x_left,
+                model_metrics[left_key][key],
+                f"{model_name} (FPR={fpr_val:.0%})",
+                True,
+                **clr,
             )
             _plot_metric_line(
-                ax_r, x_right, model_metrics[right_key][key],
-                f"{model_name} (FPR={fpr_val:.0%})", True, **clr,
+                ax_r,
+                x_right,
+                model_metrics[right_key][key],
+                f"{model_name} (FPR={fpr_val:.0%})",
+                True,
+                **clr,
             )
 
-    ax_l.plot(x_left, reco_baseline_tpr[left_key], "s--", color="black", label=reco_label)
-    ax_r.plot(x_right, reco_baseline_tpr[right_key], "s--", color="black", label=reco_label)
+    ax_l.plot(
+        x_left, reco_baseline_tpr[left_key], "s--", color="black", label=reco_label
+    )
+    ax_r.plot(
+        x_right, reco_baseline_tpr[right_key], "s--", color="black", label=reco_label
+    )
 
     ax_l.set_xlabel(x_label_left)
     ax_r.set_xlabel(x_label_right)
@@ -630,27 +730,51 @@ def plot_counts_sb_two_panel(
     if n_bg_global is not None:
         sb_l = sb_ratio_vs_global_bkg(n_sig_l, n_bg_global)
         sb_r = sb_ratio_vs_global_bkg(n_sig_r, n_bg_global)
-        sb_title = r"$S/B$ with $B = N_{\mathrm{bkg}}^{\mathrm{glob}}$ (all non-signal, ROC)"
+        sb_title = (
+            r"$S/B$ with $B = N_{\mathrm{bkg}}^{\mathrm{glob}}$ (all non-signal, ROC)"
+        )
     else:
         sb_l = sb_ratio(n_tot_l, n_sig_l)
         sb_r = sb_ratio(n_tot_r, n_sig_r)
         sb_title = None
 
     plot_histogram_counts(
-        axes[0, 0], bin_edges_left, n_tot_l, n_sig_l, x_label_left,
-        log_x=log_x_left, leg_title=leg_title, n_bg_global=n_bg_global,
+        axes[0, 0],
+        bin_edges_left,
+        n_tot_l,
+        n_sig_l,
+        x_label_left,
+        log_x=log_x_left,
+        leg_title=leg_title,
+        n_bg_global=n_bg_global,
     )
     plot_sb_stairs(
-        axes[0, 1], bin_edges_left, sb_l, x_label_left,
-        log_x=log_x_left, leg_title=leg_title, y_title=sb_title,
+        axes[0, 1],
+        bin_edges_left,
+        sb_l,
+        x_label_left,
+        log_x=log_x_left,
+        leg_title=leg_title,
+        y_title=sb_title,
     )
     plot_histogram_counts(
-        axes[1, 0], bin_edges_right, n_tot_r, n_sig_r, x_label_right,
-        log_x=False, leg_title=leg_title, n_bg_global=n_bg_global,
+        axes[1, 0],
+        bin_edges_right,
+        n_tot_r,
+        n_sig_r,
+        x_label_right,
+        log_x=False,
+        leg_title=leg_title,
+        n_bg_global=n_bg_global,
     )
     plot_sb_stairs(
-        axes[1, 1], bin_edges_right, sb_r, x_label_right,
-        log_x=False, leg_title=leg_title, y_title=sb_title,
+        axes[1, 1],
+        bin_edges_right,
+        sb_r,
+        x_label_right,
+        log_x=False,
+        leg_title=leg_title,
+        y_title=sb_title,
     )
 
     fig.suptitle(title, fontsize=14)

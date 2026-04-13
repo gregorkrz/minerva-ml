@@ -1,4 +1,5 @@
 """Per-bin classification metrics (AUPRC, AUROC, TPR@FPR)."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -8,6 +9,7 @@ import numpy as np
 from sklearn.metrics import auc, precision_recall_curve, roc_curve
 
 from ._constants import DEFAULT_FIXED_FPR, _global_score_thresholds_at_target_fprs
+
 
 def mc_value_in_bin(
     x: np.ndarray,
@@ -324,24 +326,31 @@ def compute_binned_metrics_q3(
             tpr_at_fpr = {}
             for target_fpr in fixed_fpr:
                 if use_global_fpr:
-                    t_cut = global_thr_map.get(target_fpr, float("nan")) if global_thr_map else float("nan")
+                    t_cut = (
+                        global_thr_map.get(target_fpr, float("nan"))
+                        if global_thr_map
+                        else float("nan")
+                    )
                     if np.isnan(t_cut):
                         tpr_at_fpr[target_fpr] = float("nan")
                     else:
                         sig_mask = y_bin == 1
                         tpr_at_fpr[target_fpr] = float(
-                            ((p_bin >= t_cut) & sig_mask).sum() / max(int(sig_mask.sum()), 1)
+                            ((p_bin >= t_cut) & sig_mask).sum()
+                            / max(int(sig_mask.sum()), 1)
                         )
                 else:
                     idx = int(np.searchsorted(fpr_arr, target_fpr, side="right") - 1)
                     idx = max(0, min(idx, len(tpr_arr) - 1))
                     tpr_at_fpr[target_fpr] = float(tpr_arr[idx])
-            metrics.append({
-                "auprc": auprc_val,
-                "auroc": auroc_val,
-                "n_signal": int(n_sig),
-                "tpr_at_fpr": tpr_at_fpr,
-            })
+            metrics.append(
+                {
+                    "auprc": auprc_val,
+                    "auroc": auroc_val,
+                    "n_signal": int(n_sig),
+                    "tpr_at_fpr": tpr_at_fpr,
+                }
+            )
     return metrics
 
 
@@ -403,30 +412,38 @@ def compute_binned_metrics_W(
             tpr_at_fpr = {}
             for target_fpr in fixed_fpr:
                 if use_global_fpr:
-                    t_cut = global_thr_map.get(target_fpr, float("nan")) if global_thr_map else float("nan")
+                    t_cut = (
+                        global_thr_map.get(target_fpr, float("nan"))
+                        if global_thr_map
+                        else float("nan")
+                    )
                     if np.isnan(t_cut):
                         tpr_at_fpr[target_fpr] = float("nan")
                     else:
                         sig_mask = y_bin == 1
                         tpr_at_fpr[target_fpr] = float(
-                            ((p_bin >= t_cut) & sig_mask).sum() / max(int(sig_mask.sum()), 1)
+                            ((p_bin >= t_cut) & sig_mask).sum()
+                            / max(int(sig_mask.sum()), 1)
                         )
                 else:
                     idx = int(np.searchsorted(fpr_arr, target_fpr, side="right") - 1)
                     idx = max(0, min(idx, len(tpr_arr) - 1))
                     tpr_at_fpr[target_fpr] = float(tpr_arr[idx])
-            metrics.append({
-                "auprc": auprc_val,
-                "auroc": auroc_val,
-                "n_signal": int(n_sig),
-                "tpr_at_fpr": tpr_at_fpr,
-            })
+            metrics.append(
+                {
+                    "auprc": auprc_val,
+                    "auroc": auroc_val,
+                    "n_signal": int(n_sig),
+                    "tpr_at_fpr": tpr_at_fpr,
+                }
+            )
     return metrics
 
 
 # ---------------------------------------------------------------------------
 # Multi-run aggregation
 # ---------------------------------------------------------------------------
+
 
 def _extract_metric_array(
     runs: list[list[dict | None]],
@@ -473,6 +490,9 @@ def aggregate_metrics(
 
     for fpr_val in fixed_fpr:
         arr = _extract_metric_array(runs, "tpr_at_fpr", fpr_val)
-        out[f"tpr@{fpr_val}"] = {"mean": np.nanmean(arr, axis=0), "std": np.nanstd(arr, axis=0)}
+        out[f"tpr@{fpr_val}"] = {
+            "mean": np.nanmean(arr, axis=0),
+            "std": np.nanstd(arr, axis=0),
+        }
 
     return out

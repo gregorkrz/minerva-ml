@@ -184,7 +184,9 @@ class TestCondOnlyMLP:
         with torch.no_grad():
             out = model(torch.randn(B, 16))
         assert out.shape == (B, 1)
-        assert (out >= 0).all(), "output_positive=True should produce non-negative values"
+        assert (
+            out >= 0
+        ).all(), "output_positive=True should produce non-negative values"
 
     def test_forward_classifier(self):
         from src.scripts.train import CondOnlyMLP
@@ -233,7 +235,9 @@ class TestBertBaseline:
         )
         model.eval()
         with torch.no_grad():
-            out = model(torch.randn(B, N, 4), torch.ones(B, N), global_cont=torch.randn(B, 16))
+            out = model(
+                torch.randn(B, N, 4), torch.ones(B, N), global_cont=torch.randn(B, 16)
+            )
         assert out.shape == (B, 1)
 
     def test_forward_with_global_token_requires_cond(self):

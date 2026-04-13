@@ -20,7 +20,7 @@ scratch_dir = os.environ["SCRATCH"]
 
 
 def default_playlists():
-    #return [f"1{letter}" for letter in string.ascii_uppercase[:16]]
+    # return [f"1{letter}" for letter in string.ascii_uppercase[:16]]
     # return above but without H,I,J,K
     return ["1A", "1B", "1C", "1D", "1E", "1F", "1G", "1L", "1M", "1N", "1O", "1P"]
 
@@ -58,7 +58,9 @@ def run_xrdcp(src, dest, force=False, dry_run=False):
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Download MINERvA ROOT files via xrdcp.")
+    parser = argparse.ArgumentParser(
+        description="Download MINERvA ROOT files via xrdcp."
+    )
     parser.add_argument(
         "--base-url",
         default=DEFAULT_BASE_URL,
@@ -108,7 +110,9 @@ def main():
         try:
             entries = read_playlist(playlist_url)
         except Exception as exc:
-            print(f"error: failed to read playlist {playlist_id}: {exc}", file=sys.stderr)
+            print(
+                f"error: failed to read playlist {playlist_id}: {exc}", file=sys.stderr
+            )
             failures += 1
             continue
 
@@ -132,4 +136,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

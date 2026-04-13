@@ -1,4 +1,5 @@
 """Grouped training_names (seeds) and colour helpers."""
+
 from __future__ import annotations
 
 import re

@@ -110,9 +110,9 @@ class PET2(nn.Module):
 
         if use_generator:
             self.generator = PET_generator(
-                input_dim
-                if num_gen_classes == 1
-                else num_gen_classes,  # diffusion or segmentation
+                (
+                    input_dim if num_gen_classes == 1 else num_gen_classes
+                ),  # diffusion or segmentation
                 base_dim,
                 num_transformers=num_transformers_head,
                 num_heads=num_heads,
@@ -577,9 +577,7 @@ class PET_body(nn.Module):
         # Move away zero-padded entries
         coord_shift = 999.0 * (~mask).float()
         points = coord_shift + x[:, :, : self.num_coord]
-        local_features, indices = self.local_physics(
-            points, x, mask
-        )
+        local_features, indices = self.local_physics(points, x, mask)
 
         x_int = None
         if self.use_int:

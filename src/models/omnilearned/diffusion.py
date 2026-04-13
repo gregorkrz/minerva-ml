@@ -74,4 +74,3 @@ def network_wrapper(model, z, condition, pid, add_info, y, time):
     x = base_model.body(z, condition, pid, add_info, time)
     x = base_model.generator(x, y)
     return x
-

@@ -1,9 +1,11 @@
 """Hadronic W augmentation for classification data."""
+
 from __future__ import annotations
 
 import numpy as np
 
 from ._constants import PROTON_MASS_MEV, MUON_MASS_MEV, DEFAULT_W_BIN_EDGES_GEV
+
 
 def mc_true_hadronic_W_gev_from_baselines(
     baselines: dict[str, np.ndarray],

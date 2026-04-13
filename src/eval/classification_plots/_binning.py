@@ -1,4 +1,5 @@
 """Pion binning utilities."""
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -8,6 +9,7 @@ import numpy as np
 
 from ._constants import DEFAULT_N_BINS
 from ._hadronic_w import add_hadronic_W_to_classification_data
+
 
 def equal_frequency_bin_edges(
     x: np.ndarray,
@@ -61,11 +63,15 @@ def equal_frequency_bin_edges(
     return edges
 
 
-def _as_strictly_increasing_bin_edges(edges: np.ndarray | Sequence[float], name: str) -> np.ndarray:
+def _as_strictly_increasing_bin_edges(
+    edges: np.ndarray | Sequence[float], name: str
+) -> np.ndarray:
     """Validate user-supplied histogram edges (1-D, finite, strictly increasing)."""
     arr = np.asarray(edges, dtype=np.float64)
     if arr.ndim != 1 or arr.size < 2:
-        raise ValueError(f"{name} must be a 1-D sequence with at least 2 edges, got shape {arr.shape}")
+        raise ValueError(
+            f"{name} must be a 1-D sequence with at least 2 edges, got shape {arr.shape}"
+        )
     if not np.all(np.isfinite(arr)):
         raise ValueError(f"{name} must contain only finite values")
     if np.any(np.diff(arr) <= 0):
@@ -163,7 +169,9 @@ def data_with_signal_pion_bins(
                 "pion_bin_edge_method='custom' requires keyword arguments "
                 "pion_E_bin_edges and pion_theta_bin_edges"
             )
-        pion_E_bins = _as_strictly_increasing_bin_edges(pion_E_bin_edges, "pion_E_bin_edges")
+        pion_E_bins = _as_strictly_increasing_bin_edges(
+            pion_E_bin_edges, "pion_E_bin_edges"
+        )
         pion_theta_bins = _as_strictly_increasing_bin_edges(
             pion_theta_bin_edges, "pion_theta_bin_edges"
         )
@@ -179,4 +187,3 @@ def data_with_signal_pion_bins(
     out["pion_theta_MC_bins"] = pion_theta_bins
     out["pion_theta_MC_bins_mid"] = (pion_theta_bins[:-1] + pion_theta_bins[1:]) / 2
     return out
-

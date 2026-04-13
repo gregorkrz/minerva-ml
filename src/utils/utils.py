@@ -7,6 +7,7 @@ def fetch_runs_from_wandb(tag: str, project: str = "minerva-models") -> set[str]
     # Helper function to fetch wandb run names from a project with a given tag
     """Fetch wandb run names from project with the given tag."""
     import wandb
+
     print("Calling wandb API...")
     api = wandb.Api(timeout=60)
     entity = os.environ.get("WANDB_ENTITY") or getattr(api, "default_entity", None)
@@ -21,7 +22,10 @@ def fetch_runs_from_wandb(tag: str, project: str = "minerva-models") -> set[str]
     print(f"  Wandb API finished: {len(names)} run(s) found with tag {tag!r}.")
     return names
 
-def get_regression_runs_from_wandb(tag: str, project: str = "minerva-models") -> set[str]:
+
+def get_regression_runs_from_wandb(
+    tag: str, project: str = "minerva-models"
+) -> set[str]:
     """Get all regression runs from wandb."""
     return fetch_runs_from_wandb(tag, project)
 
@@ -55,7 +59,7 @@ def get_runs_by_model_and_cap(
         m = re.search(r"_OLS_RW_regression_(-?\d+)_", name)
         if m:
             model, cap = "OmniLearned-small-rw", int(m.group(1))
-        #if model is None:
+        # if model is None:
         # #   m = re.search(r"_OLS_int_regression_(-?\d+)_", name)
         #    if m:
         #        model, cap = "OmniLearned-small-int", int(m.group(1))
@@ -63,7 +67,7 @@ def get_runs_by_model_and_cap(
             m = re.search(r"_OLS_regression_(-?\d+)_", name)
             if m:
                 model, cap = "OmniLearned-small", int(m.group(1))
-        #if model is None:
+        # if model is None:
         #    m = re.search(r"_OLM_FB_?regression_(-?\d+)_", name)
         #     if m:
         #         model, cap = "OmniLearned-medium", int(m.group(1))
@@ -99,6 +103,7 @@ def get_runs_by_model_and_cap(
             result[model][cap].append(name)
     return {model: dict(caps) for model, caps in result.items()}
 
+
 def get_classification_runs_by_model_and_cap(
     tag: str, project: str = "minerva-models"
 ) -> dict[str, dict[int, list[str]]]:
@@ -131,7 +136,7 @@ def get_classification_runs_by_model_and_cap(
         m = re.search(r"_OLS_RW_classifier_(-?\d+)_", name)
         if m:
             model, cap = "OmniLearned-small-rw", int(m.group(1))
-        #if model is None:
+        # if model is None:
         #    m = re.search(r"_OLS_int_classifier_(-?\d+)_", name)
         #    if m:
         #        model, cap = "OmniLearned-small-int", int(m.group(1))

@@ -52,9 +52,18 @@ REGRESSION_COPIES = [
 # From ``plot_classification_light`` (playlist 1A). *W* PDFs exist only if the pickle
 # carried hadronic-W binned data; those are listed separately and skipped when absent.
 CLASSIFICATION_COPIES = [
-    ("classification/light/eval_classification_light_cc1pi_q3_1A.pdf", "CC1PiPMTagging.pdf"),
-    ("classification/light/eval_classification_light_cc1pi0_q3_1A.pdf", "CC1Pi0Tagging.pdf"),
-    ("classification/light/eval_classification_light_ccnpi_q3_1A.pdf", "CCNPiPMTagging.pdf"),
+    (
+        "classification/light/eval_classification_light_cc1pi_q3_1A.pdf",
+        "CC1PiPMTagging.pdf",
+    ),
+    (
+        "classification/light/eval_classification_light_cc1pi0_q3_1A.pdf",
+        "CC1Pi0Tagging.pdf",
+    ),
+    (
+        "classification/light/eval_classification_light_ccnpi_q3_1A.pdf",
+        "CCNPiPMTagging.pdf",
+    ),
     (
         "classification/light/eval_classification_light_cc1pi_pion_kinematics_1A.pdf",
         "CC1PiPM_pion_kinematics.pdf",
@@ -63,7 +72,10 @@ CLASSIFICATION_COPIES = [
         "classification/light/eval_classification_light_cc1pi0_pion_kinematics_1A.pdf",
         "CC1Pi0_pion_kinematics.pdf",
     ),
-    ("classification/light/eval_classification_light_ccnpi_q3_1A.pdf", "CCNPiPM_q3.pdf"),
+    (
+        "classification/light/eval_classification_light_ccnpi_q3_1A.pdf",
+        "CCNPiPM_q3.pdf",
+    ),
 ]
 
 CLASSIFICATION_COPIES_OPTIONAL_W = [
@@ -152,7 +164,9 @@ def main() -> None:
         src = plots_root / rel
         d = dest("classification", name)
         if not src.is_file():
-            print(f"WARNING: skip (no source file — run light plots with W data?): {src}")
+            print(
+                f"WARNING: skip (no source file — run light plots with W data?): {src}"
+            )
             continue
         if args.dry_run:
             print(f"  would copy {src} -> {d}")

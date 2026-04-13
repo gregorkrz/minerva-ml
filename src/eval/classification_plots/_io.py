@@ -1,4 +1,5 @@
 """Load checkpoints / baselines for classification evaluation."""
+
 from __future__ import annotations
 
 import json
@@ -10,6 +11,7 @@ import torch
 
 from ._constants import DEFAULT_N_BINS, DEFAULT_Q3_BIN_EDGES
 from ._binning import _as_strictly_increasing_bin_edges
+
 
 def _softmax(logits: np.ndarray) -> np.ndarray:
     e = np.exp(logits - logits.max(axis=1, keepdims=True))
@@ -46,8 +48,18 @@ def load_results(
         for run_name in run_names:
             run_results: dict[str, dict] = {}
             for playlist in playlists:
-                p1 = ckpt_dir / run_name / "test_results" / f"outputs_{run_name}_minerva_{playlist}_0.npz"
-                p2 = ckpt_dir / run_name / "test_results" / f"outputs_best_model_minerva_{playlist}_0.npz"
+                p1 = (
+                    ckpt_dir
+                    / run_name
+                    / "test_results"
+                    / f"outputs_{run_name}_minerva_{playlist}_0.npz"
+                )
+                p2 = (
+                    ckpt_dir
+                    / run_name
+                    / "test_results"
+                    / f"outputs_best_model_minerva_{playlist}_0.npz"
+                )
                 if p1.exists():
                     run_results[playlist] = dict(np.load(p1))
                 elif p2.exists():
@@ -167,7 +179,9 @@ def load_truth_and_baselines(
             "pion_E_bin_edges and pion_theta_bin_edges must both be set or both be None"
         )
     if pion_E_bin_edges is not None:
-        pion_E_bins = _as_strictly_increasing_bin_edges(pion_E_bin_edges, "pion_E_bin_edges")
+        pion_E_bins = _as_strictly_increasing_bin_edges(
+            pion_E_bin_edges, "pion_E_bin_edges"
+        )
         pion_theta_bins = _as_strictly_increasing_bin_edges(
             pion_theta_bin_edges, "pion_theta_bin_edges"
         )
@@ -176,7 +190,9 @@ def load_truth_and_baselines(
         pion_E_signal = pion_E_MC[has_pion & (pion_E_MC > 0)]
         pion_theta_signal = pion_theta_MC[has_pion & np.isfinite(pion_theta_MC)]
         pion_E_bins = np.quantile(pion_E_signal, np.linspace(0, 1, n_pion_bins + 1))
-        pion_theta_bins = np.quantile(pion_theta_signal, np.linspace(0, 1, n_pion_bins + 1))
+        pion_theta_bins = np.quantile(
+            pion_theta_signal, np.linspace(0, 1, n_pion_bins + 1)
+        )
 
     # q3
     q3_GeV = baselines_dict[playlist]["q3"][test_idx] / 1000.0

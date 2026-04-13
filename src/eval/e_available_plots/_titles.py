@@ -1,5 +1,7 @@
 """Axis title helpers for q3 / E_true bin labels."""
+
 from __future__ import annotations
+
 
 def _format_bin_edge_for_title(x: float) -> str:
     if abs(x - round(x)) < 1e-9:
@@ -21,4 +23,3 @@ def _Etrue_bin_title(elow: float, ehigh: float, upper_threshold: float = 100.0) 
     if ehigh >= upper_threshold:
         return rf"$E_{{\mathrm{{available}}}}^{{\mathrm{{true}}}} \geq {lo}\ \mathrm{{GeV}}$"
     return rf"$E_{{\mathrm{{available}}}}^{{\mathrm{{true}}}} \in [{lo}, {hi})\ \mathrm{{GeV}}$"
-

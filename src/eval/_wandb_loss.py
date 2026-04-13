@@ -60,7 +60,9 @@ def classification_runs_per_model(
         if model not in runs_by_model_cap or -1 not in runs_by_model_cap[model]:
             run_list = training_names.get(model)
             if run_list is not None:
-                runs_per_model[model] = run_list if isinstance(run_list, list) else [run_list]
+                runs_per_model[model] = (
+                    run_list if isinstance(run_list, list) else [run_list]
+                )
             continue
         runs_per_model[model] = runs_by_model_cap[model][-1]
     return runs_per_model
@@ -76,7 +78,9 @@ def regression_runs_per_model(
         if model not in runs_by_model_cap or -1 not in runs_by_model_cap[model]:
             run_name = training_names_full["Log1p"].get(model)
             if run_name:
-                runs_per_model[model] = [run_name] if isinstance(run_name, str) else list(run_name)
+                runs_per_model[model] = (
+                    [run_name] if isinstance(run_name, str) else list(run_name)
+                )
             continue
         runs_per_model[model] = runs_by_model_cap[model][-1]
     return runs_per_model

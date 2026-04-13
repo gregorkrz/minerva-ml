@@ -45,10 +45,15 @@ _TITLE_FS = 13
 
 def _pickle_paths(out_dir: Path, flag: str) -> tuple[Path, Path]:
     ed = out_dir / EVAL_DATA_SUBDIR
-    return ed / f"{CLASSIFICATION_PICKLE_STEM}_{flag}.pkl", ed / f"{REGRESSION_PICKLE_STEM}_{flag}.pkl"
+    return (
+        ed / f"{CLASSIFICATION_PICKLE_STEM}_{flag}.pkl",
+        ed / f"{REGRESSION_PICKLE_STEM}_{flag}.pkl",
+    )
 
 
-def _runs_per_model(loss_histories: dict, flops_per_step: dict) -> OrderedDict[str, list]:
+def _runs_per_model(
+    loss_histories: dict, flops_per_step: dict
+) -> OrderedDict[str, list]:
     runs: OrderedDict[str, list] = OrderedDict()
     for model in sorted(flops_per_step):
         if model not in loss_histories:
@@ -57,7 +62,9 @@ def _runs_per_model(loss_histories: dict, flops_per_step: dict) -> OrderedDict[s
     return runs
 
 
-def _merged_colors(colors_a: dict[str, str], colors_b: dict[str, str]) -> dict[str, str]:
+def _merged_colors(
+    colors_a: dict[str, str], colors_b: dict[str, str]
+) -> dict[str, str]:
     out = dict(colors_a)
     for k, v in colors_b.items():
         out.setdefault(k, v)
@@ -114,14 +121,26 @@ def _draw_flops_curves(
         steps_grid = np.unique(np.concatenate(all_steps)).astype(float)
         if len(steps_grid) == 0:
             continue
-        losses_aligned = np.array([np.interp(steps_grid, st, lo) for st, lo in zip(all_steps, all_losses)])
+        losses_aligned = np.array(
+            [np.interp(steps_grid, st, lo) for st, lo in zip(all_steps, all_losses)]
+        )
         mean_loss = np.mean(losses_aligned, axis=0)
-        sigma_loss = np.std(losses_aligned, axis=0) if losses_aligned.shape[0] > 1 else np.zeros_like(mean_loss)
+        sigma_loss = (
+            np.std(losses_aligned, axis=0)
+            if losses_aligned.shape[0] > 1
+            else np.zeros_like(mean_loss)
+        )
         cum_flops = steps_grid * flops
         x = np.log10(cum_flops + 1)
         ax.plot(x, mean_loss, color=color, label=model)
         if losses_aligned.shape[0] > 1:
-            ax.fill_between(x, mean_loss - sigma_loss, mean_loss + sigma_loss, alpha=0.25, color=color)
+            ax.fill_between(
+                x,
+                mean_loss - sigma_loss,
+                mean_loss + sigma_loss,
+                alpha=0.25,
+                color=color,
+            )
 
     ax.set_title(panel_title, fontsize=_TITLE_FS, pad=10)
     ax.set_xlabel(r"$log_{10}$(Training FLOPs)", fontsize=_LABEL_FS)
@@ -143,7 +162,9 @@ def _plot_steps_vs_loss(
     legend_outside: bool = False,
 ) -> None:
     fig, ax = plt.subplots(figsize=(8, 5), constrained_layout=True)
-    _draw_steps_curves(ax, loss_histories, flops_per_step, colors, ylim, panel_title, olm_step_cap)
+    _draw_steps_curves(
+        ax, loss_histories, flops_per_step, colors, ylim, panel_title, olm_step_cap
+    )
     if legend_outside:
         ax.legend(
             fontsize=_LABEL_FS,
@@ -182,9 +203,15 @@ def _draw_steps_curves(
         steps_grid = np.unique(np.concatenate(all_steps)).astype(float)
         if len(steps_grid) == 0:
             continue
-        losses_aligned = np.array([np.interp(steps_grid, st, lo) for st, lo in zip(all_steps, all_losses)])
+        losses_aligned = np.array(
+            [np.interp(steps_grid, st, lo) for st, lo in zip(all_steps, all_losses)]
+        )
         mean_loss = np.mean(losses_aligned, axis=0)
-        sigma_loss = np.std(losses_aligned, axis=0) if losses_aligned.shape[0] > 1 else np.zeros_like(mean_loss)
+        sigma_loss = (
+            np.std(losses_aligned, axis=0)
+            if losses_aligned.shape[0] > 1
+            else np.zeros_like(mean_loss)
+        )
         if olm_step_cap is not None and "OmniLearned-medium" in model:
             step_mask = steps_grid <= olm_step_cap
         else:
@@ -359,34 +386,65 @@ def main(argv: list[str] | None = None) -> None:
     ylim_r = (0.03, 0.06)
 
     _plot_combined_flops_row(
-        lh_c, flops_c, colors_c, ylim_c,
-        lh_r, flops_r, colors_r, ylim_r,
+        lh_c,
+        flops_c,
+        colors_c,
+        ylim_c,
+        lh_r,
+        flops_r,
+        colors_r,
+        ylim_r,
         combined_out / "log_flops_vs_val_loss.pdf",
     )
     _plot_combined_steps_row(
-        lh_c, flops_c, colors_c, ylim_c, 25_000,
-        lh_r, flops_r, colors_r, ylim_r,
+        lh_c,
+        flops_c,
+        colors_c,
+        ylim_c,
+        25_000,
+        lh_r,
+        flops_r,
+        colors_r,
+        ylim_r,
         combined_out / "log_steps_vs_val_loss.pdf",
     )
 
     if args.separate_panels:
         _plot_flops_vs_loss(
-            lh_c, flops_c, colors_c, "Classification", ylim_c,
+            lh_c,
+            flops_c,
+            colors_c,
+            "Classification",
+            ylim_c,
             clf_out / "log_flops_vs_val_loss.pdf",
             legend_outside=True,
         )
         _plot_steps_vs_loss(
-            lh_c, flops_c, colors_c, "Classification", ylim_c, 25_000,
+            lh_c,
+            flops_c,
+            colors_c,
+            "Classification",
+            ylim_c,
+            25_000,
             clf_out / "log_steps_vs_val_loss.pdf",
             legend_outside=True,
         )
         _plot_flops_vs_loss(
-            lh_r, flops_r, colors_r, "Regression", ylim_r,
+            lh_r,
+            flops_r,
+            colors_r,
+            "Regression",
+            ylim_r,
             reg_out / "log_flops_vs_val_loss.pdf",
             legend_outside=False,
         )
         _plot_steps_vs_loss(
-            lh_r, flops_r, colors_r, "Regression", ylim_r, None,
+            lh_r,
+            flops_r,
+            colors_r,
+            "Regression",
+            ylim_r,
+            None,
             reg_out / "log_steps_vs_val_loss.pdf",
             legend_outside=False,
         )

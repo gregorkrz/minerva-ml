@@ -1,4 +1,5 @@
 """Load regression evaluation arrays from checkpoints."""
+
 from __future__ import annotations
 
 import json
@@ -13,6 +14,7 @@ import torch
 
 from ._constants import DEFAULT_BASELINE_KEY, EAVAILABLE_SCALE
 
+
 def load_eval_data(
     CKPT_DIR: str | Path,
     training_names: dict[str, dict[str, str]],
@@ -20,7 +22,7 @@ def load_eval_data(
     baseline_ref: tuple[str, str] | None = None,
     baseline_run: str | None = None,
     verbose: bool = True,
-    transform = None,
+    transform=None,
     suppress_errors: bool = False,
 ) -> dict[str, Any]:
     """Load evaluation results, configs, baselines and derived arrays.
@@ -61,8 +63,18 @@ def load_eval_data(
             configs[loss][model] = {}
             for playlist in playlists:
                 run = training_names[loss][model]
-                p1 = CKPT_DIR / run / "test_results" / f"outputs_{run}_minerva_{playlist}_0.npz"
-                p2 = CKPT_DIR / run / "test_results" / f"outputs_best_model_minerva_{playlist}_0.npz"
+                p1 = (
+                    CKPT_DIR
+                    / run
+                    / "test_results"
+                    / f"outputs_{run}_minerva_{playlist}_0.npz"
+                )
+                p2 = (
+                    CKPT_DIR
+                    / run
+                    / "test_results"
+                    / f"outputs_best_model_minerva_{playlist}_0.npz"
+                )
                 if p1.exists():
                     results[loss][model][playlist] = dict(np.load(p1))
                 elif p2.exists():
@@ -70,7 +82,9 @@ def load_eval_data(
                 else:
                     if suppress_errors:
                         if verbose:
-                            print(f"Skipping {run} on playlist {playlist} (no eval results found)")
+                            print(
+                                f"Skipping {run} on playlist {playlist} (no eval results found)"
+                            )
                         continue
                     raise FileNotFoundError(
                         f"No results for {run} on playlist {playlist} "
@@ -84,7 +98,7 @@ def load_eval_data(
                     with open(settings_path, "r") as f:
                         configs[loss][model][playlist] = json.load(f)
                 else:
-                    #if verbose:
+                    # if verbose:
                     #    print(f"No settings found for {run} on playlist {playlist}")
                     configs[loss][model][playlist] = {}
 
@@ -101,7 +115,9 @@ def load_eval_data(
                     data_paths[loss][model][playlist] = ckpt["args"]["data_path"]
                 else:
                     if verbose:
-                        print(f"No best model found for {training_names[loss][model]} on {playlist}")
+                        print(
+                            f"No best model found for {training_names[loss][model]} on {playlist}"
+                        )
 
     # --- E_true / E_pred dicts (cell 6) ------------------------------------
     E_true_dict: dict = {}
@@ -115,8 +131,12 @@ def load_eval_data(
             for model in data_paths[loss]:
                 if dataset not in results[loss][model]:
                     continue
-                E_true_dict[dataset][loss][model] = results[loss][model][dataset]["pid"].flatten()
-                E_pred_dict[dataset][loss][model] = results[loss][model][dataset]["prediction"].flatten()
+                E_true_dict[dataset][loss][model] = results[loss][model][dataset][
+                    "pid"
+                ].flatten()
+                E_pred_dict[dataset][loss][model] = results[loss][model][dataset][
+                    "prediction"
+                ].flatten()
     # --- baselines & filters (cell 7) --------------------------------------
     # Resolve where the baseline / filter data lives.  Three strategies:
     #   1. baseline_run  – a standalone run name with settings.json / best_model.pt
@@ -134,7 +154,9 @@ def load_eval_data(
             ckpt = torch.load(bl_model_pt, weights_only=False, map_location="cpu")
             baseline_data_path = ckpt["args"]["data_path"]
         if baseline_data_path is None and verbose:
-            print(f"baseline_run '{baseline_run}' has no settings.json or best_model.pt")
+            print(
+                f"baseline_run '{baseline_run}' has no settings.json or best_model.pt"
+            )
 
     ref_loss, ref_model = _resolve_baseline_ref(
         baseline_ref, configs, data_paths, training_names
@@ -158,8 +180,12 @@ def load_eval_data(
                 _bl_data_paths[pl] = data_paths[ref_loss][ref_model][pl]
 
     # mc_E: use the first available model's truth values
-    first_loss = next(iter(E_true_dict.get(playlists[0], {})), None) if playlists else None
-    first_model = next(iter(E_true_dict[playlists[0]][first_loss]), None) if first_loss else None
+    first_loss = (
+        next(iter(E_true_dict.get(playlists[0], {})), None) if playlists else None
+    )
+    first_model = (
+        next(iter(E_true_dict[playlists[0]][first_loss]), None) if first_loss else None
+    )
 
     for eval_dataset in playlists:
         if eval_dataset not in _bl_data_paths:
@@ -180,11 +206,15 @@ def load_eval_data(
         split_idx_path = os.path.join(dp_path, "result.pkl")
         if not os.path.exists(split_idx_path):
             if verbose:
-                print(f"result.pkl not found at {split_idx_path}, skipping baselines for {eval_dataset}")
+                print(
+                    f"result.pkl not found at {split_idx_path}, skipping baselines for {eval_dataset}"
+                )
             continue
         with open(split_idx_path, "rb") as f:
             split_idx = pickle.load(f)
-        bl_path = os.path.join(dp_path, "baselines", f"{eval_dataset}_enu_baselines.npz")
+        bl_path = os.path.join(
+            dp_path, "baselines", f"{eval_dataset}_enu_baselines.npz"
+        )
         if not os.path.exists(bl_path):
             if verbose:
                 print(f"Baselines file not found: {bl_path}")
@@ -196,7 +226,9 @@ def load_eval_data(
             if key in ["muon_filter_CC_paper", "mc_current", "q0", "q3"]:
                 Enu_filters[eval_dataset][key] = current_baselines[key][test_idx]
                 if key in ["q0", "q3"]:
-                    Enu_filters[eval_dataset][key] = Enu_filters[eval_dataset][key] / 1000
+                    Enu_filters[eval_dataset][key] = (
+                        Enu_filters[eval_dataset][key] / 1000
+                    )
             elif key == "E_recoil_CCinc_only":
                 bl = current_baselines[key][test_idx] / 1000
                 bl[bl == 0] = -1
@@ -229,7 +261,9 @@ def _resolve_baseline_ref(baseline_ref, configs, data_paths, training_names):
         for model in training_names[loss]:
             for pl in configs.get(loss, {}).get(model, {}):
                 cfg = configs[loss][model][pl]
-                has_path = "path" in cfg or pl in data_paths.get(loss, {}).get(model, {})
+                has_path = "path" in cfg or pl in data_paths.get(loss, {}).get(
+                    model, {}
+                )
                 if cfg and has_path:
                     return loss, model
     return None, None
@@ -238,6 +272,7 @@ def _resolve_baseline_ref(baseline_ref, configs, data_paths, training_names):
 # ---------------------------------------------------------------------------
 # Event selection
 # ---------------------------------------------------------------------------
+
 
 def _build_event_mask(
     dp: str,

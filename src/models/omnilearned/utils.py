@@ -49,7 +49,9 @@ def _filter_partial_state(checkpoint_state, model_state, verbose=True):
         else:
             if verbose:
                 model_shape = model_state[k].shape if k in model_state else "missing"
-                print(f"  Skipping {k}: shape mismatch (ckpt: {v.shape}, model: {model_shape})")
+                print(
+                    f"  Skipping {k}: shape mismatch (ckpt: {v.shape}, model: {model_shape})"
+                )
     return filtered
 
 
@@ -88,13 +90,17 @@ def load_pretrained_omnilearned(model, pretrain_tag, checkpoint_dir):
             checkpoint["classifier_head"], model.classifier.state_dict()
         )
         model.classifier.load_state_dict(filtered, strict=False)
-        print(f"Loaded classifier: {len(filtered)}/{len(model.classifier.state_dict())} params")
+        print(
+            f"Loaded classifier: {len(filtered)}/{len(model.classifier.state_dict())} params"
+        )
 
     if "generator_head" in checkpoint and model.generator is not None:
         filtered = _filter_partial_state(
             checkpoint["generator_head"], model.generator.state_dict()
         )
         model.generator.load_state_dict(filtered, strict=False)
-        print(f"Loaded generator: {len(filtered)}/{len(model.generator.state_dict())} params")
+        print(
+            f"Loaded generator: {len(filtered)}/{len(model.generator.state_dict())} params"
+        )
 
     return model

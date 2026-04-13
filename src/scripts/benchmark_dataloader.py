@@ -6,6 +6,7 @@ Usage:
   python -m src.scripts.benchmark_dataloader --dataset-dir /path/to/1A/train --batch-size 2048
   python -m src.scripts.benchmark_dataloader -d /path/to/1A/train -bs 2048
 """
+
 import argparse
 import os
 import time
@@ -105,7 +106,9 @@ def main():
         drop_last=False,
     )
     n_batches_per_epoch = len(loader)
-    n_batches = args.num_batches if args.num_batches is not None else n_batches_per_epoch
+    n_batches = (
+        args.num_batches if args.num_batches is not None else n_batches_per_epoch
+    )
     print(f"  Batch size: {args.batch_size}")
     print(f"  Batches per epoch: {n_batches_per_epoch}")
     print(f"  Batches to run: {n_batches}")

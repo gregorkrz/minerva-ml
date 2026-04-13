@@ -1,4 +1,5 @@
 """Constants and small helpers for classification eval plots."""
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -40,12 +41,16 @@ def _tpr_column_title_vs_kinematics(use_global_fpr: bool) -> str:
     return "TPR @ fixed FPR" if use_global_fpr else "TPR @ per-bin FPR"
 
 
-def _tpr_line_legend_label(model_name: str, _fpr_val: float, _use_global_fpr: bool) -> str:
+def _tpr_line_legend_label(
+    model_name: str, _fpr_val: float, _use_global_fpr: bool
+) -> str:
     """Legend entry for a model TPR line (no FPR suffix; baseline uses :func:`_baseline_legend_with_global_fpr`)."""
     return model_name
 
 
-def _global_reco_baseline_fpr(reco_pred: np.ndarray, y_true_binary: np.ndarray) -> float:
+def _global_reco_baseline_fpr(
+    reco_pred: np.ndarray, y_true_binary: np.ndarray
+) -> float:
     """Full-sample FPR of a binary baseline: FP / (FP + TN) on true background."""
     y_true_binary = np.asarray(y_true_binary)
     reco_pred = np.asarray(reco_pred)
@@ -135,10 +140,11 @@ MUON_MASS_MEV = 105.6583755
 CLASSIFICATION_PERFORMANCE_LEGEND_TITLE = None
 
 
-def _classification_legend_kw(fontsize: int, legend_title: str | None) -> dict[str, Any]:
+def _classification_legend_kw(
+    fontsize: int, legend_title: str | None
+) -> dict[str, Any]:
     kw: dict[str, Any] = {"fontsize": fontsize}
     if legend_title:
         kw["title"] = legend_title
         kw["title_fontsize"] = 10 if fontsize >= 9 else 8
     return kw
-

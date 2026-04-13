@@ -1,4 +1,5 @@
 """RMS/IQR vs q3 with seed uncertainty bands."""
+
 from __future__ import annotations
 
 import warnings
@@ -18,6 +19,7 @@ from ._grouped import (
 from ._load import _build_event_mask
 from ._plot_rms import plot_rms_iqr
 
+
 def plot_rms_iqr_with_uncertainty(
     CKPT_DIR: str | Path,
     training_names: dict[str, dict[str, str]] | dict[str, dict[str, list[str]]],
@@ -34,7 +36,7 @@ def plot_rms_iqr_with_uncertainty(
     colors: dict[str, Any] | None = None,
     verbose: bool = True,
     data: dict | None = None,
-    transform = None,
+    transform=None,
     return_hist_fig: bool = False,  # accepted for API parity, ignored
     return_values: bool = False,
     suppress_errors: bool = False,
@@ -117,7 +119,8 @@ def plot_rms_iqr_with_uncertainty(
 
     if data is None:
         data = load_eval_data_grouped(
-            CKPT_DIR, training_names_grouped,
+            CKPT_DIR,
+            training_names_grouped,
             playlists=playlists,
             baseline_ref=baseline_ref,
             baseline_run=baseline_run,
@@ -139,11 +142,7 @@ def plot_rms_iqr_with_uncertainty(
         and "q3" in Enu_filters[dp]
         and dp in mc_E
     )
-    has_baselines = (
-        has_q3
-        and dp in Enu_baselines
-        and baseline_key in Enu_baselines[dp]
-    )
+    has_baselines = has_q3 and dp in Enu_baselines and baseline_key in Enu_baselines[dp]
 
     if not has_q3:
         warnings.warn(
@@ -158,7 +157,9 @@ def plot_rms_iqr_with_uncertainty(
     q3_bin_mids = ((q3_arr[:-1] + q3_arr[1:]) / 2)[:n_plot_bins]
 
     q3 = Enu_filters[dp]["q3"]
-    mask_sel = _build_event_mask(dp, Enu_filters, Enu_baselines, baseline_key, use_cc_selection)
+    mask_sel = _build_event_mask(
+        dp, Enu_filters, Enu_baselines, baseline_key, use_cc_selection
+    )
 
     bin_masks = []
     for i in range(n_plot_bins):
@@ -225,7 +226,8 @@ def plot_rms_iqr_with_uncertainty(
                 ratio_bl_mpv = ratio_bl
             if ratio_bl_clipped.size > 0:
                 iqr_val = float(
-                    np.percentile(ratio_bl_clipped, 75) - np.percentile(ratio_bl_clipped, 25)
+                    np.percentile(ratio_bl_clipped, 75)
+                    - np.percentile(ratio_bl_clipped, 25)
                 )
                 rms_val = float(np.sqrt(np.mean((ratio_bl_clipped - 1.0) ** 2)))
                 if ratio_bl_mpv.size > 0:
@@ -251,7 +253,9 @@ def plot_rms_iqr_with_uncertainty(
             "pct_in_range": np.array(pct_bl),
         }
 
-    print(f"E_pred_dict keys for '{dp}': { {l: list(m.keys()) for l, m in E_pred_dict.get(dp, {}).items()} }")
+    print(
+        f"E_pred_dict keys for '{dp}': { {l: list(m.keys()) for l, m in E_pred_dict.get(dp, {}).items()} }"
+    )
     for loss in training_names_grouped:
         for config_label, runs in training_names_grouped[loss].items():
             seed_rms = np.empty((len(runs), n_plot_bins))
@@ -260,7 +264,9 @@ def plot_rms_iqr_with_uncertainty(
             for s in range(len(runs)):
                 flat_key = f"{config_label}{_SEED_SEP}{s}"
                 if flat_key not in E_pred_dict.get(dp, {}).get(loss, {}):
-                    print(f"  WARNING: '{flat_key}' not found in E_pred_dict['{dp}']['{loss}']")
+                    print(
+                        f"  WARNING: '{flat_key}' not found in E_pred_dict['{dp}']['{loss}']"
+                    )
                     continue
                 # Use per-run truth (same NPZ as predictions). Using global mc_E[dp] here
                 # caused IndexError when another run had a different #events than the first
@@ -293,15 +299,20 @@ def plot_rms_iqr_with_uncertainty(
                         ratio_mpv = ratio
                     if ratio_clipped.size > 0:
                         seed_iqr[s, i] = float(
-                            np.percentile(ratio_clipped, 75) - np.percentile(ratio_clipped, 25)
+                            np.percentile(ratio_clipped, 75)
+                            - np.percentile(ratio_clipped, 25)
                         )
                         seed_rms[s, i] = float(
                             np.sqrt(np.mean((ratio_clipped - 1.0) ** 2))
                         )
                         if ratio_mpv.size > 0:
-                            hist, edges = np.histogram(ratio_mpv, bins=100, range=(0.0, 2.0))
+                            hist, edges = np.histogram(
+                                ratio_mpv, bins=100, range=(0.0, 2.0)
+                            )
                             max_idx = int(np.argmax(hist))
-                            seed_mpv[s, i] = float(0.5 * (edges[max_idx] + edges[max_idx + 1]))
+                            seed_mpv[s, i] = float(
+                                0.5 * (edges[max_idx] + edges[max_idx + 1])
+                            )
                         else:
                             seed_mpv[s, i] = float("nan")
                     else:
@@ -395,13 +406,23 @@ def plot_rms_iqr_with_uncertainty(
             bl_rms_over_mpv = bl_rms / bl_mpv
             bl_iqr_over_mpv = bl_iqr / bl_mpv
         if not iqr_only:
-            ax_rms.plot(q3_bin_mids, bl_rms_over_mpv, ".--", color="black", label="Baseline")
-        ax_iqr.plot(q3_bin_mids, bl_iqr_over_mpv, ".--", color="black", label="Baseline")
+            ax_rms.plot(
+                q3_bin_mids, bl_rms_over_mpv, ".--", color="black", label="Baseline"
+            )
+        ax_iqr.plot(
+            q3_bin_mids, bl_iqr_over_mpv, ".--", color="black", label="Baseline"
+        )
         if iqr_only:
-            ax_mpv_panel.plot(q3_bin_mids, bl_mpv, ".--", color="black", label="Baseline")
+            ax_mpv_panel.plot(
+                q3_bin_mids, bl_mpv, ".--", color="black", label="Baseline"
+            )
         else:
-            ax_bottom[0].plot(q3_bin_mids, bl_mpv, ".--", color="black", label="Baseline")
-            ax_bottom[1].plot(q3_bin_mids, bl_mpv, ".--", color="black", label="Baseline")
+            ax_bottom[0].plot(
+                q3_bin_mids, bl_mpv, ".--", color="black", label="Baseline"
+            )
+            ax_bottom[1].plot(
+                q3_bin_mids, bl_mpv, ".--", color="black", label="Baseline"
+            )
 
     # Legend placement; optional *text* is used as legend title if provided.
     legend_kwargs: dict[str, Any] = {"fontsize": 9, "loc": "upper right"}

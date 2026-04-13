@@ -37,6 +37,7 @@ CLRS_CLASSIFICATION: dict[str, str] = {
     "Transformer2": "#d62728",
 }
 
+
 def repo_output_path(repo_root: Path, path: Path) -> Path:
     """Resolve *path* under *repo_root* unless *path* is already absolute."""
     path = Path(path)

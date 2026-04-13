@@ -90,7 +90,9 @@ def main(argv: list[str] | None = None) -> None:
     n_models = len(model_names)
 
     for playlist in playlists:
-        fig, axes = plt.subplots(1, n_models, figsize=(7 * n_models, 6), tight_layout=True)
+        fig, axes = plt.subplots(
+            1, n_models, figsize=(7 * n_models, 6), tight_layout=True
+        )
         if n_models == 1:
             axes = [axes]
         for ax, model_name in zip(axes, model_names):
@@ -99,13 +101,20 @@ def main(argv: list[str] | None = None) -> None:
             y_pred = run0["prediction"].argmax(axis=1)
             cm = confusion_matrix(y_true, y_pred)
             sns.heatmap(
-                cm, annot=True, fmt="d", cmap="Blues", ax=ax,
-                xticklabels=class_names, yticklabels=class_names,
+                cm,
+                annot=True,
+                fmt="d",
+                cmap="Blues",
+                ax=ax,
+                xticklabels=class_names,
+                yticklabels=class_names,
             )
             ax.set_xlabel(r"Predicted class")
             ax.set_ylabel(r"True class")
             ax.set_title(model_name)
-        fig.suptitle(f"Confusion matrices (first run per model) — {playlist}", fontsize=14)
+        fig.suptitle(
+            f"Confusion matrices (first run per model) — {playlist}", fontsize=14
+        )
         fp = out_dir / f"confusion_matrices_{playlist}.pdf"
         fig.savefig(fp)
         plt.close(fig)
@@ -135,34 +144,54 @@ def main(argv: list[str] | None = None) -> None:
         baseline_fpr_cc1pi = fp / (fp + tn)
 
         metrics_q3_cc1pi = compute_all_metrics_q3(
-            results, data, signal_classes=cc1pi_classes, fixed_fpr=[baseline_fpr_cc1pi],
+            results,
+            data,
+            signal_classes=cc1pi_classes,
+            fixed_fpr=[baseline_fpr_cc1pi],
             playlist=playlist,
         )
-        baseline_cc1pi = compute_signal_baseline(results, data, signal_classes=cc1pi_classes, playlist=playlist)
+        baseline_cc1pi = compute_signal_baseline(
+            results, data, signal_classes=cc1pi_classes, playlist=playlist
+        )
         is_signal_cc1pi = y_true_cc1pi == 1
         reco_baseline_tpr_q3_cc1pi = compute_reco_baseline_recall_per_bin(
-            y_pred_cc1pi, is_signal_cc1pi, data["q3_GeV"], data["q3_bin_edges"],
+            y_pred_cc1pi,
+            is_signal_cc1pi,
+            data["q3_GeV"],
+            data["q3_bin_edges"],
         )
         fig = plot_multi_pion_vs_q3(
-            metrics_q3_cc1pi, data, baseline_cc1pi["q3"],
-            fixed_fpr=[baseline_fpr_cc1pi], uncertainties=True,
+            metrics_q3_cc1pi,
+            data,
+            baseline_cc1pi["q3"],
+            fixed_fpr=[baseline_fpr_cc1pi],
+            uncertainties=True,
             reco_baseline_tpr_q3=reco_baseline_tpr_q3_cc1pi,
             colors=clrs,
-            title=fr"$CC1\pi^\pm$ tagging - MINERvA Open Data Playlist {playlist}",
+            title=rf"$CC1\pi^\pm$ tagging - MINERvA Open Data Playlist {playlist}",
             playlist=playlist,
         )
         figs_cc1pi_q3.append(fig)
         plt.close(fig)
 
         fig = plot_binned_by_inttype(
-            results, data, signal_classes=cc1pi_classes, x_var="q3", xlabel=r"True $q_3$ [GeV]",
-            title=fr"$CC1\pi^\pm$ tagging - MINERvA Open Data Playlist {playlist} - by interaction type",
-            uncertainties=True, fixed_fpr=[baseline_fpr_cc1pi], reco_baseline_pred=y_pred_cc1pi,
-            playlist=playlist, colors=clrs,
+            results,
+            data,
+            signal_classes=cc1pi_classes,
+            x_var="q3",
+            xlabel=r"True $q_3$ [GeV]",
+            title=rf"$CC1\pi^\pm$ tagging - MINERvA Open Data Playlist {playlist} - by interaction type",
+            uncertainties=True,
+            fixed_fpr=[baseline_fpr_cc1pi],
+            reco_baseline_pred=y_pred_cc1pi,
+            playlist=playlist,
+            colors=clrs,
         )
         figs_cc1pi_q3.append(fig)
         plt.close(fig)
-        save_figures_to_pdf(figs_cc1pi_q3, out_dir / f"eval_cc1pi_tagging_q3_{playlist}.pdf")
+        save_figures_to_pdf(
+            figs_cc1pi_q3, out_dir / f"eval_cc1pi_tagging_q3_{playlist}.pdf"
+        )
         print("Saved:", out_dir / f"eval_cc1pi_tagging_q3_{playlist}.pdf")
 
     multi_pi_classes = [0, 1]
@@ -189,38 +218,59 @@ def main(argv: list[str] | None = None) -> None:
         baseline_fpr_ccnpi = fp / (fp + tn)
 
         metrics_q3 = compute_all_metrics_q3(
-            results, data, signal_classes=multi_pi_classes, fixed_fpr=[baseline_fpr_ccnpi],
+            results,
+            data,
+            signal_classes=multi_pi_classes,
+            fixed_fpr=[baseline_fpr_ccnpi],
             playlist=playlist,
         )
-        baseline_multi = compute_signal_baseline(results, data, signal_classes=multi_pi_classes, playlist=playlist)
+        baseline_multi = compute_signal_baseline(
+            results, data, signal_classes=multi_pi_classes, playlist=playlist
+        )
         is_signal_ccnpi = y_true_ccnpi == 1
         reco_baseline_tpr_q3 = compute_reco_baseline_recall_per_bin(
-            y_pred_ccnpi, is_signal_ccnpi, data["q3_GeV"], data["q3_bin_edges"],
+            y_pred_ccnpi,
+            is_signal_ccnpi,
+            data["q3_GeV"],
+            data["q3_bin_edges"],
         )
         fig = plot_multi_pion_vs_q3(
-            metrics_q3, data, baseline_multi["q3"],
-            fixed_fpr=[baseline_fpr_ccnpi], uncertainties=True,
+            metrics_q3,
+            data,
+            baseline_multi["q3"],
+            fixed_fpr=[baseline_fpr_ccnpi],
+            uncertainties=True,
             reco_baseline_tpr_q3=reco_baseline_tpr_q3,
             colors=clrs,
-            title=fr"$CCN\pi^\pm$ tagging ($N \geq 1$) - MINERvA Open Data Playlist {playlist}",
+            title=rf"$CCN\pi^\pm$ tagging ($N \geq 1$) - MINERvA Open Data Playlist {playlist}",
             playlist=playlist,
         )
         figs_npi.append(fig)
         plt.close(fig)
 
         fig = plot_prc_curves(
-            results, signal_classes=multi_pi_classes,
-            title=fr"PRC — $CCN\pi^\pm$ tagging ($N \geq 1$) - MINERvA Open Data Playlist {playlist}",
-            playlist=playlist, uncertainties=True, colors=clrs,
+            results,
+            signal_classes=multi_pi_classes,
+            title=rf"PRC — $CCN\pi^\pm$ tagging ($N \geq 1$) - MINERvA Open Data Playlist {playlist}",
+            playlist=playlist,
+            uncertainties=True,
+            colors=clrs,
         )
         figs_npi.append(fig)
         plt.close(fig)
 
         fig = plot_binned_by_inttype(
-            results, data, signal_classes=multi_pi_classes, x_var="q3", xlabel=r"True $q_3$ [GeV]",
-            title=fr"$CCN\pi^\pm$ tagging ($N \geq 1$) - MINERvA Open Data Playlist {playlist} - by interaction type",
-            uncertainties=True, fixed_fpr=[baseline_fpr_ccnpi], reco_baseline_pred=y_pred_ccnpi,
-            playlist=playlist, colors=clrs,
+            results,
+            data,
+            signal_classes=multi_pi_classes,
+            x_var="q3",
+            xlabel=r"True $q_3$ [GeV]",
+            title=rf"$CCN\pi^\pm$ tagging ($N \geq 1$) - MINERvA Open Data Playlist {playlist} - by interaction type",
+            uncertainties=True,
+            fixed_fpr=[baseline_fpr_ccnpi],
+            reco_baseline_pred=y_pred_ccnpi,
+            playlist=playlist,
+            colors=clrs,
         )
         figs_npi.append(fig)
         plt.close(fig)

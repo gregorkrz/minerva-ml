@@ -1,4 +1,5 @@
 """RMS / IQR vs q3 summary plot."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -9,6 +10,7 @@ import numpy as np
 
 from ._constants import DEFAULT_BASELINE_KEY
 from ._load import _build_event_mask, load_eval_data
+
 
 def plot_rms_iqr(
     CKPT_DIR: str | Path,
@@ -25,7 +27,7 @@ def plot_rms_iqr(
     show_q3_histograms: bool = False,
     verbose: bool = True,
     data: dict | None = None,
-    transform = None,
+    transform=None,
     return_hist_fig: bool = False,
     suppress_errors: bool = False,
 ) -> plt.Figure | tuple[plt.Figure, plt.Figure | None]:
@@ -61,20 +63,27 @@ def plot_rms_iqr(
     matplotlib.figure.Figure – the RMS / IQR summary figure.
     """
     if q3_bins is None:
-        q3_bins = [0, 0.3, 0.6, 1.2, 1.8, 2.4, 3.0,100]
+        q3_bins = [0, 0.3, 0.6, 1.2, 1.8, 2.4, 3.0, 100]
 
-    datasets = [dataset_to_plot] if isinstance(dataset_to_plot, str) else list(dataset_to_plot)
+    datasets = (
+        [dataset_to_plot] if isinstance(dataset_to_plot, str) else list(dataset_to_plot)
+    )
     if len(datasets) > 1:
         if dataset_to_linestyle is None:
-            raise ValueError("dataset_to_linestyle is required when dataset_to_plot is a list")
+            raise ValueError(
+                "dataset_to_linestyle is required when dataset_to_plot is a list"
+            )
         missing = [d for d in datasets if d not in dataset_to_linestyle]
         if missing:
-            raise ValueError(f"dataset_to_linestyle must contain an entry for each dataset; missing: {missing}")
+            raise ValueError(
+                f"dataset_to_linestyle must contain an entry for each dataset; missing: {missing}"
+            )
 
     # -- load data if not provided ------------------------------------------
     if data is None:
         data = load_eval_data(
-            CKPT_DIR, training_names,
+            CKPT_DIR,
+            training_names,
             playlists=playlists,
             baseline_ref=baseline_ref,
             baseline_run=baseline_run,
@@ -99,11 +108,7 @@ def plot_rms_iqr(
         )
 
     def _has_baselines(dp: str) -> bool:
-        return (
-            _has_q3(dp)
-            and dp in Enu_baselines
-            and baseline_key in Enu_baselines[dp]
-        )
+        return _has_q3(dp) and dp in Enu_baselines and baseline_key in Enu_baselines[dp]
 
     datasets_with_q3 = [dp for dp in datasets if _has_q3(dp)]
     for dp in datasets:
@@ -132,7 +137,7 @@ def plot_rms_iqr(
         lp_true = np.log1p(y_true)
         diff = lp_pred - lp_true
         abs_diff = np.abs(diff)
-        loss = np.where(abs_diff <= 1.0, 0.5 * diff ** 2, abs_diff - 0.5)
+        loss = np.where(abs_diff <= 1.0, 0.5 * diff**2, abs_diff - 0.5)
         return float(loss.mean())
 
     # -- compute RMS / IQR per q3 bin, per dataset --------------------------
@@ -159,7 +164,9 @@ def plot_rms_iqr(
     for dp in datasets_with_q3:
         has_baselines = _has_baselines(dp)
         q3 = Enu_filters[dp]["q3"]
-        mask_sel = _build_event_mask(dp, Enu_filters, Enu_baselines, baseline_key, use_cc_selection)
+        mask_sel = _build_event_mask(
+            dp, Enu_filters, Enu_baselines, baseline_key, use_cc_selection
+        )
 
         IQR_models_by_dp[dp] = {}
         RMS_models_by_dp[dp] = {}
@@ -212,7 +219,10 @@ def plot_rms_iqr(
                     ratio_bl_clipped = ratio_bl
 
                 if ratio_bl_clipped.size > 0:
-                    iqr = float(np.percentile(ratio_bl_clipped, 75) - np.percentile(ratio_bl_clipped, 25))
+                    iqr = float(
+                        np.percentile(ratio_bl_clipped, 75)
+                        - np.percentile(ratio_bl_clipped, 25)
+                    )
                     rms = float(np.sqrt(np.mean((ratio_bl_clipped - 1.0) ** 2)))
                 else:
                     iqr = float("nan")
@@ -273,7 +283,10 @@ def plot_rms_iqr(
                         ratio_clipped = ratio
 
                     if ratio_clipped.size > 0:
-                        model_iqr = float(np.percentile(ratio_clipped, 75) - np.percentile(ratio_clipped, 25))
+                        model_iqr = float(
+                            np.percentile(ratio_clipped, 75)
+                            - np.percentile(ratio_clipped, 25)
+                        )
                         model_rms = float(np.sqrt(np.mean((ratio_clipped - 1.0) ** 2)))
                     else:
                         model_iqr = float("nan")
@@ -313,11 +326,15 @@ def plot_rms_iqr(
             if show_q3_histograms and datasets_with_q3:
                 q3_label = f"{q3_bins[i]}-{q3_bins[i+1]}"
                 eff_str = f" (eff: {efficiency:.1f}%)" if has_baselines else ""
-                hist_ax[0, i].set(xlabel="E reco / E true", ylabel="Counts",
-                                  title=f"q3: {q3_label} GeV{eff_str}")
+                hist_ax[0, i].set(
+                    xlabel="E reco / E true",
+                    ylabel="Counts",
+                    title=f"q3: {q3_label} GeV{eff_str}",
+                )
                 hist_ax[0, i].grid(True)
-                hist_ax[1, i].set(xlabel="E reco / E true", ylabel="Counts",
-                                  title=f"q3: {q3_label}")
+                hist_ax[1, i].set(
+                    xlabel="E reco / E true", ylabel="Counts", title=f"q3: {q3_label}"
+                )
                 hist_ax[1, i].set_yscale("log")
                 hist_ax[1, i].legend(loc="lower left", fontsize=7)
                 hist_ax[1, i].grid(True)
@@ -331,7 +348,9 @@ def plot_rms_iqr(
     default_linestyle = ".--"
     # One color per (loss, model); cycle through default prop_cycle
     prop_cycle = plt.rcParams["axes.prop_cycle"]
-    colors = prop_cycle.by_key().get("color", ["C0", "C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9"])
+    colors = prop_cycle.by_key().get(
+        "color", ["C0", "C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9"]
+    )
     lm_pairs = [(loss, model) for loss in results for model in results[loss]]
     color_by_lm = {lm: colors[i % len(colors)] for i, lm in enumerate(lm_pairs)}
 
@@ -343,18 +362,18 @@ def plot_rms_iqr(
             iqr_vals = np.array(IQR_models_by_dp[dp][loss][model])
             pct_vals = np.array(PCT_models_by_dp[dp][loss][model])
             pct_mean = np.nanmean(pct_vals) if pct_vals.size > 0 else float("nan")
-            train_loss = LOG1P_LOSS_models_by_dp.get(dp, {}).get(loss, {}).get(model, float("nan"))
+            train_loss = (
+                LOG1P_LOSS_models_by_dp.get(dp, {})
+                .get(loss, {})
+                .get(model, float("nan"))
+            )
             color = color_by_lm[(loss, model)]
             if single_dataset:
                 ls = default_linestyle
-                lab = (
-                    f"{model}"
-                )
+                lab = f"{model}"
             else:
                 ls = dataset_to_linestyle.get(dp, "-")
-                lab = (
-                    f"{model}"
-                )
+                lab = f"{model}"
             ax[0].plot(q3_bin_mids, rms_vals, ls, color=color, label=lab)
             ax[1].plot(q3_bin_mids, iqr_vals, ls, color=color, label=lab)
 
@@ -365,8 +384,8 @@ def plot_rms_iqr(
         if not rms_bl or not iqr_bl or not pct_bl:
             continue
         pct_bl_arr = np.array(pct_bl)
-        #pct_bl_mean = np.nanmean(pct_bl_arr) if pct_bl_arr.size > 0 else float("nan")
-        #bl_loss = LOG1P_LOSS_baseline_by_dp.get(dp, float("nan"))
+        # pct_bl_mean = np.nanmean(pct_bl_arr) if pct_bl_arr.size > 0 else float("nan")
+        # bl_loss = LOG1P_LOSS_baseline_by_dp.get(dp, float("nan"))
         if single_dataset:
             ls = default_linestyle
             lab = "baseline"
@@ -378,8 +397,14 @@ def plot_rms_iqr(
 
     ax[0].legend(fontsize=7)
     ax[1].legend(fontsize=7)
-    ax[0].set(xlabel="MC truth $q_3$ [GeV]", ylabel="RMS of $E_{\\mathrm{available}}^{\\mathrm{reco}}/E_{\\mathrm{available}}^{\\mathrm{true}}$")
-    ax[1].set(xlabel="MC truth $q_3$ [GeV]", ylabel="25-75 IQR of $E_{\\mathrm{available}}^{\\mathrm{reco}}/E_{\\mathrm{available}}^{\\mathrm{true}}$")
+    ax[0].set(
+        xlabel="MC truth $q_3$ [GeV]",
+        ylabel="RMS of $E_{\\mathrm{available}}^{\\mathrm{reco}}/E_{\\mathrm{available}}^{\\mathrm{true}}$",
+    )
+    ax[1].set(
+        xlabel="MC truth $q_3$ [GeV]",
+        ylabel="25-75 IQR of $E_{\\mathrm{available}}^{\\mathrm{reco}}/E_{\\mathrm{available}}^{\\mathrm{true}}$",
+    )
     ax[0].grid(True)
     ax[1].grid(True)
     fig.tight_layout()
@@ -387,4 +412,3 @@ def plot_rms_iqr(
     if return_hist_fig:
         return fig, hist_fig
     return fig
-

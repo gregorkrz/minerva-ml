@@ -47,6 +47,7 @@ _load_project_env()
 def get_folders_from_wandb(tag: str, project: str = "minerva-models") -> set[str]:
     """Fetch wandb run names from project with the given tag."""
     import wandb
+
     print("Calling wandb API...")
     api = wandb.Api(timeout=60)
     entity = os.environ.get("WANDB_ENTITY") or getattr(api, "default_entity", None)
@@ -77,7 +78,9 @@ def get_all_ckpt_folders(ckpt_dir: str) -> set[str]:
 DATASETS = ("minerva_1A", "minerva_1B")
 
 
-def has_test_results_npz_for_dataset(ckpt_dir: str, folder: str, dataset_name: str) -> bool:
+def has_test_results_npz_for_dataset(
+    ckpt_dir: str, folder: str, dataset_name: str
+) -> bool:
     """True if ckpt_dir/folder/test_results contains an .npz for this dataset (e.g. *minerva_1A*.npz)."""
     results_dir = Path(ckpt_dir) / folder / "test_results"
     if not results_dir.is_dir():
@@ -102,7 +105,7 @@ def main():
         default=None,
         metavar="TAG",
         help="If set, only consider folders whose name matches a wandb run name "
-             'in project "minerva-models" with this tag.',
+        'in project "minerva-models" with this tag.',
     )
     args = parser.parse_args()
 

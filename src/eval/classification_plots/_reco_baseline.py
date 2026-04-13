@@ -1,9 +1,11 @@
 """Reconstruction-baseline recall/FPR per kinematic bin."""
+
 from __future__ import annotations
 
 import numpy as np
 
 from ._metrics_binned import mc_value_in_bin
+
 
 def compute_reco_baseline_recall_per_bin(
     reco_pred: np.ndarray,
@@ -63,4 +65,3 @@ def compute_reco_baseline_fpr_per_bin(
             fp = int(((reco_pred == 1) & bg).sum())
             out.append(fp / n_bg)
     return np.asarray(out, dtype=np.float64)
-

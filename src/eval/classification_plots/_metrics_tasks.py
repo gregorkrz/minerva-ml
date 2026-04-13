@@ -1,4 +1,5 @@
 """Aggregate metrics across models (pion, q3, W)."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -15,6 +16,7 @@ from ._metrics_binned import (
     get_signal_probabilities,
     mc_value_in_bin,
 )
+
 
 def compute_all_metrics(
     results: dict[str, list[dict]],
@@ -222,4 +224,3 @@ def compute_signal_baseline_W(
         n_sig = (y_true[bm] == 1).sum() if bm.sum() > 0 else 0
         baseline_w.append(y_true[bm].mean() if n_sig > 0 else np.nan)
     return np.array(baseline_w)
-

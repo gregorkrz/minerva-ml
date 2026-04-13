@@ -6,7 +6,8 @@ import os
 import uproot
 import awkward as ak
 from concurrent.futures import ThreadPoolExecutor, as_completed
-#from src.dataset.resolution_tools import find_narrowest_interval
+
+# from src.dataset.resolution_tools import find_narrowest_interval
 from src.dataset.preprocessing import (
     get_event_repr_nested_tensor,
     get_muons,
@@ -24,25 +25,70 @@ import traceback
 
 DATASETS = {}
 
-for playlist in ["1A", "1B", "1C", "1D", "1E", "1F", "1G", "1L", "1M", "1N", "1O", "1P"]:
-    DATASETS[playlist] = f"/pscratch/sd/g/gregork/MINERvA/raw_data/MediumEnergy_FHC_StandardMC_Playlist/{playlist}"
+for playlist in [
+    "1A",
+    "1B",
+    "1C",
+    "1D",
+    "1E",
+    "1F",
+    "1G",
+    "1L",
+    "1M",
+    "1N",
+    "1O",
+    "1P",
+]:
+    DATASETS[playlist] = (
+        f"/pscratch/sd/g/gregork/MINERvA/raw_data/MediumEnergy_FHC_StandardMC_Playlist/{playlist}"
+    )
 
-mc_part_keys = ["mc_FSPartPx", "mc_FSPartPy", "mc_FSPartPz", "mc_FSPartE", "mc_FSPartPDG"]
-prong_keys = ["prong_part_pos", "prong_part_E", "prong_part_score", "prong_part_mass", "prong_part_charge", "prong_part_pid", "prong_dEdXMean"]
-blob_keys = ["MasterAnaDev_BlobX", "MasterAnaDev_BlobY", "MasterAnaDev_BlobZ", "MasterAnaDev_BlobT", "MasterAnaDev_BlobTPos", "MasterAnaDev_BlobTotalE"]
+mc_part_keys = [
+    "mc_FSPartPx",
+    "mc_FSPartPy",
+    "mc_FSPartPz",
+    "mc_FSPartE",
+    "mc_FSPartPDG",
+]
+prong_keys = [
+    "prong_part_pos",
+    "prong_part_E",
+    "prong_part_score",
+    "prong_part_mass",
+    "prong_part_charge",
+    "prong_part_pid",
+    "prong_dEdXMean",
+]
+blob_keys = [
+    "MasterAnaDev_BlobX",
+    "MasterAnaDev_BlobY",
+    "MasterAnaDev_BlobZ",
+    "MasterAnaDev_BlobT",
+    "MasterAnaDev_BlobTPos",
+    "MasterAnaDev_BlobTotalE",
+]
 
 
-def process_single_root_file(playlist, root_file, dataset_path, output_dir, use_max_blobs_and_prongs=False, max_objects=150, max_blobs=20, max_prongs=10):
+def process_single_root_file(
+    playlist,
+    root_file,
+    dataset_path,
+    output_dir,
+    use_max_blobs_and_prongs=False,
+    max_objects=150,
+    max_blobs=20,
+    max_prongs=10,
+):
     """
     Process a single ROOT file.
-    
+
     Args:
         playlist: Playlist name (e.g., "1A")
         root_file: ROOT file name
         i: Index of the file
         dataset_path: Path to directory containing ROOT files
         output_dir: Output directory for processed files
-    
+
     Returns:
         Tuple of (success, root_file, n_events_written, error_msg)
     """
@@ -63,19 +109,29 @@ def process_single_root_file(playlist, root_file, dataset_path, output_dir, use_
             muons = remove_overflows(muons)
             global_features = get_global_features(master_ana_dev)
             global_features = np.concatenate(
-                [global_features, compute_extra_global_features(muons, photons, prongs)], axis=1
+                [
+                    global_features,
+                    compute_extra_global_features(muons, photons, prongs),
+                ],
+                axis=1,
             )
             mc_part = get_dense(mc_part_keys, master_ana_dev)
             truth_labels = get_event_labels(master_ana_dev, mc_part)
             max_blobs = max_blobs if use_max_blobs_and_prongs else -1
-            max_prongs = max_prongs if use_max_blobs_and_prongs else -1 # Max. number of tokens per event is then 20(blobs)+10(prongs)+2(photons)+1(muons)=33
+            max_prongs = (
+                max_prongs if use_max_blobs_and_prongs else -1
+            )  # Max. number of tokens per event is then 20(blobs)+10(prongs)+2(photons)+1(muons)=33
             n_events_written = get_event_repr_nested_tensor(
-                muons, photons, blobs, prongs, 
-                global_features, truth_labels, 
+                muons,
+                photons,
+                blobs,
+                prongs,
+                global_features,
+                truth_labels,
                 output_file=output_file,
                 max_blobs=max_blobs,
                 max_prongs=max_prongs,
-                max_objects=max_objects
+                max_objects=max_objects,
             )
         return (True, root_file, n_events_written, None)
     except Exception:
@@ -83,10 +139,19 @@ def process_single_root_file(playlist, root_file, dataset_path, output_dir, use_
         return (False, root_file, 0, error_msg)
 
 
-def process_playlist(playlist, dataset_path, output_dir="/data", max_workers_per_playlist=4, use_max_blobs_and_prongs=False, max_objects=150, max_blobs=20, max_prongs=10):
+def process_playlist(
+    playlist,
+    dataset_path,
+    output_dir="/data",
+    max_workers_per_playlist=4,
+    use_max_blobs_and_prongs=False,
+    max_objects=150,
+    max_blobs=20,
+    max_prongs=10,
+):
     """
     Process all ROOT files in a playlist in parallel.
-    
+
     Args:
         playlist: Playlist name (e.g., "1A")
         dataset_path: Path to directory containing ROOT files
@@ -97,17 +162,29 @@ def process_playlist(playlist, dataset_path, output_dir="/data", max_workers_per
         Tuple of (playlist, num_files_processed, num_files_failed, errors)
     """
     root_files = sorted([f for f in os.listdir(dataset_path) if f.endswith(".root")])
-    
-    print(f"[{playlist}] Starting parallel processing of {len(root_files)} files (max_workers={max_workers_per_playlist})")
+
+    print(
+        f"[{playlist}] Starting parallel processing of {len(root_files)} files (max_workers={max_workers_per_playlist})"
+    )
     start_time = time.time()
     num_processed = 0
     num_failed = 0
     errors = []
-    
+
     with ThreadPoolExecutor(max_workers=max_workers_per_playlist) as executor:
         # Submit all ROOT files for processing
         future_to_file = {
-            executor.submit(process_single_root_file, playlist, root_file, dataset_path, output_dir, use_max_blobs_and_prongs, max_objects, max_blobs, max_prongs): root_file
+            executor.submit(
+                process_single_root_file,
+                playlist,
+                root_file,
+                dataset_path,
+                output_dir,
+                use_max_blobs_and_prongs,
+                max_objects,
+                max_blobs,
+                max_prongs,
+            ): root_file
             for root_file in root_files
         }
         # Collect results as they complete
@@ -122,30 +199,43 @@ def process_playlist(playlist, dataset_path, output_dir="/data", max_workers_per
                     num_failed += 1
                     errors.append(error_msg)
                     print(f"[{playlist}] ✗ {error_msg}")
-                
+
                 completed += 1
                 if completed % 10 == 0:  # Progress update every 10 files
                     elapsed = time.time() - start_time
                     avg_time = elapsed / completed
                     remaining = avg_time * (len(root_files) - completed)
-                    print(f"[{playlist}] Progress: {completed}/{len(root_files)} files ({elapsed:.1f}s elapsed, ~{remaining:.1f}s remaining)")
-                
+                    print(
+                        f"[{playlist}] Progress: {completed}/{len(root_files)} files ({elapsed:.1f}s elapsed, ~{remaining:.1f}s remaining)"
+                    )
+
             except Exception as e:
                 num_failed += 1
                 error_msg = f"Unexpected error processing {root_file}: {str(e)}"
                 errors.append(error_msg)
                 print(f"[{playlist}] ✗ {error_msg}")
-    
+
     elapsed = time.time() - start_time
-    print(f"[{playlist}] ✓ Complete: {num_processed}/{len(root_files)} files succeeded in {elapsed:.1f}s")
-    
+    print(
+        f"[{playlist}] ✓ Complete: {num_processed}/{len(root_files)} files succeeded in {elapsed:.1f}s"
+    )
+
     return (playlist, num_processed, num_failed, errors)
 
 
-def process_all_playlists_parallel(datasets, output_dir="/data", max_workers=None, max_workers_per_playlist=4, use_max_blobs_and_prongs=False, max_objects=150, max_blobs=20, max_prongs=10):
+def process_all_playlists_parallel(
+    datasets,
+    output_dir="/data",
+    max_workers=None,
+    max_workers_per_playlist=4,
+    use_max_blobs_and_prongs=False,
+    max_objects=150,
+    max_blobs=20,
+    max_prongs=10,
+):
     """
     Process multiple playlists in parallel (each playlist processes its files in parallel).
-    
+
     Args:
         datasets: Dictionary of {playlist: path}
         output_dir: Output directory for processed files
@@ -154,27 +244,39 @@ def process_all_playlists_parallel(datasets, output_dir="/data", max_workers=Non
         use_max_blobs_and_prongs: Use max_blobs and max_prongs to aggregate blobs and prongs into a special token.
     """
     os.makedirs(output_dir, exist_ok=True)
-    
+
     playlists = list(datasets.keys())
-    
+
     if max_workers is None:
         max_workers = len(playlists)
-    
+
     print("=" * 80)
     print(f"Processing {len(playlists)} playlists in parallel")
     print(f"Max concurrent playlists: {max_workers}")
-    print(f"Each playlist will process files in parallel (max_workers_per_playlist={max_workers_per_playlist})")
+    print(
+        f"Each playlist will process files in parallel (max_workers_per_playlist={max_workers_per_playlist})"
+    )
     print("=" * 80)
-    
+
     all_results = {}
-    
+
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         # Submit all playlists
         future_to_playlist = {
-            executor.submit(process_playlist, playlist, datasets[playlist], output_dir, max_workers_per_playlist, use_max_blobs_and_prongs, max_objects, max_blobs, max_prongs): playlist
+            executor.submit(
+                process_playlist,
+                playlist,
+                datasets[playlist],
+                output_dir,
+                max_workers_per_playlist,
+                use_max_blobs_and_prongs,
+                max_objects,
+                max_blobs,
+                max_prongs,
+            ): playlist
             for playlist in playlists
         }
-        
+
         # Collect results as they complete
         for future in as_completed(future_to_playlist):
             playlist = future_to_playlist[future]
@@ -184,9 +286,10 @@ def process_all_playlists_parallel(datasets, output_dir="/data", max_workers=Non
             except Exception as e:
                 print(f"[{playlist}] Playlist processing failed: {e}")
                 import traceback
+
                 traceback.print_exc()
                 all_results[playlist] = (playlist, 0, 0, [str(e)])
-    
+
     return all_results
 
 
@@ -197,56 +300,93 @@ def print_summary(all_results):
     print("=" * 80)
     total_files = 0
     total_success = 0
-    total_failed = 0    
+    total_failed = 0
     for playlist in sorted(all_results.keys()):
         result = all_results[playlist]
         _, num_success, num_failed, errors = result
-        total_files += (num_success + num_failed)
+        total_files += num_success + num_failed
         total_success += num_success
         total_failed += num_failed
         status = "✓" if num_failed == 0 else "✗"
-        print(f"{status} {playlist}: {num_success}/{num_success + num_failed} files succeeded")
-        
+        print(
+            f"{status} {playlist}: {num_success}/{num_success + num_failed} files succeeded"
+        )
+
         # Print errors if any
         if errors:
-            for error in errors[:3]: # Show first 3 errors
+            for error in errors[:3]:  # Show first 3 errors
                 print(f"    {error}")
             if len(errors) > 3:
                 print(f"    ... and {len(errors) - 3} more errors")
-    
+
     print("=" * 80)
-    print(f"TOTAL: {total_success}/{total_files} files succeeded, {total_failed} failed")
+    print(
+        f"TOTAL: {total_success}/{total_files} files succeeded, {total_failed} failed"
+    )
     print("=" * 80)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Process MINERvA ROOT files to HDF5 format")
-    parser.add_argument("--output-dir", default="/data", help="Output directory for HDF5 files")
-    parser.add_argument("--max-workers", type=int, default=None,
-                        help="Maximum number of playlists to process simultaneously (default: all)")
-    parser.add_argument("--max-workers-per-playlist", type=int, default=1,
-                        help="Maximum number of ROOT files to process simultaneously per playlist (default: 4)")
-    parser.add_argument("--playlists", nargs="+", default=None, help="Specific playlists to process (default: all)")
-    parser.add_argument("--use-max-blobs-and-prongs", action="store_true", default=False,
-                        help="Use max_blobs and max_prongs to aggregate blobs and prongs into a special token.")
-    parser.add_argument("--max-blobs", type=int, default=100,
-                        help="Maximum number of blobs to process (default: 100)")
-    parser.add_argument("--max-prongs", type=int, default=10,
-                        help="Maximum number of prongs to process (default: 10)")
-    parser.add_argument("--max-objects", type=int, default=150,
-                        help="Maximum number of objects to process (default: 150) - use this only if use-max-blobs-and-prongs is False")
+    parser = argparse.ArgumentParser(
+        description="Process MINERvA ROOT files to HDF5 format"
+    )
+    parser.add_argument(
+        "--output-dir", default="/data", help="Output directory for HDF5 files"
+    )
+    parser.add_argument(
+        "--max-workers",
+        type=int,
+        default=None,
+        help="Maximum number of playlists to process simultaneously (default: all)",
+    )
+    parser.add_argument(
+        "--max-workers-per-playlist",
+        type=int,
+        default=1,
+        help="Maximum number of ROOT files to process simultaneously per playlist (default: 4)",
+    )
+    parser.add_argument(
+        "--playlists",
+        nargs="+",
+        default=None,
+        help="Specific playlists to process (default: all)",
+    )
+    parser.add_argument(
+        "--use-max-blobs-and-prongs",
+        action="store_true",
+        default=False,
+        help="Use max_blobs and max_prongs to aggregate blobs and prongs into a special token.",
+    )
+    parser.add_argument(
+        "--max-blobs",
+        type=int,
+        default=100,
+        help="Maximum number of blobs to process (default: 100)",
+    )
+    parser.add_argument(
+        "--max-prongs",
+        type=int,
+        default=10,
+        help="Maximum number of prongs to process (default: 10)",
+    )
+    parser.add_argument(
+        "--max-objects",
+        type=int,
+        default=150,
+        help="Maximum number of objects to process (default: 150) - use this only if use-max-blobs-and-prongs is False",
+    )
     args = parser.parse_args()
-    
+
     # Filter datasets if specific playlists requested
     if args.playlists:
         datasets_to_process = {k: v for k, v in DATASETS.items() if k in args.playlists}
     else:
         datasets_to_process = DATASETS
-    
+
     print(f"Selected playlists: {list(datasets_to_process.keys())}")
-    
+
     start_time = time.time()
-    
+
     all_results = process_all_playlists_parallel(
         datasets_to_process,
         output_dir=args.output_dir,
@@ -255,11 +395,12 @@ if __name__ == "__main__":
         use_max_blobs_and_prongs=args.use_max_blobs_and_prongs,
         max_blobs=args.max_blobs,
         max_prongs=args.max_prongs,
-        max_objects=args.max_objects
+        max_objects=args.max_objects,
     )
-    
-    total_time = time.time() - start_time
-    
-    print_summary(all_results)
-    print(f"\nTotal processing time: {total_time/60:.1f} minutes ({total_time/3600:.2f} hours)")
 
+    total_time = time.time() - start_time
+
+    print_summary(all_results)
+    print(
+        f"\nTotal processing time: {total_time/60:.1f} minutes ({total_time/3600:.2f} hours)"
+    )
