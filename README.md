@@ -170,7 +170,7 @@ python -m src.scripts.copy_figures_for_paper
 # or: python -m src.scripts.copy_figures_for_paper --dry-run
 ```
 
-Use `--plots-root` if your PDFs live outside the default `plots/` tree (`--out-root` is an alias). Outputs go under `figures_latex/regression`, `figures_latex/classification`, and `figures_latex/classification_detailed` by default.
+Use `--plots-root` if your PDFs live outside the default `plots/` tree (`--out-root` is an alias). Outputs go under `figures_latex/` (root for joint training curves), `figures_latex/regression/`, and `figures_latex/classification/` by default.
 
 ### Notebooks (optional)
 

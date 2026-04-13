@@ -12,6 +12,7 @@ CCNπ (multi-pion) emits vs *q₃* and vs *W* only (two PDFs when *W* data exist
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Literal
 
@@ -31,15 +32,55 @@ from src.eval.classification_plots import (
 )
 from src.eval.classification_plots._constants import (
     _baseline_legend_with_global_fpr,
-    _tpr_column_title_vs_kinematics,
     _tpr_line_legend_label,
 )
 
 LightComponent = Literal["pion", "q3"]
 
+# Axis labels match ``plot_steps`` (12); ticks 11; shared legend slightly smaller for density.
+_LABEL_FS = 12
+_TICK_FS = 11
+_LEGEND_FS = 10
+
 _COL_LABELS = ("AUPRC", "AUROC", "Efficiency (TPR)")
-# q₃ metrics always use global FPR in ``compute_all_metrics_q3`` (matches ``plot_classification_q3``).
-_TPR_TITLE_Q3 = _tpr_column_title_vs_kinematics(True)
+
+
+def _shared_light_legend(fig: plt.Figure, axes: Iterable[plt.Axes]) -> None:
+    """One legend below the figure; first-seen label order, one handle per label."""
+    by_label: dict[str, plt.Artist] = {}
+    labels_order: list[str] = []
+    for ax in axes:
+        h, lab = ax.get_legend_handles_labels()
+        for hi, li in zip(h, lab):
+            if li in by_label:
+                continue
+            by_label[li] = hi
+            labels_order.append(li)
+    if not labels_order:
+        return
+    handles = [by_label[k] for k in labels_order]
+    n = len(labels_order)
+    ncol = max(3, min(6, (n + 2) // 3)) if n > 2 else n
+    legend_kw: dict = dict(
+        ncol=ncol,
+        fontsize=_LEGEND_FS,
+        frameon=True,
+        fancybox=True,
+        facecolor="white",
+        edgecolor="0.4",
+        columnspacing=1.0,
+        handletextpad=0.5,
+    )
+    try:
+        fig.legend(handles, labels_order, loc="outside lower center", **legend_kw)
+    except (TypeError, ValueError):
+        fig.legend(
+            handles,
+            labels_order,
+            loc="lower center",
+            bbox_to_anchor=(0.5, -0.12),
+            **legend_kw,
+        )
 
 
 def _save_single_fig(fig: plt.Figure, path: Path) -> None:
@@ -57,7 +98,6 @@ def _figure_metrics_1x3(
     fixed_fpr: list[float],
     reco_baseline_tpr: np.ndarray,
     reco_label: str,
-    suptitle: str,
     colors: dict[str, str],
     *,
     log_x: bool = False,
@@ -83,21 +123,16 @@ def _figure_metrics_1x3(
     )
     axes[2].plot(x, reco_baseline_tpr, "s--", color="black", label=bl_lbl, zorder=2)
 
-    x_short = xlabel.split("[")[0].strip() if "[" in xlabel else xlabel
     for col, metric in enumerate(_COL_LABELS):
         ax = axes[col]
-        ax.set_xlabel(xlabel, fontsize=11)
-        ax.set_ylabel(metric, fontsize=11)
-        if col < 2:
-            ax.set_title(f"{metric} vs. {x_short}", fontsize=11)
-        else:
-            ax.set_title(f"{_TPR_TITLE_Q3} vs. {x_short}", fontsize=11)
-        ax.legend(fontsize=8, loc="best")
+        ax.set_xlabel(xlabel, fontsize=_LABEL_FS)
+        ax.set_ylabel(metric, fontsize=_LABEL_FS)
+        ax.tick_params(axis="both", labelsize=_TICK_FS)
         ax.grid(True, alpha=0.35)
         if log_x:
             ax.set_xscale("log")
 
-    fig.suptitle(suptitle, fontsize=13)
+    _shared_light_legend(fig, axes.ravel())
     return fig
 
 
@@ -112,7 +147,6 @@ def _figure_metrics_2x3_pion(
     reco_tpr_theta: np.ndarray,
     reco_label: str,
     reco_baseline_global_fpr: float,
-    suptitle: str,
     colors: dict[str, str],
 ) -> plt.Figure:
     """Two rows: pion *E* (top) and *θ* (bottom); matches ``plot_cc1pi_vs_pion_kinematics`` (3-col part)."""
@@ -138,30 +172,22 @@ def _figure_metrics_2x3_pion(
     axes[0, 2].plot(x_E, reco_tpr_E, "s--", color="black", label=bl_lbl, zorder=2)
     axes[1, 2].plot(x_theta, reco_tpr_theta, "s--", color="black", label=bl_lbl, zorder=2)
 
-    e_short = r"True $E_\pi$"
-    th_short = r"True $\theta_\pi$"
     for col, metric in enumerate(_COL_LABELS):
         ax0 = axes[0, col]
         ax1 = axes[1, col]
-        ax0.set_xlabel(r"True $E_\pi$ [GeV]", fontsize=11)
-        ax1.set_xlabel(r"True $\theta_\pi$ [rad]", fontsize=11)
-        ax0.set_ylabel(metric, fontsize=11)
-        ax1.set_ylabel(metric, fontsize=11)
-        if col < 2:
-            ax0.set_title(f"{metric} vs. {e_short}", fontsize=11)
-            ax1.set_title(f"{metric} vs. {th_short}", fontsize=11)
-        else:
-            ax0.set_title(f"{_TPR_TITLE_Q3} vs. {e_short}", fontsize=11)
-            ax1.set_title(f"{_TPR_TITLE_Q3} vs. {th_short}", fontsize=11)
-        ax0.legend(fontsize=7, loc="best")
-        ax1.legend(fontsize=7, loc="best")
+        ax0.set_xlabel(r"True $E_\pi$ [GeV]", fontsize=_LABEL_FS)
+        ax1.set_xlabel(r"True $\theta_\pi$ [rad]", fontsize=_LABEL_FS)
+        ax0.set_ylabel(metric, fontsize=_LABEL_FS)
+        ax1.set_ylabel(metric, fontsize=_LABEL_FS)
+        ax0.tick_params(axis="both", labelsize=_TICK_FS)
+        ax1.tick_params(axis="both", labelsize=_TICK_FS)
         ax0.grid(True, alpha=0.35)
         ax1.grid(True, alpha=0.35)
         ax0.set_xscale("log")
         if len(x_E) > 0 and np.all(np.isfinite(x_E[[0, -1]])):
             ax0.set_xlim(float(x_E[0]) * 0.8, float(x_E[-1]) * 1.2)
 
-    fig.suptitle(suptitle, fontsize=13)
+    _shared_light_legend(fig, axes.ravel())
     return fig
 
 
@@ -207,9 +233,6 @@ def save_light_classification_pdfs(
                 y_pred: np.ndarray,
                 baseline_fpr: float,
                 tag: str,
-                suptitle_q3: str,
-                suptitle_W: str,
-                suptitle_pion: str,
             ) -> None:
                 if not np.isfinite(baseline_fpr):
                     return
@@ -241,7 +264,6 @@ def save_light_classification_pdfs(
                     fpr,
                     reco_q3,
                     "Baseline",
-                    suptitle_q3,
                     clrs_dict_full,
                     log_x=False,
                     reco_baseline_global_fpr=baseline_fpr,
@@ -272,7 +294,6 @@ def save_light_classification_pdfs(
                         fpr,
                         reco_W,
                         "Baseline",
-                        suptitle_W,
                         clrs_dict_full,
                         log_x=False,
                         reco_baseline_global_fpr=baseline_fpr,
@@ -309,7 +330,6 @@ def save_light_classification_pdfs(
                     reco_th,
                     "Baseline",
                     baseline_fpr,
-                    suptitle_pion,
                     clrs_dict_full,
                 )
                 _save_single_fig(fig_p, out_dir / f"eval_classification_light_{tag}_pion_kinematics_{playlist}.pdf")
@@ -328,9 +348,6 @@ def save_light_classification_pdfs(
                 y_pred=y_pred_cc1pi,
                 baseline_fpr=baseline_fpr_cc1pi,
                 tag="cc1pi",
-                suptitle_q3=rf"$CC1\pi^\pm$ — AUPRC / AUROC / {_TPR_TITLE_Q3} vs. $q_3$ (playlist {playlist})",
-                suptitle_W=rf"$CC1\pi^\pm$ — AUPRC / AUROC / {_TPR_TITLE_Q3} vs. $W$ (playlist {playlist})",
-                suptitle_pion=rf"$CC1\pi^\pm$ — AUPRC / AUROC / {_TPR_TITLE_Q3} vs. pion kinematics (playlist {playlist})",
             )
 
             # --- CCπ⁰ ---
@@ -351,9 +368,6 @@ def save_light_classification_pdfs(
                 y_pred=y_pred_pi0,
                 baseline_fpr=baseline_fpr_pi0,
                 tag="cc1pi0",
-                suptitle_q3=rf"$CC\pi^0$ — AUPRC / AUROC / {_TPR_TITLE_Q3} vs. $q_3$ (playlist {playlist})",
-                suptitle_W=rf"$CC\pi^0$ — AUPRC / AUROC / {_TPR_TITLE_Q3} vs. $W$ (playlist {playlist})",
-                suptitle_pion=rf"$CC\pi^0$ — AUPRC / AUROC / {_TPR_TITLE_Q3} vs. pion kinematics (playlist {playlist})",
             )
 
         if do_q3:
@@ -386,7 +400,6 @@ def save_light_classification_pdfs(
                     fpr_n,
                     reco_q3,
                     "Baseline",
-                    rf"CCN$\pi$ — AUPRC / AUROC / {_TPR_TITLE_Q3} vs. $q_3$ (playlist {playlist})",
                     clrs_dict_full,
                     log_x=False,
                     reco_baseline_global_fpr=baseline_fpr_ccnpi,
@@ -416,7 +429,6 @@ def save_light_classification_pdfs(
                         fpr_n,
                         reco_W,
                         "Baseline",
-                        rf"CCN$\pi$ — AUPRC / AUROC / {_TPR_TITLE_Q3} vs. $W$ (playlist {playlist})",
                         clrs_dict_full,
                         log_x=False,
                         reco_baseline_global_fpr=baseline_fpr_ccnpi,

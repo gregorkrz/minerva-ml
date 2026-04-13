@@ -232,9 +232,7 @@ def main(argv: list[str] | None = None) -> None:
         xlabel="MC truth $q_3$ [GeV]",
         ylabel=r"25-75 IQR of $E_{\mathrm{available}}^{\mathrm{reco}}/E_{\mathrm{available}}^{\mathrm{true}}$",
     )
-    selection_text = (
-        "MINERvA Open Data Playlists 1A, 1B\n" r"Event selection def. by E_recoil_CCinc"
-    )
+    selection_text = ""
     leg1 = ax[1].legend(title=selection_text, fontsize=9, loc="upper right")
     leg1.set_title(selection_text)
     ax[0].grid(True)
