@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Load classification + regression eval inputs and cache them as pickles.
+"""Load classification and/or regression eval inputs and cache them as pickles.
 
 Default layout (relative to repo root)::
 
-    out/eval_data/classification_<flag>.pkl
-    out/eval_data/regression_<flag>.pkl
+    out/classification_<flag>.pkl
+    out/regression_<flag>.pkl
 
 Each file is a versioned dict suitable for offline ``plot_*.py`` scripts.
 
@@ -31,7 +31,6 @@ from src.eval._constants import (
     DEFAULT_CKPT_DIR,
     DEFAULT_OUT_DIR,
     DEFAULT_WANDB_TAG,
-    EVAL_DATA_SUBDIR,
     CLRS_CLASSIFICATION,
     CLRS_REGRESSION,
     FLOPS_PER_STEP,
@@ -57,10 +56,9 @@ def _cap_to_label(cap: int) -> str:
 
 
 def _default_paths(out_dir: Path, flag: str) -> tuple[Path, Path]:
-    ed = out_dir / EVAL_DATA_SUBDIR
     return (
-        ed / f"{CLASSIFICATION_PICKLE_STEM}_{flag}.pkl",
-        ed / f"{REGRESSION_PICKLE_STEM}_{flag}.pkl",
+        out_dir / f"{CLASSIFICATION_PICKLE_STEM}_{flag}.pkl",
+        out_dir / f"{REGRESSION_PICKLE_STEM}_{flag}.pkl",
     )
 
 
@@ -232,19 +230,26 @@ def main(argv: list[str] | None = None) -> None:
     )
     p.add_argument("--ckpt-dir", type=Path, default=DEFAULT_CKPT_DIR)
     p.add_argument("--suppress-errors", action="store_true")
+    p.add_argument(
+        "--regression-only",
+        action="store_true",
+        help="Only collect regression eval data and write the regression pickle; skip classification.",
+    )
     args = p.parse_args(argv)
 
     out_dir = _REPO_ROOT / (args.out_dir or DEFAULT_OUT_DIR)
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / EVAL_DATA_SUBDIR).mkdir(parents=True, exist_ok=True)
 
     clf_path, reg_path = _default_paths(out_dir, args.flag)
 
-    print("Collecting classification…")
-    clf = collect_classification(args.ckpt_dir, args.flag)
-    with open(clf_path, "wb") as f:
-        pickle.dump(clf, f, protocol=pickle.HIGHEST_PROTOCOL)
-    print("Wrote", clf_path)
+    if not args.regression_only:
+        print("Collecting classification…")
+        clf = collect_classification(args.ckpt_dir, args.flag)
+        with open(clf_path, "wb") as f:
+            pickle.dump(clf, f, protocol=pickle.HIGHEST_PROTOCOL)
+        print("Wrote", clf_path)
+    else:
+        print("Skipping classification (--regression-only).")
 
     print("Collecting regression…")
     reg = collect_regression(args.ckpt_dir, args.flag, args.suppress_errors)

@@ -9,7 +9,6 @@ DEFAULT_WANDB_TAG = "Run_2703"
 DEFAULT_OUT_DIR = Path("out")
 # Default directory for plot PDFs (under repo unless path is absolute).
 DEFAULT_PLOTS_DIR = Path("plots")
-EVAL_DATA_SUBDIR = "eval_data"
 CLASSIFICATION_PICKLE_STEM = "classification"
 REGRESSION_PICKLE_STEM = "regression"
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Classification vs pion kinematics (E, θ), CC1π⁰, π⁰ Δm scan; plus light appendix PDFs.
 
-Pickles default under ``<repo>/<--out-dir>/eval_data/``; PDFs under
+Pickles default under ``<repo>/<--out-dir>/``; PDFs under
 ``<repo>/<--plots-dir>/classification/pions/`` and ``.../classification/light/``
 (per playlist: ``eval_classification_light_{cc1pi,cc1pi0}_{q3,W,pion_kinematics}_<pl>.pdf``).
 """
@@ -42,13 +42,12 @@ from src.eval._constants import (
     DEFAULT_OUT_DIR,
     DEFAULT_PLOTS_DIR,
     DEFAULT_WANDB_TAG,
-    EVAL_DATA_SUBDIR,
     repo_output_path,
 )
 
 
 def _pickle_path(out_dir: Path, flag: str) -> Path:
-    return out_dir / EVAL_DATA_SUBDIR / f"{CLASSIFICATION_PICKLE_STEM}_{flag}.pkl"
+    return out_dir / f"{CLASSIFICATION_PICKLE_STEM}_{flag}.pkl"
 
 
 PI0_MASS = 134.977
@@ -99,7 +98,7 @@ def main(argv: list[str] | None = None) -> None:
         "--out-dir",
         type=Path,
         default=None,
-        help="Root containing eval_data/ pickles (default: out/ under repo)",
+        help="Directory containing classification_<flag>.pkl (default: out/ under repo)",
     )
     ap.add_argument(
         "--plots-dir",

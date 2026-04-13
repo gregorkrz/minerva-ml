@@ -70,6 +70,7 @@ def get_runs_by_model_and_cap(
         if model is None:
             m = re.search(r"_OLM_FB_regression_(-?\d+)_", name)
             if m:
+                print("Found regression with OL-medium!")
                 model, cap = "OmniLearned-medium", int(m.group(1))
         if model is None:
             m = re.search(r"_regression_(Transformer[^_]+)_data_cap_(-?\d+)_", name)

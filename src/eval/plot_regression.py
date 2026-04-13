@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Regression evaluation PDFs (IQR vs q3, residuals, scaling) from cached pickle.
 
-Pickles default under ``<repo>/<--out-dir>/eval_data/``; PDFs under
+Pickles default under ``<repo>/<--out-dir>/``; PDFs under
 ``<repo>/<--plots-dir>/regression/``.
 """
 
@@ -31,7 +31,6 @@ from src.eval._constants import (
     DEFAULT_OUT_DIR,
     DEFAULT_PLOTS_DIR,
     DEFAULT_WANDB_TAG,
-    EVAL_DATA_SUBDIR,
     REGRESSION_PICKLE_STEM,
     repo_output_path,
 )
@@ -48,7 +47,7 @@ def _maybe_register_arial() -> None:
 
 
 def _pickle_path(out_dir: Path, flag: str) -> Path:
-    return out_dir / EVAL_DATA_SUBDIR / f"{REGRESSION_PICKLE_STEM}_{flag}.pkl"
+    return out_dir / f"{REGRESSION_PICKLE_STEM}_{flag}.pkl"
 
 
 def _cap_to_label(cap: int) -> str:
@@ -66,7 +65,7 @@ def main(argv: list[str] | None = None) -> None:
         "--out-dir",
         type=Path,
         default=None,
-        help="Root containing eval_data/ pickles (default: out/ under repo)",
+        help="Directory containing regression_<flag>.pkl (default: out/ under repo)",
     )
     ap.add_argument(
         "--plots-dir",

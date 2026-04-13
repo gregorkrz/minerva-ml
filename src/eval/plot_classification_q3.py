@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Classification vs q3, confusion matrices, CCNπ q₃ panels; plus light appendix PDFs.
 
-Pickles default under ``<repo>/<--out-dir>/eval_data/``; PDFs under
+Pickles default under ``<repo>/<--out-dir>/``; PDFs under
 ``<repo>/<--plots-dir>/classification/q3/`` and ``.../classification/light/``
 (``eval_classification_light_ccnpi_q3_<pl>.pdf`` and ``..._W_<pl>.pdf`` when *W* is in the pickle).
 """
@@ -39,13 +39,12 @@ from src.eval._constants import (
     DEFAULT_OUT_DIR,
     DEFAULT_PLOTS_DIR,
     DEFAULT_WANDB_TAG,
-    EVAL_DATA_SUBDIR,
     repo_output_path,
 )
 
 
 def _pickle_path(out_dir: Path, flag: str) -> Path:
-    return out_dir / EVAL_DATA_SUBDIR / f"{CLASSIFICATION_PICKLE_STEM}_{flag}.pkl"
+    return out_dir / f"{CLASSIFICATION_PICKLE_STEM}_{flag}.pkl"
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -57,7 +56,7 @@ def main(argv: list[str] | None = None) -> None:
         "--out-dir",
         type=Path,
         default=None,
-        help="Root containing eval_data/ pickles (default: out/ under repo)",
+        help="Directory containing classification_<flag>.pkl (default: out/ under repo)",
     )
     ap.add_argument(
         "--plots-dir",

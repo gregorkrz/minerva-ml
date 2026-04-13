@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Training curves: log10(FLOPs) vs validation loss and log10(steps) vs validation loss.
 
-Pickles default to ``<repo>/<--out-dir>/eval_data/``; PDFs default to
+Pickles default to ``<repo>/<--out-dir>/``; PDFs default to
 ``<repo>/<--plots-dir>/``.
 
 By default writes **one row of two panels** (classification | regression) with a
@@ -32,7 +32,6 @@ from src.eval._constants import (
     DEFAULT_OUT_DIR,
     DEFAULT_PLOTS_DIR,
     DEFAULT_WANDB_TAG,
-    EVAL_DATA_SUBDIR,
     REGRESSION_PICKLE_STEM,
     repo_output_path,
 )
@@ -45,10 +44,9 @@ _TITLE_FS = 13
 
 
 def _pickle_paths(out_dir: Path, flag: str) -> tuple[Path, Path]:
-    ed = out_dir / EVAL_DATA_SUBDIR
     return (
-        ed / f"{CLASSIFICATION_PICKLE_STEM}_{flag}.pkl",
-        ed / f"{REGRESSION_PICKLE_STEM}_{flag}.pkl",
+        out_dir / f"{CLASSIFICATION_PICKLE_STEM}_{flag}.pkl",
+        out_dir / f"{REGRESSION_PICKLE_STEM}_{flag}.pkl",
     )
 
 
@@ -345,7 +343,7 @@ def main(argv: list[str] | None = None) -> None:
         "--out-dir",
         type=Path,
         default=None,
-        help="Root containing eval_data/ pickles (default: out/ under repo)",
+        help="Directory containing classification_<flag>.pkl and regression_<flag>.pkl (default: out/ under repo)",
     )
     ap.add_argument(
         "--plots-dir",
@@ -378,7 +376,9 @@ def main(argv: list[str] | None = None) -> None:
     colors_c = clf["clrs_dict_full"]
 
     with open(reg_p, "rb") as f:
+        print("- reading regression pickle from", reg_p)
         reg = pickle.load(f)
+        print("- keys in regression pickle:", reg["training_names_full"]["Log1p"].keys())
     lh_r = reg["loss_histories"]
     flops_r = reg["flops_per_step"]
     colors_r = reg["clrs_dict_full"]
