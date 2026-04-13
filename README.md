@@ -170,25 +170,6 @@ python -m src.scripts.copy_figures_for_paper
 # or: python -m src.scripts.copy_figures_for_paper --dry-run
 ```
 
-Use `--plots-root` if your PDFs live outside the default `plots/` tree (`--out-root` is an alias). Outputs go under `figures_latex/` (root for joint training curves), `figures_latex/regression/`, and `figures_latex/classification/` by default.
-
-### Notebooks (optional)
-
-The `notebooks/Eval_*.ipynb` notebooks remain useful for interactive exploration. Set `WANDB_TAG` at the top to match your tag and run all cells. To execute headlessly (requires `nbconvert`; e.g. `pip install nbconvert`):
-
-```bash
-cd notebooks
-# Execute (updates notebooks in place with fresh outputs)
-jupyter nbconvert --to notebook --execute Eval_Regression.ipynb --inplace
-jupyter nbconvert --to notebook --execute Eval_Classification.ipynb --inplace
-jupyter nbconvert --to notebook --execute Eval_Classification_Light.ipynb --inplace
-
-# Export static copies (HTML; use --to pdf instead if pandoc/LaTeX are available, or --to webpdf with Chromium)
-jupyter nbconvert --to html Eval_Regression.ipynb
-jupyter nbconvert --to html Eval_Classification.ipynb
-```
-
-For publication-quality PDFs and the directory layout used by `copy_figures_for_paper`, prefer the `src.eval` pipeline above rather than notebook output paths.
 
 ## 6) Event displays
 

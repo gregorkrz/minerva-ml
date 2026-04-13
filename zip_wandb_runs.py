@@ -20,11 +20,27 @@ CKPT_DIR = Path("/global/cfs/cdirs/m3246/gregork/checkpoints")
 
 def main():
     parser = argparse.ArgumentParser(description="Zip wandb-tagged checkpoint folders.")
-    parser.add_argument("--tag", default="Run_1203", help="Wandb tag to filter runs (default: Run_2703)")
-    parser.add_argument("--project", default="minerva-models", help="Wandb project name")
-    parser.add_argument("--ckpt-dir", type=Path, default=CKPT_DIR, help="Checkpoint root directory")
-    parser.add_argument("-o", "--output", type=str, default=None, help="Output archive path (default: <tag>_checkpoints.tar.gz)")
-    parser.add_argument("--dry-run", action="store_true", help="List matching folders without creating archive")
+    parser.add_argument(
+        "--tag", default="Run_1203", help="Wandb tag to filter runs (default: Run_2703)"
+    )
+    parser.add_argument(
+        "--project", default="minerva-models", help="Wandb project name"
+    )
+    parser.add_argument(
+        "--ckpt-dir", type=Path, default=CKPT_DIR, help="Checkpoint root directory"
+    )
+    parser.add_argument(
+        "-o",
+        "--output",
+        type=str,
+        default=None,
+        help="Output archive path (default: <tag>_checkpoints.tar.gz)",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="List matching folders without creating archive",
+    )
     args = parser.parse_args()
 
     if args.output is None:
@@ -61,12 +77,15 @@ def main():
     print(f"This may take a while for {len(found)} folder(s)...")
 
     cmd = [
-        "tar", "-czf", str(output_path),
-        "-C", str(args.ckpt_dir),
+        "tar",
+        "-czf",
+        str(output_path),
+        "-C",
+        str(args.ckpt_dir),
         *found,
     ]
     subprocess.run(cmd, check=True)
-    size_gb = output_path.stat().st_size / (1024 ** 3)
+    size_gb = output_path.stat().st_size / (1024**3)
     print(f"Done. Archive size: {size_gb:.2f} GB")
 
 

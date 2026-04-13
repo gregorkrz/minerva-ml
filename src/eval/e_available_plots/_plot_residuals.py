@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,12 @@ from ._grouped import _resolve_color_map, _SEED_SEP
 from ._constants import DEFAULT_BASELINE_KEY
 from ._load import _build_event_mask, load_eval_data
 from ._titles import _Etrue_bin_title, _q3_bin_title
+
+# Match ``plot_regression`` / ``plot_rms_iqr_with_uncertainty`` (legend 9; axes ≈ mpl defaults).
+_REGRESSION_LEGEND_FS = 10
+_REGRESSION_AXIS_FS = 12
+_REGRESSION_TITLE_FS = 12
+_REGRESSION_TICK_FS = 12
 
 
 def plot_residuals_by_energy(
@@ -282,15 +289,11 @@ def plot_residuals_by_q3(
 
     if legend_title is None:
         if use_cc_selection >= 2:
-            title_text = (
-                "Available energy residual and ratio histograms\n"
-                f"Minerva Open Data Playlist {dp}\n"
-                "Event selection def. by E_recoil_CCinc"
-            )
+            title_text = ""
         else:
-            title_text = "Available energy residual and ratio histograms"
+            title_text = ""
     else:
-        title_text = "Available energy residual and ratio histograms"
+        title_text = ""
         if legend_title:
             title_text += "\n" + legend_title
 
@@ -344,15 +347,22 @@ def plot_residuals_by_q3(
                 )
 
         col_title = _q3_bin_title(qlow, qhigh)
-        ax[0, i].set(
-            xlabel=r"$E_{\mathrm{available}}^{\mathrm{reco}} - E_{\mathrm{available}}^{\mathrm{true}}$ [GeV]",
-            ylabel="Counts",
-            title=col_title,
+        fs_a = _REGRESSION_AXIS_FS
+        fs_t = _REGRESSION_TITLE_FS
+        fs_k = _REGRESSION_TICK_FS
+        ax[0, i].set_xlabel(
+            r"$E_{\mathrm{available}}^{\mathrm{reco}} - E_{\mathrm{available}}^{\mathrm{true}}$ [GeV]",
+            fontsize=fs_a,
         )
-        ax[1, i].set(
-            xlabel=r"$E_{\mathrm{available}}^{\mathrm{reco}} / E_{\mathrm{available}}^{\mathrm{true}}$",
-            ylabel="Counts",
+        ax[0, i].set_ylabel("Counts", fontsize=fs_a)
+        ax[0, i].set_title(col_title, fontsize=fs_t)
+        ax[1, i].set_xlabel(
+            r"$E_{\mathrm{available}}^{\mathrm{reco}} / E_{\mathrm{available}}^{\mathrm{true}}$",
+            fontsize=fs_a,
         )
+        ax[1, i].set_ylabel("Counts", fontsize=fs_a)
+        ax[0, i].tick_params(axis="both", which="major", labelsize=fs_k)
+        ax[1, i].tick_params(axis="both", which="major", labelsize=fs_k)
         ax[0, i].set_xlim(-1, 1)
         ax[0, i].grid(True)
         ax[1, i].grid(True)
@@ -361,15 +371,10 @@ def plot_residuals_by_q3(
             lo, hi = ax[row, i].get_ylim()
             ax[row, i].set_ylim(lo, hi * 1.10)
 
-    fig.suptitle(title_text, fontsize=11, y=0.995)
+    #fig.suptitle(title_text, fontsize=11, y=0.995)
 
-    # Keep the 2×n_axes stack about 5" tall (same as the old full-height ``figsize=(..., 5)``),
-    # with the extra figure height left for the suptitle band above ``rect[3]``.
-    fig_h = fig.get_figheight()
-    bottom_m = 0.02
-    axes_stack_height_in = 5.0
-    top_frac = bottom_m + min(axes_stack_height_in / fig_h, 0.96 - bottom_m)
-    fig.tight_layout()
+    # Reserve lower margin for a shared fig.legend (same idea as ``plot_residuals_by_energy``).
+    fig.tight_layout(rect=(0.0, 0.08, 1.0, 1.0))
 
     h0, lab0 = ax[0, 0].get_legend_handles_labels()
     if h0:
@@ -379,11 +384,14 @@ def plot_residuals_by_q3(
                 by_label[lab] = h
         sorted_labs = sorted(by_label.keys())
         sorted_handles = [by_label[lab] for lab in sorted_labs]
-        ax[0, 0].legend(
+        ncol = min(len(sorted_handles), 5)
+        fig.legend(
             sorted_handles,
             sorted_labs,
-            loc="upper right",
-            fontsize=7,
+            loc="lower center",
+            bbox_to_anchor=(0.5, 0.0),
+            ncol=ncol,
+            fontsize=_REGRESSION_LEGEND_FS,
             frameon=True,
             fancybox=False,
             edgecolor="0.75",
@@ -391,6 +399,7 @@ def plot_residuals_by_q3(
             framealpha=0.95,
             handlelength=1.6,
             handletextpad=0.45,
+            columnspacing=1.0,
             borderpad=0.35,
             labelspacing=0.35,
         )

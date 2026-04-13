@@ -201,42 +201,33 @@ def main(argv: list[str] | None = None) -> None:
     plt.close(fig_1B)
 
     q3 = vals_1A["q3_bin_mids"]
-    fig_both, ax = plt.subplots(1, 2, figsize=(9, 4.5))
+    fig_both, ax = plt.subplots(figsize=(5.5, 4.5))
     for loss in vals_1A:
         if loss in ("q3_bin_mids", "baseline"):
             continue
         for cfg_label, vA in vals_1A[loss].items():
             method = cfg_label.split()[0]
             color = clrs.get(method, "tab:gray")
-            ax[0].plot(q3, vA["rms_mean"], "--", color=color, label=f"{method} (1A)")
-            ax[1].plot(q3, vA["iqr_mean"], "--", color=color, label=f"{method} (1A)")
+            ax.plot(q3, vA["iqr_mean"], "--", color=color, label=f"{method} (1A)")
             vB = vals_1B.get(loss, {}).get(cfg_label)
             if vB is not None:
-                ax[0].plot(q3, vB["rms_mean"], "-", color=color, label=f"{method} (1B)")
-                ax[1].plot(q3, vB["iqr_mean"], "-", color=color, label=f"{method} (1B)")
+                ax.plot(q3, vB["iqr_mean"], "-", color=color, label=f"{method} (1B)")
 
     if "baseline" in vals_1A:
         bl = vals_1A["baseline"]
-        ax[0].plot(q3, bl["rms"], "k:", label="Baseline (1A)")
-        ax[1].plot(q3, bl["iqr"], "k:", label="Baseline (1A)")
+        ax.plot(q3, bl["iqr"], "k:", label="Baseline (1A)")
     if "baseline" in vals_1B:
         bl = vals_1B["baseline"]
-        ax[0].plot(q3, bl["rms"], "k--", label="Baseline (1B)")
-        ax[1].plot(q3, bl["iqr"], "k--", label="Baseline (1B)")
+        ax.plot(q3, bl["iqr"], "k--", label="Baseline (1B)")
 
-    ax[0].set(
-        xlabel="MC truth $q_3$ [GeV]",
-        ylabel=r"RMS of $E_{\mathrm{available}}^{\mathrm{reco}}/E_{\mathrm{available}}^{\mathrm{true}}$",
-    )
-    ax[1].set(
+    ax.set(
         xlabel="MC truth $q_3$ [GeV]",
         ylabel=r"25-75 IQR of $E_{\mathrm{available}}^{\mathrm{reco}}/E_{\mathrm{available}}^{\mathrm{true}}$",
     )
     selection_text = ""
-    leg1 = ax[1].legend(title=selection_text, fontsize=9, loc="upper right")
+    leg1 = ax.legend(title=selection_text, fontsize=9, loc="upper right")
     leg1.set_title(selection_text)
-    ax[0].grid(True)
-    ax[1].grid(True)
+    ax.grid(True)
     fig_both.tight_layout()
     fig_both.savefig(out_dir / "q3_vs_iqr_rms_full_1A_1B.pdf", bbox_inches="tight")
     plt.close(fig_both)
