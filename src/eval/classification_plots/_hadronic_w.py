@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 
-from ._constants import PROTON_MASS_MEV, MUON_MASS_MEV, DEFAULT_W_BIN_EDGES_GEV
+from ._binning import _as_strictly_increasing_bin_edges
+from ._constants import (
+    DEFAULT_W_BIN_EDGES_GEV,
+    MUON_MASS_MEV,
+    PROTON_MASS_MEV,
+)
 
 
 def mc_true_hadronic_W_gev_from_baselines(

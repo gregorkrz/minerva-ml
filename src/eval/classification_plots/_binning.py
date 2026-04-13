@@ -8,7 +8,6 @@ from typing import Any
 import numpy as np
 
 from ._constants import DEFAULT_N_BINS
-from ._hadronic_w import add_hadronic_W_to_classification_data
 
 
 def equal_frequency_bin_edges(

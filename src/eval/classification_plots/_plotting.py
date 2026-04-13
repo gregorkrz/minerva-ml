@@ -12,14 +12,17 @@ from sklearn.metrics import auc, precision_recall_curve
 from ._constants import (
     CLASSIFICATION_PERFORMANCE_LEGEND_TITLE,
     DEFAULT_FIXED_FPR,
+    MC_INT_TYPE,
     W_METRICS_XLIM_GEV,
     _baseline_legend_with_global_fpr,
     _classification_legend_kw,
     _default_signal_label,
+    _global_reco_baseline_fpr,
+    _reco_baseline_fpr_on_mask,
     _tpr_column_title_vs_kinematics,
     _tpr_line_legend_label,
 )
-from ._metrics_binned import mc_value_in_bin
+from ._metrics_binned import get_signal_probabilities, mc_value_in_bin
 from ._metrics_tasks import (
     compute_all_metrics,
     compute_all_metrics_q3,

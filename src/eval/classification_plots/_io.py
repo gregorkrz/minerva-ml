@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import pickle
+from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import torch
@@ -158,7 +160,6 @@ def load_truth_and_baselines(
         if candidate.exists():
             baselines_dict[playlist] = dict(np.load(candidate))
             loaded = True
-            break
         if not loaded:
             print(f"[{playlist}] WARNING: no baselines found in {data_path}")
 
