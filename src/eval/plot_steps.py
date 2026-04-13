@@ -37,8 +37,9 @@ from src.eval._constants import (
     repo_output_path,
 )
 
-# Paper-style typography: legend matches axis label size; ticks slightly smaller.
+# Paper-style typography: axis labels 12; legend slightly smaller; ticks 11.
 _LABEL_FS = 12
+_LEGEND_FS = 10
 _TICK_FS = 11
 _TITLE_FS = 13
 
@@ -85,14 +86,14 @@ def _plot_flops_vs_loss(
     _draw_flops_curves(ax, loss_histories, flops_per_step, colors, ylim, panel_title)
     if legend_outside:
         ax.legend(
-            fontsize=_LABEL_FS,
+            fontsize=_LEGEND_FS,
             loc="upper left",
             bbox_to_anchor=(1.02, 1.0),
             borderaxespad=0.0,
             frameon=True,
         )
     else:
-        ax.legend(fontsize=_LABEL_FS, loc="upper right", frameon=True)
+        ax.legend(fontsize=_LEGEND_FS, loc="upper right", frameon=True)
     ax.grid(True)
     out_pdf.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_pdf, bbox_inches="tight")
@@ -167,14 +168,14 @@ def _plot_steps_vs_loss(
     )
     if legend_outside:
         ax.legend(
-            fontsize=_LABEL_FS,
+            fontsize=_LEGEND_FS,
             loc="upper left",
             bbox_to_anchor=(1.02, 1.0),
             borderaxespad=0.0,
             frameon=True,
         )
     else:
-        ax.legend(fontsize=_LABEL_FS, loc="upper right", frameon=True)
+        ax.legend(fontsize=_LEGEND_FS, loc="upper right", frameon=True)
     ax.grid(True)
     out_pdf.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_pdf, bbox_inches="tight")
@@ -212,10 +213,10 @@ def _draw_steps_curves(
             if losses_aligned.shape[0] > 1
             else np.zeros_like(mean_loss)
         )
-        if olm_step_cap is not None and "OmniLearned-medium" in model:
-            step_mask = steps_grid <= olm_step_cap
-        else:
-            step_mask = np.full_like(steps_grid, True, dtype=bool)
+        #if olm_step_cap is not None and "OmniLearned-medium" in model:
+        #    step_mask = steps_grid <= olm_step_cap
+        #else:
+        step_mask = np.full_like(steps_grid, True, dtype=bool)
         steps_plot = steps_grid[step_mask]
         mean_loss_plot = mean_loss[step_mask]
         sigma_loss_plot = sigma_loss[step_mask]
@@ -253,7 +254,7 @@ def _shared_figure_legend(fig: plt.Figure, axes: tuple[plt.Axes, ...]) -> None:
     ncol = max(3, min(6, (n + 2) // 3)) if n > 2 else n
     legend_kw: dict = dict(
         ncol=ncol,
-        fontsize=_LABEL_FS,
+        fontsize=_LEGEND_FS,
         frameon=True,
         fancybox=True,
         facecolor="white",

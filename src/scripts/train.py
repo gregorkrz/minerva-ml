@@ -893,6 +893,34 @@ class _FlopsWrapper(nn.Module):
         return forward_model(self.model, self._inputs, self.args)
 
 
+class _Pet2BodyFlopsWrapper(nn.Module):
+    """PET2 ``body`` only (same inputs as full PET2 forward)."""
+
+    def __init__(self, body, x, cond, pid, add_info):
+        super().__init__()
+        self.body = body
+        self._x = x
+        self._cond = cond
+        self._pid = pid
+        self._add_info = add_info
+
+    def forward(self, _dummy=None):
+        t = torch.zeros(self._x.shape[0], device=self._x.device, dtype=self._x.dtype)
+        return self.body(self._x, self._cond, self._pid, self._add_info, t).sum()
+
+
+class _Pet2ClassifierFlopsWrapper(nn.Module):
+    """PET2 ``classifier`` only, on a fixed ``x_body`` tensor (shape from one body forward)."""
+
+    def __init__(self, classifier, x_body: torch.Tensor):
+        super().__init__()
+        self.classifier = classifier
+        self.register_buffer("_x_body", x_body.detach())
+
+    def forward(self, _dummy=None):
+        return self.classifier(self._x_body).sum()
+
+
 def _make_dummy_batch(args, device):
     """Build a minimal batch dict with shape (batch_size, max_particles, ...) for FLOPs."""
     B = args.batch_size
@@ -931,6 +959,9 @@ def _make_dummy_batch(args, device):
         batch["add_info"] = torch.zeros(
             B, N, getattr(args, "ol_num_add", 5), device=device, dtype=torch.float32
         )
+        # PET_body uses mask = (X[:, :, 2:3] != 0). All-zero X marks every token as padding;
+        # match real events by flagging all slots as present (third feature ≠ 0).
+        X[:, :, 2:3] = 1.0
     elif getattr(args, "use_bert", None) and use_pid:
         batch["pid"] = torch.zeros(B, N, device=device, dtype=torch.long)
     return batch
@@ -958,6 +989,9 @@ def run_calculate_flops(args):
         model = create_model(args, task)
     model = model.to(device)
     model.eval()
+
+    # Weights do not change FLOPs; skip checkpoint I/O here. Apply same freeze as training for medium.
+    _apply_omnilearned_medium_backbone_freeze(model, args)
 
     dummy_batch = _make_dummy_batch(args, device)
     if args.use_omnilearned:
@@ -999,13 +1033,74 @@ def run_calculate_flops(args):
         input_shape=(1,),
         output_as_string=False,
     )
-    # flops is total for one forward (inference) with the given batch size
+    # calflops: "FLOPs" here counts multiply/add work in a theoretical graph (often FLOPs ≈ 2 × MACs).
+    # nn.MultiheadAttention is usually counted like dense matmuls; real CUDA kernels (e.g. SDPA
+    # backends) can do far less work, so these numbers are not hardware FLOPs and are not "exact".
     inference_flops = flops
     training_flops_approx = flops * 3
-    print(f"Batch size: {args.batch_size}, max_particles: {args.max_particles}")
-    print(f"Inference FLOPs per batch: {inference_flops:,}")
-    print(f"Training FLOPs per batch (approx, ×3): {training_flops_approx:,}")
-    print(f"Params: {params:,}")
+    Bsz = args.batch_size
+    print(f"Batch size: {Bsz}, max_particles: {args.max_particles}")
+    print(f"Inference FLOPs per batch (full model, calflops): {inference_flops:,}")
+    print(f"  MACs per batch (calflops): {macs:,}  (~FLOPs/2 if counted as 2 FLOPs per MAC)")
+    print(f"  Inference FLOPs per sample (÷ batch): {inference_flops / Bsz:,.0f}")
+    print(f"Training FLOPs per batch (heuristic, full model ×3): {training_flops_approx:,}")
+    print(f"Params (total): {params:,}")
+
+    if args.use_omnilearned and isinstance(model, PET2) and model.classifier is not None:
+        x = inputs["X"]
+        t0 = torch.zeros(x.shape[0], device=x.device, dtype=x.dtype)
+        body_wrap = _Pet2BodyFlopsWrapper(
+            model.body, x, inputs.get("cond"), inputs.get("pid"), inputs.get("add_info")
+        ).eval()
+        body_flops, body_macs, body_params = calculate_flops(
+            model=body_wrap, input_shape=(1,), output_as_string=False
+        )
+        with torch.no_grad():
+            x_body = model.body(
+                x, inputs.get("cond"), inputs.get("pid"), inputs.get("add_info"), t0
+            )
+        clf_wrap = _Pet2ClassifierFlopsWrapper(model.classifier, x_body).eval()
+        clf_flops, clf_macs, clf_params = calculate_flops(
+            model=clf_wrap, input_shape=(1,), output_as_string=False
+        )
+        n_body = sum(p.numel() for p in model.body.parameters())
+        n_train = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        n_frozen = sum(
+            p.numel() for p in model.body.parameters() if not p.requires_grad
+        )
+        split_sum = body_flops + clf_flops
+        rel = abs(split_sum - inference_flops) / max(inference_flops, 1.0)
+        print("")
+        print("PET2 split (inference, per batch, calflops):")
+        print(f"  body (backbone) FLOPs:     {body_flops:,}  MACs: {body_macs:,}")
+        print(f"  classifier (head) FLOPs: {clf_flops:,}  MACs: {clf_macs:,}")
+        print(f"  sum(body+head) FLOPs:      {split_sum:,}")
+        print(
+            f"  vs full-model forward above: rel. diff {100.0 * rel:.2f}% "
+            "(large mismatch ⇒ counter quirks, not a guarantee body+head = traced full forward)"
+        )
+        print(f"  body params: {n_body:,}; trainable params: {n_train:,}; frozen body params: {n_frozen:,}")
+        if args.use_omnilearned == "medium" and n_frozen > 0:
+            # Heuristic: frozen body ⇒ no backward through backbone weights; backward cost is
+            # dominated by trainable head (~2× head forward is a common rule of thumb, not exact).
+            train_step_frozen_approx = body_flops + 3 * clf_flops
+            print("")
+            print(
+                "OmniLearned-medium + frozen backbone — heuristic training work per batch "
+                "(NOT measured; NOT equal to GPU FLOPs):"
+            )
+            print(f"  forward (body + head):     {split_sum:,}")
+            print(
+                f"  + backward (rough ~2× head only): 2 × {clf_flops:,} = {2 * clf_flops:,}"
+            )
+            print(
+                f"  rule-of-thumb total:     {train_step_frozen_approx:,} (= body_fwd + 3× head_fwd)"
+            )
+            print(
+                "  Expect this to stay large: the backbone still runs a full forward each step; "
+                "only weight-update / backward through the body is skipped."
+            )
+
     raise SystemExit(0)
 
 

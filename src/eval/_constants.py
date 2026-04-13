@@ -13,7 +13,9 @@ EVAL_DATA_SUBDIR = "eval_data"
 CLASSIFICATION_PICKLE_STEM = "classification"
 REGRESSION_PICKLE_STEM = "regression"
 
-# FLOPs per training step (batch size 2048) — same tables as notebooks
+# FLOPs per training step (batch size 2048) — same tables as notebooks.
+# OmniLearned-medium: scalar used for log-FLOPs plots (full-model training proxy). Frozen-backbone
+# training uses fewer FLOPs per step; measure with ``src.scripts.train --calculate-flops``.
 FLOPS_PER_STEP: dict[str, float] = {
     "Transformer-xsmall": 358.5 * 1e9,
     "OmniLearned-small": 1769 * 1e9,
