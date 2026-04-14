@@ -1,5 +1,0 @@
-Traceback (most recent call last):
-  File "<string>", line 1, in <module>
-AttributeError: module 'omnilearned' has no attribute 'cli'
-srun: error: nid003665: task 0: Exited with exit code 1
-srun: Terminating StepId=48296304.0
