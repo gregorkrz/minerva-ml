@@ -158,6 +158,10 @@ python -m src.eval.collect_eval_data --flag Run_2703 --out-dir /global/cfs/cdirs
 
 This writes `out/classification_<TAG>.pkl` and `out/regression_<TAG>.pkl`. Use `--out-dir` optionally.
 
+**Optional:** Download latest cached model outputs
+
+* You can use download the latest files with evaluation data (https://huggingface.co/datasets/gregorkrzmanc/minerva-ml-eval), and set $OUT to the path where you download this data.
+
 **2. Generate PDFs** (each script accepts `--flag`, `--out-dir`, and `--plots-dir`; defaults match the layout below). Plotting code lives under ``src.eval.classification_plots`` and ``src.eval.e_available_plots`` (several modules each); notebooks may still use ``from eval_*_plots import …`` via thin shims in ``notebooks/``.
 
 ```bash
@@ -170,6 +174,7 @@ python -m src.eval.plot_classification_q3     --flag $FLAG --out-dir $OUT       
 python -m src.eval.plot_classification_Pions  --flag $FLAG --out-dir $OUT     # pion kinematics, CC1π⁰, light appendix → plots/classification/pions/ and .../light/
 python -m src.eval.plot_classification_light  --flag $FLAG --out-dir $OUT     # light PDFs only → plots/classification/light/ (see --components)
 ```
+
 
 **3. Figures for a LaTeX paper** (copies or single-page extracts into `figures_latex/`):
 
