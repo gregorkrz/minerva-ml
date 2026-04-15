@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -14,8 +15,10 @@ from ._constants import (
     DEFAULT_FIXED_FPR,
     MC_INT_TYPE,
     W_METRICS_XLIM_GEV,
+    _LABEL_FS,
+    _LEGEND_FS,
+    _TICK_FS,
     _baseline_legend_with_global_fpr,
-    _classification_legend_kw,
     _default_signal_label,
     _global_reco_baseline_fpr,
     _reco_baseline_fpr_on_mask,
@@ -42,6 +45,44 @@ def _set_xlim_w_metrics(ax: plt.Axes) -> None:
     ax.set_xlim(lo, hi)
 
 
+def _shared_light_legend(fig: plt.Figure, axes: Iterable[plt.Axes]) -> None:
+    """One legend below the figure; first-seen label order, one handle per label."""
+    by_label: dict[str, plt.Artist] = {}
+    labels_order: list[str] = []
+    for ax in axes:
+        h, lab = ax.get_legend_handles_labels()
+        for hi, li in zip(h, lab):
+            if li in by_label:
+                continue
+            by_label[li] = hi
+            labels_order.append(li)
+    if not labels_order:
+        return
+    handles = [by_label[k] for k in labels_order]
+    n = len(labels_order)
+    ncol = max(3, min(6, (n + 2) // 3)) if n > 2 else n
+    legend_kw: dict = dict(
+        ncol=ncol,
+        fontsize=_LEGEND_FS,
+        frameon=True,
+        fancybox=True,
+        facecolor="white",
+        edgecolor="0.4",
+        columnspacing=1.0,
+        handletextpad=0.5,
+    )
+    try:
+        fig.legend(handles, labels_order, loc="outside lower center", **legend_kw)
+    except (TypeError, ValueError):
+        fig.legend(
+            handles,
+            labels_order,
+            loc="lower center",
+            bbox_to_anchor=(0.5, -0.12),
+            **legend_kw,
+        )
+
+
 def _histogram_inttype_counts_with_positives(
     ax: plt.Axes,
     hist_var: np.ndarray,
@@ -53,6 +94,7 @@ def _histogram_inttype_counts_with_positives(
     reco_baseline_pred: np.ndarray | None = None,
     finite_bin_var: bool = False,
     has_pion_for_binning: np.ndarray | None = None,
+    show_legend: bool = True,
 ) -> None:
     """Stacked histogram: orange = MC signal (positives) on the **bottom**,
     blue = not signal stacked **above**.
@@ -119,10 +161,11 @@ def _histogram_inttype_counts_with_positives(
                 fontsize=6,
                 color="white" if cs >= 3 else "black",
             )
-    ax.grid(True, axis="y", alpha=0.3)
+    ax.grid(True, axis="y", alpha=0.35)
     if log_x:
         ax.set_xscale("log")
-    ax.legend(loc="upper right", fontsize=6, framealpha=0.9)
+    if show_legend:
+        ax.legend(loc="upper right", fontsize=6, framealpha=0.9)
 
     if reco_baseline_pred is not None:
         if len(reco_baseline_pred) != len(hist_var):
@@ -156,7 +199,8 @@ def _histogram_inttype_counts_with_positives(
         ax2.tick_params(axis="y", labelcolor="black")
         ymax = float(np.nanmax(fpr_bin)) if np.any(np.isfinite(fpr_bin)) else 1.0
         ax2.set_ylim(0.0, min(1.0, max(0.05, ymax * 1.15)))
-        ax2.legend(loc="upper left", fontsize=6, framealpha=0.9)
+        if show_legend:
+            ax2.legend(loc="upper left", fontsize=6, framealpha=0.9)
 
 
 def _plot_metric_line(
@@ -185,15 +229,16 @@ def _format_axes_grid(
     fixed_fpr: list[float] | None = None,
     use_global_fpr: bool = True,
 ) -> None:
-    """Apply labels, titles, legend and grid to an (n_rows, 3) axes array."""
+    """Apply labels, titles, and grid to an (n_rows, 3) axes array."""
     if fixed_fpr is None:
         fixed_fpr = DEFAULT_FIXED_FPR
     tpr_title = _tpr_column_title_vs_kinematics(use_global_fpr)
     for row in range(n_rows):
         for col in range(3):
             ax = axes[row, col] if n_rows > 1 else axes[col]
-            ax.set_xlabel(xlabel)
-            ax.set_ylabel(col_labels[col])
+            ax.set_xlabel(xlabel, fontsize=_LABEL_FS)
+            ax.set_ylabel(col_labels[col], fontsize=_LABEL_FS)
+            ax.tick_params(axis="both", labelsize=_TICK_FS)
             title_prefix = f"{row_titles[row]} — " if row_titles else ""
             if col < 2:
                 ax.set_title(
@@ -203,8 +248,7 @@ def _format_axes_grid(
                 ax.set_title(
                     f"{title_prefix}{tpr_title} vs. {xlabel.split('[')[0].strip()}"
                 )
-            ax.legend(fontsize=7)
-            ax.grid(True)
+            ax.grid(True, alpha=0.35)
             if log_x:
                 ax.set_xscale("log")
 
@@ -270,7 +314,7 @@ def plot_cc1pi_vs_pion_kinematics(
     tpr_title = _tpr_column_title_vs_kinematics(use_global_fpr)
     n_cols = 4 if results is not None else 3
     fig_w = 22.0 if n_cols == 4 else 17.0
-    fig, axes = plt.subplots(2, n_cols, figsize=(fig_w, 9), tight_layout=True)
+    fig, axes = plt.subplots(2, n_cols, figsize=(fig_w, 9), constrained_layout=True)
 
     E_mid = data["pion_E_MC_bins_mid"]
     theta_mid = data["pion_theta_MC_bins_mid"]
@@ -397,6 +441,7 @@ def plot_cc1pi_vs_pion_kinematics(
             reco_baseline_pred=reco_baseline_pred,
             finite_bin_var=False,
             has_pion_for_binning=hp_bin,
+            show_legend=False,
         )
         _histogram_inttype_counts_with_positives(
             axes[1, 3],
@@ -408,6 +453,7 @@ def plot_cc1pi_vs_pion_kinematics(
             reco_baseline_pred=reco_baseline_pred,
             finite_bin_var=True,
             has_pion_for_binning=hp_bin,
+            show_legend=False,
         )
 
     col_labels = ["AUPRC", "AUROC", "Efficiency (TPR)"]
@@ -415,31 +461,33 @@ def plot_cc1pi_vs_pion_kinematics(
     for row, kinematic in enumerate(xlabels):
         for col, metric in enumerate(col_labels):
             ax = axes[row, col]
-            ax.set_xlabel(kinematic)
-            ax.set_ylabel(metric)
+            ax.set_xlabel(kinematic, fontsize=_LABEL_FS)
+            ax.set_ylabel(metric, fontsize=_LABEL_FS)
+            ax.tick_params(axis="both", labelsize=_TICK_FS)
             x_short = kinematic.split("[")[0].strip()
             if col < 2:
                 ax.set_title(f"{metric} vs. {x_short}")
             else:
                 ax.set_title(f"{tpr_title} vs. {x_short}")
-            ax.legend(**_classification_legend_kw(7, legend_title))
-            ax.grid(True)
+            ax.grid(True, alpha=0.35)
             if row == 0:
                 ax.set_xlim(E_mid[0] * 0.8, E_mid[-1] * 1.2)
                 ax.set_xscale("log")
         if n_cols == 4:
             axh = axes[row, 3]
-            axh.set_xlabel(kinematic)
-            axh.set_ylabel("Events")
+            axh.set_xlabel(kinematic, fontsize=_LABEL_FS)
+            axh.set_ylabel("Events", fontsize=_LABEL_FS)
+            axh.tick_params(axis="both", labelsize=_TICK_FS)
             x_short = kinematic.split("[")[0].strip()
             axh.set_title(
                 rf"Event counts vs. {x_short} (top = $N_{{\mathrm{{tot}}}}$; orange = $N_{{\mathrm{{sig}}}}$)"
             )
-            axh.grid(True, axis="y", alpha=0.3)
+            axh.grid(True, axis="y", alpha=0.35)
             if row == 0:
                 axh.set_xlim(E_mid[0] * 0.8, E_mid[-1] * 1.2)
                 axh.set_xscale("log")
 
+    _shared_light_legend(fig, axes.ravel())
     if suptitle is None:
         suptitle = rf"$CC1\pi^\pm$ tagging - MINERvA Open Data Playlist {playlist}"
     fig.suptitle(suptitle, fontsize=14)
@@ -475,7 +523,7 @@ def plot_multi_pion_vs_q3(
     if fixed_fpr is None:
         fixed_fpr = DEFAULT_FIXED_FPR
     tpr_title = _tpr_column_title_vs_kinematics(use_global_fpr)
-    fig, axes = plt.subplots(1, 3, figsize=(17, 5), tight_layout=True)
+    fig, axes = plt.subplots(1, 3, figsize=(17, 5), constrained_layout=True)
 
     q3_mid = data["q3_bin_mids"]
 
@@ -512,16 +560,17 @@ def plot_multi_pion_vs_q3(
     col_labels = ["AUPRC", "AUROC", "Efficiency (TPR)"]
     for col, metric in enumerate(col_labels):
         ax = axes[col]
-        ax.set_xlabel(r"True $q_3$ [GeV]")
-        ax.set_ylabel(metric)
+        ax.set_xlabel(r"True $q_3$ [GeV]", fontsize=_LABEL_FS)
+        ax.set_ylabel(metric, fontsize=_LABEL_FS)
+        ax.tick_params(axis="both", labelsize=_TICK_FS)
         x_short = r"True $q_3$"
         if col < 2:
             ax.set_title(f"{metric} vs. {x_short}")
         else:
             ax.set_title(f"{tpr_title} vs. {x_short}")
-        ax.legend(**_classification_legend_kw(7, legend_title))
-        ax.grid(True)
+        ax.grid(True, alpha=0.35)
 
+    _shared_light_legend(fig, axes.ravel())
     if title is None:
         title = rf"$CCN\pi^\pm$ tagging ($N \geq 1$) - MINERvA Open Data Playlist {playlist}"
     fig.suptitle(title, fontsize=14)
@@ -572,7 +621,7 @@ def plot_multi_classification_vs_W(
     tpr_title = _tpr_column_title_vs_kinematics(use_global_fpr)
     n_cols = 4 if results is not None else 3
     fig_w = 22.0 if n_cols == 4 else 17.0
-    fig, axes = plt.subplots(1, n_cols, figsize=(fig_w, 5), tight_layout=True)
+    fig, axes = plt.subplots(1, n_cols, figsize=(fig_w, 5), constrained_layout=True)
 
     w_mid = data["W_bin_mids"]
 
@@ -617,15 +666,15 @@ def plot_multi_classification_vs_W(
     col_labels = ["AUPRC", "AUROC", "Efficiency (TPR)"]
     for col, metric in enumerate(col_labels):
         ax = axes[col]
-        ax.set_xlabel(r"$W$ [GeV]")
-        ax.set_ylabel(metric)
+        ax.set_xlabel(r"$W$ [GeV]", fontsize=_LABEL_FS)
+        ax.set_ylabel(metric, fontsize=_LABEL_FS)
+        ax.tick_params(axis="both", labelsize=_TICK_FS)
         x_short = r"$W$"
         if col < 2:
             ax.set_title(f"{metric} vs. {x_short}")
         else:
             ax.set_title(f"{tpr_title} vs. {x_short}")
-        ax.legend(**_classification_legend_kw(7, legend_title))
-        ax.grid(True)
+        ax.grid(True, alpha=0.35)
         _set_xlim_w_metrics(ax)
 
     if n_cols == 4:
@@ -652,14 +701,17 @@ def plot_multi_classification_vs_W(
             y_true_binary,
             data["W_bin_edges"],
             reco_baseline_pred=reco_baseline_pred,
+            show_legend=False,
         )
-        ax_h.set_xlabel(r"$W$ [GeV]")
-        ax_h.set_ylabel("Events")
+        ax_h.set_xlabel(r"$W$ [GeV]", fontsize=_LABEL_FS)
+        ax_h.set_ylabel("Events", fontsize=_LABEL_FS)
+        ax_h.tick_params(axis="both", labelsize=_TICK_FS)
         ax_h.set_title(
             r"Event counts vs. $W$ (top = $N_{\mathrm{tot}}$; orange = $N_{\mathrm{sig}}$)"
         )
         _set_xlim_w_metrics(ax_h)
 
+    _shared_light_legend(fig, axes.ravel())
     if title is None:
         title = rf"$CCN\pi^\pm$ tagging ($N \geq 1$) - MINERvA Open Data Playlist {playlist}"
     fig.suptitle(title, fontsize=14)
@@ -718,7 +770,7 @@ def plot_binned_by_inttype(
 
     int_type_arr = data["int_type_arr"]
     n_int = len(int_types)
-    fig, axes = plt.subplots(n_int, 4, figsize=(22, 4.5 * n_int), tight_layout=True)
+    fig, axes = plt.subplots(n_int, 4, figsize=(22, 4.5 * n_int), constrained_layout=True)
     if n_int == 1:
         axes = axes[np.newaxis, :]
 
@@ -821,7 +873,6 @@ def plot_binned_by_inttype(
                     color="gray",
                 )
                 ax.set_title(f"{int_name} (N={n_events:,})")
-            # Histogram: stacked all events vs MC signal positives in this interaction type
             ax_h = axes[row_idx, 3]
             _histogram_inttype_counts_with_positives(
                 ax_h,
@@ -833,9 +884,11 @@ def plot_binned_by_inttype(
                 reco_baseline_pred=reco_baseline_pred,
                 finite_bin_var=finite_hist,
                 has_pion_for_binning=hp_for_bins,
+                show_legend=False,
             )
-            ax_h.set_xlabel(xlabel)
-            ax_h.set_ylabel("Events")
+            ax_h.set_xlabel(xlabel, fontsize=_LABEL_FS)
+            ax_h.set_ylabel("Events", fontsize=_LABEL_FS)
+            ax_h.tick_params(axis="both", labelsize=_TICK_FS)
             ax_h.set_title(
                 f"{int_name} (N={n_events:,}) — events (orange = signal, bottom)"
             )
@@ -960,12 +1013,12 @@ def plot_binned_by_inttype(
             bl_lbl = _baseline_legend_with_global_fpr(reco_baseline_label, fpr_row)
             axes[row_idx, 2].plot(x_mid, reco_bl, "s--", color="black", label=bl_lbl)
 
-        # --- Metric columns ---
         col_labels = ["AUPRC", "AUROC", "Efficiency (TPR)"]
         for col, metric in enumerate(col_labels):
             ax = axes[row_idx, col]
-            ax.set_xlabel(xlabel)
-            ax.set_ylabel(metric)
+            ax.set_xlabel(xlabel, fontsize=_LABEL_FS)
+            ax.set_ylabel(metric, fontsize=_LABEL_FS)
+            ax.tick_params(axis="both", labelsize=_TICK_FS)
             if col < 2:
                 ax.set_title(
                     f"{int_name} (N={n_events:,}) — {metric} vs. {xlabel.split('[')[0].strip()}"
@@ -974,15 +1027,13 @@ def plot_binned_by_inttype(
                 ax.set_title(
                     f"{int_name} (N={n_events:,}) — {tpr_title} vs. {xlabel.split('[')[0].strip()}"
                 )
-            ax.legend(**_classification_legend_kw(7, legend_title))
-            ax.grid(True)
+            ax.grid(True, alpha=0.35)
             if x_var == "W":
                 _set_xlim_w_metrics(ax)
             elif log_x:
                 ax.set_xlim(x_mid[0] * 0.8, x_mid[-1] * 1.2)
                 ax.set_xscale("log")
 
-        # --- Histogram column (col 3): stacked not-signal (blue) + signal positives (orange)
         ax_h = axes[row_idx, 3]
         _histogram_inttype_counts_with_positives(
             ax_h,
@@ -994,15 +1045,18 @@ def plot_binned_by_inttype(
             reco_baseline_pred=reco_baseline_pred,
             finite_bin_var=finite_hist,
             has_pion_for_binning=hp_for_bins,
+            show_legend=False,
         )
-        ax_h.set_xlabel(xlabel)
-        ax_h.set_ylabel("Events")
+        ax_h.set_xlabel(xlabel, fontsize=_LABEL_FS)
+        ax_h.set_ylabel("Events", fontsize=_LABEL_FS)
+        ax_h.tick_params(axis="both", labelsize=_TICK_FS)
         ax_h.set_title(
             f"{int_name} (N={n_events:,}) — events (orange = signal, bottom)"
         )
         if x_var == "W":
             _set_xlim_w_metrics(ax_h)
 
+    _shared_light_legend(fig, axes.ravel())
     fig.suptitle(title, fontsize=14, y=1.005)
     return fig
 
@@ -1060,7 +1114,7 @@ def plot_event_counts_by_inttype(
         kin_mask = data["has_pion"] if pion_bins_require_has_pion else np.isfinite(var)
 
     n_int = len(int_types)
-    fig, axes = plt.subplots(n_int, 1, figsize=(8, 3.0 * n_int), tight_layout=True)
+    fig, axes = plt.subplots(n_int, 1, figsize=(8, 3.0 * n_int), constrained_layout=True)
     if n_int == 1:
         axes = np.array([axes])
 
@@ -1094,10 +1148,11 @@ def plot_event_counts_by_inttype(
                     fontsize=7,
                 )
 
-        ax.set_xlabel(xlabel)
-        ax.set_ylabel("Events")
+        ax.set_xlabel(xlabel, fontsize=_LABEL_FS)
+        ax.set_ylabel("Events", fontsize=_LABEL_FS)
+        ax.tick_params(axis="both", labelsize=_TICK_FS)
         ax.set_title(f"{int_name} (N={n_plotted:,})")
-        ax.grid(True, axis="y", alpha=0.3)
+        ax.grid(True, axis="y", alpha=0.35)
         if x_var == "W":
             _set_xlim_w_metrics(ax)
         elif log_x:
@@ -1181,7 +1236,7 @@ def plot_prc_curves(
     sig = get_signal_probabilities(results[first_model][0], signal_classes, playlist)
     signal_frac = sig["ytrue"].mean()
 
-    fig, axes = plt.subplots(1, 2, figsize=(16, 7), tight_layout=True)
+    fig, axes = plt.subplots(1, 2, figsize=(16, 7), constrained_layout=True)
 
     for ax in axes:
         ax.axhline(
@@ -1216,18 +1271,19 @@ def plot_prc_curves(
                 ax.fill_between(r, p - s, p + s, alpha=0.2, color=line.get_color())
 
     for ax, scale in zip(axes, ["linear", "log"]):
-        ax.set_xlabel(r"Recall (TPR)")
-        ax.set_ylabel(r"Precision (purity)")
+        ax.set_xlabel(r"Recall (TPR)", fontsize=_LABEL_FS)
+        ax.set_ylabel(r"Precision (purity)", fontsize=_LABEL_FS)
+        ax.tick_params(axis="both", labelsize=_TICK_FS)
         ax.set_title(f"{title} ({scale} scale)")
-        ax.legend(**_classification_legend_kw(9, legend_title))
-        ax.grid(True)
+        ax.grid(True, alpha=0.35)
         ax.set_xlim(0, 1)
         if scale == "log":
             ax.set_yscale("log")
-            # ax.set_xscale("log")
             ax.set_ylim(bottom=signal_frac * 0.5, top=1.05)
         else:
             ax.set_ylim(0, 1)
+
+    _shared_light_legend(fig, axes.ravel())
     return fig
 
 

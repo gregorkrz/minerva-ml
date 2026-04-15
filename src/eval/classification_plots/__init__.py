@@ -55,6 +55,7 @@ from ._metrics_tasks import (
 )
 from ._plotting import (
     _plot_metric_line,
+    _shared_light_legend,
     plot_binned_by_inttype,
     plot_cc1pi_vs_pion_kinematics,
     plot_event_counts_by_inttype,
@@ -107,4 +108,5 @@ __all__ = [
     "plot_prc_curves",
     "save_figures_to_pdf",
     "_plot_metric_line",
+    "_shared_light_legend",
 ]

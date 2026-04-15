@@ -35,6 +35,11 @@ def _default_signal_label(signal_classes: list[int]) -> str:
 
 DEFAULT_FIXED_FPR = [0.2]
 
+# Shared font sizes for all classification performance figures.
+_LABEL_FS = 12
+_TICK_FS = 11
+_LEGEND_FS = 10
+
 
 def _tpr_column_title_vs_kinematics(use_global_fpr: bool) -> str:
     """Third-column title for kinematic-bin performance plots."""

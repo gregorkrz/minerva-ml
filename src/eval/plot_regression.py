@@ -2,7 +2,8 @@
 """Regression evaluation PDFs (IQR vs q3, residuals, scaling) from cached pickle.
 
 Pickles default under ``<repo>/<--out-dir>/``; PDFs under
-``<repo>/<--plots-dir>/regression/``.
+``<repo>/<--plots-dir>/regression/`` and small-paper ratio histograms under
+``<repo>/<--plots-dir>/small_paper/``.
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from src.eval.e_available_plots import (
     plot_example_E_pred_true,
+    plot_ratio_histogram_q3_two_panels,
     plot_residuals_by_energy,
     plot_residuals_by_q3,
     plot_rms_iqr_with_uncertainty,
@@ -82,6 +84,8 @@ def main(argv: list[str] | None = None) -> None:
     plots_root = repo_output_path(_REPO_ROOT, args.plots_dir)
     out_dir = plots_root / "regression"
     out_dir.mkdir(parents=True, exist_ok=True)
+    small_paper_dir = plots_root / "small_paper"
+    small_paper_dir.mkdir(parents=True, exist_ok=True)
 
     pkl = args.regression_pickle or _pickle_path(data_root, args.flag)
     with open(pkl, "rb") as f:
@@ -117,6 +121,27 @@ def main(argv: list[str] | None = None) -> None:
     fig_i.savefig(out_dir / "q3_vs_iqr_rms_full_1A.pdf", bbox_inches="tight")
     plt.close(fig_i)
     print("Saved:", out_dir / "q3_vs_iqr_rms_full_1A.pdf")
+
+    if data_first is not None and "mc_E" in data_first:
+        ratio_playlists = sorted(data_first["mc_E"].keys())
+    else:
+        ratio_playlists = ["1A"]
+    for pl in ratio_playlists:
+        fig_q = plot_ratio_histogram_q3_two_panels(
+            CKPT_DIR=CKPT_DIR,
+            training_names=training_names_full_first_only,
+            playlists=[pl],
+            dataset_to_plot=pl,
+            baseline_run=baseline_run,
+            use_cc_selection=2,
+            colors=clrs,
+            suppress_errors=suppress,
+            data=data_first,
+        )
+        out_q = small_paper_dir / f"regression_e_ratio_hist_q3_0_1_and_1_2_{pl}.pdf"
+        fig_q.savefig(out_q, bbox_inches="tight")
+        plt.close(fig_q)
+        print("Saved:", out_q)
 
     fig_i = plot_rms_iqr_with_uncertainty(
         CKPT_DIR=CKPT_DIR,

@@ -10,12 +10,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from ._grouped import _resolve_color_map, _SEED_SEP
-from ._constants import DEFAULT_BASELINE_KEY
+from ._constants import DEFAULT_BASELINE_KEY, SMALL_PAPER_COMPACT_IQR_MPV_FIGSIZE_INCHES
 from ._load import _build_event_mask, load_eval_data
 from ._titles import _Etrue_bin_title, _q3_bin_title
 
 # Match ``plot_regression`` / ``plot_rms_iqr_with_uncertainty`` (legend 9; axes ≈ mpl defaults).
 _REGRESSION_LEGEND_FS = 10
+# Slightly smaller in-panel legend for the compact two-panel ratio figure.
+_SMALL_PAPER_RATIO_LEGEND_FS = 8
 _REGRESSION_AXIS_FS = 12
 _REGRESSION_TITLE_FS = 12
 _REGRESSION_TICK_FS = 12
@@ -403,5 +405,209 @@ def plot_residuals_by_q3(
             borderpad=0.35,
             labelspacing=0.35,
         )
+
+    return fig
+
+
+def plot_ratio_histogram_q3_two_panels(
+    CKPT_DIR: str | Path,
+    training_names: dict[str, dict[str, str]],
+    playlists: list[str] | None = None,
+    dataset_to_plot: str = "1A",
+    baseline_ref: tuple[str, str] | None = None,
+    baseline_run: str | None = None,
+    baseline_key: str = DEFAULT_BASELINE_KEY,
+    use_cc_selection: int = 2,
+    colors: dict[str, Any] | None = None,
+    verbose: bool = True,
+    data: dict | None = None,
+    transform=None,
+    suppress_errors: bool = False,
+    *,
+    legend_fontsize: float | None = None,
+) -> plt.Figure:
+    """Two side-by-side :math:`E_{\\mathrm{reco}}/E_{\\mathrm{true}}` histograms for *q₃* slices.
+
+    Left: :math:`q_3 \\in [0, 1)` GeV; right: :math:`q_3 \\in [1, 2)` GeV. Figure height equals
+    :data:`SMALL_PAPER_COMPACT_IQR_MPV_FIGSIZE_INCHES` width; ``wspace`` is small so the
+    panels sit close together; ``set_box_aspect(1)`` keeps each subplot ~square. Legend
+    on the left panel only (``loc="best"``); the right panel has no legend.
+    """
+    if data is None:
+        data = load_eval_data(
+            CKPT_DIR,
+            training_names,
+            playlists=playlists,
+            baseline_ref=baseline_ref,
+            baseline_run=baseline_run,
+            verbose=verbose,
+            transform=transform,
+            suppress_errors=suppress_errors,
+        )
+
+    results = data["results"]
+    E_pred_dict = data["E_pred_dict"]
+    Enu_baselines = data["Enu_baselines"]
+    Enu_filters = data["Enu_filters"]
+    mc_E = data["mc_E"]
+    dp = dataset_to_plot
+
+    has_baselines = (
+        dp in Enu_filters
+        and "muon_filter_CC_paper" in Enu_filters[dp]
+        and dp in Enu_baselines
+        and baseline_key in Enu_baselines[dp]
+    )
+
+    q3 = (
+        Enu_filters[dp]["q3"] if dp in Enu_filters and "q3" in Enu_filters[dp] else None
+    )
+    if q3 is None:
+        warnings.warn(f"No q3 information for dataset '{dp}'.")
+        return plt.figure()
+
+    if has_baselines:
+        mask_sel = _build_event_mask(
+            dp, Enu_filters, Enu_baselines, baseline_key, use_cc_selection
+        )
+    else:
+        mask_sel = mc_E[dp] > 0
+
+    def _model_color_key(model: str) -> str:
+        return model.split("§", 1)[0] if "§" in model else model
+
+    model_bases_ordered: list[str] = []
+    for loss in results:
+        for model in results[loss]:
+            if model not in E_pred_dict.get(dp, {}).get(loss, {}):
+                continue
+            key = _model_color_key(model)
+            if key not in model_bases_ordered:
+                model_bases_ordered.append(key)
+    if colors:
+        color_by_model_base = _resolve_color_map(model_bases_ordered, colors)
+    else:
+        prop_cycle = plt.rcParams["axes.prop_cycle"]
+        cycle_cols = prop_cycle.by_key().get(
+            "color", ["C0", "C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9"]
+        )
+        color_by_model_base = {
+            m: cycle_cols[i % len(cycle_cols)]
+            for i, m in enumerate(model_bases_ordered)
+        }
+
+    ratio_bins = np.linspace(0, 2, 50)
+    baseline_color_kw: Any = "black"
+
+    def _fill_ratio_panel(
+        ax: plt.Axes,
+        mask_q3: np.ndarray,
+        *,
+        use_legend_labels: bool,
+        panel_title: str,
+    ) -> None:
+        mask = mask_q3 & mask_sel
+        true = mc_E[dp][mask]
+        valid = true > 0
+        if has_baselines:
+            baseline = Enu_baselines[dp][baseline_key][mask]
+            ratio_bl = baseline[valid] / true[valid]
+            bl_lab = "Baseline" if use_legend_labels else "_nolegend_"
+            ax.hist(
+                ratio_bl,
+                bins=ratio_bins,
+                histtype="step",
+                label=bl_lab,
+                color=baseline_color_kw,
+            )
+        for loss in results:
+            for model in results[loss]:
+                if model not in E_pred_dict.get(dp, {}).get(loss, {}):
+                    continue
+                reco = E_pred_dict[dp][loss][model][mask]
+                ratio_model = reco[valid] / true[valid]
+                mlab = _model_color_key(model)
+                mcol = color_by_model_base.get(mlab, "tab:gray")
+                lab = mlab if use_legend_labels else "_nolegend_"
+                ax.hist(
+                    ratio_model,
+                    bins=ratio_bins,
+                    histtype="step",
+                    label=lab,
+                    color=mcol,
+                )
+        fs_a = _REGRESSION_AXIS_FS
+        fs_k = _REGRESSION_TICK_FS
+        ax.set_xlabel(
+            r"$E_{\mathrm{available}}^{\mathrm{reco}} / E_{\mathrm{available}}^{\mathrm{true}}$",
+            fontsize=fs_a,
+        )
+        ax.set_ylabel("Counts", fontsize=fs_a)
+        ax.tick_params(axis="both", which="major", labelsize=fs_k)
+        ax.grid(True)
+        ax.set_title(panel_title, fontsize=_REGRESSION_TITLE_FS, pad=8)
+
+    _iw = SMALL_PAPER_COMPACT_IQR_MPV_FIGSIZE_INCHES[0]
+    fig, axes = plt.subplots(
+        1,
+        2,
+        figsize=(1.78 * _iw, _iw),
+        sharey=True,
+        constrained_layout=False,
+        gridspec_kw={"wspace": 0.08},
+    )
+    mask_01 = (q3 >= 0.0) & (q3 < 1.0)
+    mask_12 = (q3 >= 1.0) & (q3 < 2.0)
+    _fill_ratio_panel(
+        axes[0],
+        mask_01,
+        use_legend_labels=True,
+        panel_title=r"$q_3 \in [0, 1)$ GeV",
+    )
+    _fill_ratio_panel(
+        axes[1],
+        mask_12,
+        use_legend_labels=False,
+        panel_title=r"$q_3 \in [1, 2)$ GeV",
+    )
+    axes[1].set_ylabel("")
+    axes[1].tick_params(axis="y", labelleft=False)
+
+    y_hi = max(ax.get_ylim()[1] for ax in axes)
+    for ax in axes:
+        ax.set_ylim(0.0, y_hi * 1.08)
+    for ax in axes:
+        ax.set_box_aspect(1)
+
+    h0, l0 = axes[0].get_legend_handles_labels()
+    by_label: dict[str, Any] = {}
+    for hi, li in zip(h0, l0):
+        if li and li != "_nolegend_" and li not in by_label:
+            by_label[li] = hi
+    sorted_labs = sorted(by_label.keys())
+    sorted_handles = [by_label[x] for x in sorted_labs]
+    if sorted_handles:
+        leg_fs = (
+            float(legend_fontsize)
+            if legend_fontsize is not None
+            else float(_SMALL_PAPER_RATIO_LEGEND_FS)
+        )
+        axes[0].legend(
+            sorted_handles,
+            sorted_labs,
+            loc="best",
+            fontsize=leg_fs,
+            frameon=True,
+            fancybox=False,
+            edgecolor="0.75",
+            facecolor="1.0",
+            framealpha=0.95,
+            handlelength=1.5,
+            handletextpad=0.45,
+            borderpad=0.35,
+            labelspacing=0.35,
+        )
+
+    fig.tight_layout()
 
     return fig
