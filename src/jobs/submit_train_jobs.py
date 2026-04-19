@@ -43,7 +43,7 @@ def generate_cmd(
         base = f"python -m src.scripts.train --resume {continue_from} -name {resume_run_name} --resume-run-id {resume_run_id} --max_steps 1000000"
         return base.format(continue_from=continue_from)
     base = "python -m src.scripts.train -bs {bs} --mode {task} {detailed_task} -name {name} --d_model {model_dim} --depth {model_depth} --n_heads {model_n_heads} --dropout {model_dropout} --attn_dropout {model_attn_dropout} {cap} --seed {seed} -seed-event-sampler {seed}  --max_steps {max_steps} --grad_accum_steps {grad_accum_steps} {extra} --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260326 "
-    # Model options: ... "OLS", "OLS_int" (OLS + --ol-interaction --ol-local-interaction), "OLS_RW", "OLM" or "OLM_FB" (medium OmniLearned; run names use OLM_FB_ for both tasks), "BERT-tiny"
+    # Model options: ... "OLS", "OLS_int", "OLS_RW", "OLM"/"OLM_FB", "BERT-tiny", "BERT-tiny-rw" (BERT tiny arch, random encoder weights)
     # Seed both the event sampler and the whole training with seed
     detailed_task = "-E-available-no-muon" if task == "regression" else "-npi2"
     model_dim = 128
@@ -70,6 +70,9 @@ def generate_cmd(
     elif model == "BERT-tiny":
         name = f"Run_1703_BERT_tiny_{task}_{data_cap}_seed{seed}"
         extra = " --use-bert tiny --zero-cond-feature 2 "
+    elif model == "BERT-tiny-rw":
+        name = f"Run_1703_BERT_tiny_rw_{task}_{data_cap}_seed{seed}"
+        extra = " --use-bert tiny-rw --zero-cond-feature 2 "
     elif model in (
         "Transformer1",
         "Transformer1NR",
@@ -125,6 +128,7 @@ def get_cmds_and_slurm_times():
             "OLS_int": "00:50:00",
             "OLM_FB": "00:50:00",
             "BERT-tiny": "00:50:00",
+            "BERT-tiny-rw": "00:50:00",
             "Transformer1": "00:20:00",
             "Transformer1NR": "00:20:00",
         },
@@ -134,6 +138,7 @@ def get_cmds_and_slurm_times():
             "OLS_int": "01:00:00",
             "OLM_FB": "01:00:00",
             "BERT-tiny": "01:00:00",
+            "BERT-tiny-rw": "01:00:00",
             "Transformer1": "00:20:00",
             "Transformer1NR": "00:20:00",
         },
@@ -145,6 +150,7 @@ def get_cmds_and_slurm_times():
             "OLS_int": "01:00:00",
             "OLM_FB": "01:00:00",
             "BERT-tiny": "01:00:00",
+            "BERT-tiny-rw": "01:00:00",
         },
         "200000": {
             "OLS_RW": "05:00:00",
@@ -152,16 +158,17 @@ def get_cmds_and_slurm_times():
             "OLS_int": "01:30:00",
             "OLM_FB": "01:30:00",
             "BERT-tiny": "01:30:00",
+            "BERT-tiny-rw": "01:30:00",
             "Transformer1": "00:20:00",
             "Transformer1NR": "00:20:00",
         },
     }
     cmds = []
     slurm_times = []
-    for seed in [50, 51, 52, 53]:
+    for seed in [55, 56]:
         for data_cap in [-1]:
             for task in ["regression", "classifier"]:
-                for model in ["BERT-tiny"]:
+                for model in ["BERT-tiny"]:  # use "BERT-tiny-rw" for same arch, random BERT weights
                     if "OL" in model:
                         bs = 2048
                         grad_accum_steps = 1
@@ -178,7 +185,7 @@ def get_cmds_and_slurm_times():
                                 slurm_times.append("12:00:00")
                             else:
                                 slurm_times.append(times_data_cap[str(data_cap)][model])
-                    elif model == "BERT-tiny":
+                    elif model in ("BERT-tiny", "BERT-tiny-rw"):
                         bs = 2048
                         grad_accum_steps = 1
                         if data_cap == -1:

@@ -29,6 +29,9 @@ python -m src.scripts.train -bs 10 --mode classifier -npi2 -name DEBUG --max_ste
 ## BERT-style baseline (HF pretrained; same particle features as OmniLearned):
 python -m src.scripts.train -bs 10 --mode regression -E-available-no-muon -name DEBUG --max_steps 250000 --use-bert small [-cap {data_cap} -seed-event-sampler {seed} --seed {seed}]
 
+## BERT-tiny architecture with random encoder weights (hub config only; equivalent to `--use-bert tiny --bert-random-init`):
+python -m src.scripts.train -bs 10 --mode regression -E-available-no-muon -name DEBUG --max_steps 250000 --use-bert tiny-rw [-cap {data_cap} -seed-event-sampler {seed} --seed {seed}]
+
 """
 
 import argparse
@@ -96,6 +99,7 @@ print(f"CUDA_VISIBLE_DEVICES: {os.environ.get('CUDA_VISIBLE_DEVICES')}")
 BERT_PRESETS = {
     "small": "prajjwal1/bert-tiny",
     "tiny": "prajjwal1/bert-tiny",
+    "tiny-rw": "prajjwal1/bert-tiny",  # same arch as tiny; random-init encoder (see create_bert_model)
     "distil": "distilbert-base-uncased",
 }
 
@@ -111,17 +115,12 @@ def _load_hf_sequence_encoder(
     If ``random_init``, architecture (and vocab size, etc.) is taken from the hub ``config.json``,
     but weights are freshly initialized (no checkpoint weights).
     """
-    try:
-        from transformers import (
-            BertConfig,
-            BertModel,
-            DistilBertConfig,
-            DistilBertModel,
-        )
-    except ImportError as e:
-        raise ImportError(
-            "BertBaseline requires the `transformers` package. Install with: pip install transformers"
-        ) from e
+    from transformers import (
+        BertConfig,
+        BertModel,
+        DistilBertConfig,
+        DistilBertModel,
+    )
     name = pretrained_model_name_or_path.lower()
     if "distilbert" in name:
         if random_init:
@@ -506,10 +505,11 @@ def parse_args():
         nargs="?",
         const="small",
         default=None,
-        choices=["tiny", "small", "distil"],
+        choices=["tiny", "tiny-rw", "small", "distil"],
         metavar="SIZE",
-        help="Use pretrained BERT-style encoder on particle features (same layout as OmniLearned). "
-        "Pass --use-bert alone for preset 'small' (bert-tiny). Requires `transformers`.",
+        help="Use BERT-style encoder on particle features (same layout as OmniLearned). "
+        "Presets tiny/small load prajjwal1/bert-tiny weights; tiny-rw uses the same config but "
+        "random encoder init (or use --use-bert tiny --bert-random-init). Requires `transformers`.",
     )
     parser.add_argument(
         "--use-cls-token",
@@ -788,7 +788,7 @@ def create_bert_model(args, task):
     else:
         raise ValueError("Invalid task type")
     pretrained_name = BERT_PRESETS[args.use_bert]
-    ri = bool(getattr(args, "bert_random_init", False))
+    ri = bool(getattr(args, "bert_random_init", False)) or args.use_bert == "tiny-rw"
     e_sum_dim = 6 if args.include_E_sum else 0
     global_cont_dim = (GLOBAL_COND_BASE_DIM if args.use_cond else 0) + e_sum_dim
     if ri:

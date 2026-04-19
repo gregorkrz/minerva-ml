@@ -39,6 +39,7 @@ nvidia-smi
 
 # User commands
 pip install transformers
+export LD_LIBRARY_PATH="/opt/conda/lib:${{LD_LIBRARY_PATH:-}}"
 {commands}
 EOF
 )

@@ -167,10 +167,10 @@ This writes `out/classification_<TAG>.pkl` and `out/regression_<TAG>.pkl`. Use `
 ```bash
 export FLAG=Run_2703
 export OUT=/global/cfs/cdirs/m3246/gregork/Minerva/runs/
-python -m src.eval.plot_steps                 --flag $FLAG --out-dir $OUT       # training curves → plots/steps_combined/ (1×2 clf|reg, one legend); add --separate-panels for plots/{classification,regression}/steps/
-python -m src.eval.plot_regression            --flag $FLAG --out-dir $OUT                # energy / q₃ / scaling → plots/regression/
-python -m src.eval.plot_classification_W      --flag $FLAG --out-dir $OUT         # vs hadronic W → plots/classification/w_bins/
-python -m src.eval.plot_classification_q3     --flag $FLAG --out-dir $OUT       # vs q₃, CCNπ, light appendix → plots/classification/q3/ and .../light/
+python -m src.eval.plot_steps                 --flag $FLAG --out-dir $OUT     # training curves → plots/steps_combined/ (1×2 clf|reg, one legend); add --separate-panels for plots/{classification,regression}/steps/
+python -m src.eval.plot_regression            --flag $FLAG --out-dir $OUT     # energy / q₃ / scaling → plots/regression/
+python -m src.eval.plot_classification_W      --flag $FLAG --out-dir $OUT     # vs hadronic W → plots/classification/w_bins/
+python -m src.eval.plot_classification_q3     --flag $FLAG --out-dir $OUT     # vs q₃, CCNπ, light appendix → plots/classification/q3/ and .../light/
 python -m src.eval.plot_classification_Pions  --flag $FLAG --out-dir $OUT     # pion kinematics, CC1π⁰, light appendix → plots/classification/pions/ and .../light/
 python -m src.eval.plot_classification_light  --flag $FLAG --out-dir $OUT     # light PDFs only → plots/classification/light/ (see --components)
 ```

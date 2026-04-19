@@ -128,10 +128,11 @@ def collect_regression(ckpt_dir: Path, wandb_tag: str, suppress_errors: bool) ->
     if baseline_run is None:
         baseline_run = list(training_names_full["Log1p"].values())[0]
 
-    training_names_full_no_rw = {"Log1p": {}}
-    for key in training_names_full["Log1p"]:
-        if "rw" not in key:
-            training_names_full_no_rw["Log1p"][key] = training_names_full["Log1p"][key]
+    # Historically this dict excluded any model name containing "rw" (intended to drop
+    # random-weights ablations). That also removed OmniLearned-small-rw, which is a
+    # first-class model whose key ends in "-rw". Include every cap=-1 model so
+    # IQR/MPV and related plots match the full regression lineup.
+    training_names_full_no_rw = {"Log1p": dict(training_names_full["Log1p"])}
 
     training_names_full_first_only: dict = {}
     for loss, models in training_names_full.items():
@@ -147,12 +148,12 @@ def collect_regression(ckpt_dir: Path, wandb_tag: str, suppress_errors: bool) ->
     runs_per_model = regression_runs_per_model(runs_by_model_cap, training_names_full)
     loss_histories = collect_histories_for_runs(runs_per_model)
 
-    # Grouped layout for multi-seed / no-rw models (matches plot_rms_iqr_with_uncertainty).
+    # Grouped layout for multi-seed models (matches plot_rms_iqr_with_uncertainty).
     grouped_no_rw: dict[str, dict[str, list[str]]] = {"Log1p": {}}
     for model, runs in training_names_full_no_rw["Log1p"].items():
         grouped_no_rw["Log1p"][model] = runs if isinstance(runs, list) else [runs]
 
-    print("Loading regression eval arrays (no-rw, playlists 1A+1B)…")
+    print("Loading regression eval arrays (IQR bundle, playlists 1A+1B)…")
     eval_data_no_rw = load_eval_data_grouped(
         ckpt_dir,
         grouped_no_rw,
