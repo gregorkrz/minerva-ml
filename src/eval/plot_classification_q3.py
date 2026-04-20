@@ -28,6 +28,7 @@ from src.eval.classification_plots import (
     compute_signal_baseline,
     compute_reco_baseline_recall_per_bin,
     plot_binned_by_inttype,
+    plot_composition_vs_kinematic,
     plot_multi_pion_vs_q3,
     plot_prc_curves,
     save_figures_to_pdf,
@@ -275,6 +276,23 @@ def main(argv: list[str] | None = None) -> None:
         plt.close(fig)
         save_figures_to_pdf(figs_npi, out_dir / f"eval_Npi_tagging_{playlist}.pdf")
         print("Saved:", out_dir / f"eval_Npi_tagging_{playlist}.pdf")
+
+    # Event-composition (signal + background + S/B vs q3) for all three signal
+    # definitions — one single-page PDF per playlist.
+    for playlist in playlists:
+        data = data_by_playlist[playlist]
+        first_model = next(iter(results))
+        pid = results[first_model][0][playlist]["pid"]
+        fig_comp = plot_composition_vs_kinematic(
+            data=data,
+            pid=pid,
+            x_var="q3",
+            playlist=playlist,
+        )
+        fp = out_dir / f"event_composition_q3_{playlist}.pdf"
+        fig_comp.savefig(fp, bbox_inches="tight")
+        plt.close(fig_comp)
+        print("Saved:", fp)
 
     save_light_classification_pdfs(
         light_dir,

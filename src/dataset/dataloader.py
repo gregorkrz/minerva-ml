@@ -10,6 +10,57 @@ import numpy as np
 from pathlib import Path
 import torch._dynamo
 from dataclasses import dataclass, field
+from typing import Iterable
+
+
+# GENIE interaction-type codes stored in truth_labels[:, 1] (see DATASET.md).
+INT_TYPE_NAME_TO_CODE: dict[str, int] = {
+    "QE": 1,
+    "RES": 2,
+    "DIS": 3,
+    "COH": 4,
+    "MEC": 8,
+}
+INT_TYPE_CODE_TO_NAME: dict[int, str] = {v: k for k, v in INT_TYPE_NAME_TO_CODE.items()}
+# Column index of mc_intType in the truth_labels tensor.
+TRUTH_INT_TYPE_COL: int = 1
+
+
+def parse_event_types(values: Iterable) -> list[int]:
+    """Parse user-supplied event-type identifiers into GENIE interaction codes.
+
+    Accepts mixed names (``"DIS"``, case-insensitive) and integer codes (``3``).
+    Raises ``ValueError`` on unknown entries.
+    """
+    if values is None:
+        return []
+    codes: list[int] = []
+    for v in values:
+        if isinstance(v, str) and not v.strip().lstrip("-").isdigit():
+            key = v.strip().upper()
+            if key not in INT_TYPE_NAME_TO_CODE:
+                raise ValueError(
+                    f"Unknown event type '{v}'. Allowed names: "
+                    f"{sorted(INT_TYPE_NAME_TO_CODE)}; allowed codes: "
+                    f"{sorted(INT_TYPE_NAME_TO_CODE.values())}"
+                )
+            codes.append(INT_TYPE_NAME_TO_CODE[key])
+        else:
+            code = int(v)
+            if code not in INT_TYPE_CODE_TO_NAME:
+                raise ValueError(
+                    f"Unknown event-type code {code}. Allowed codes: "
+                    f"{sorted(INT_TYPE_CODE_TO_NAME)}"
+                )
+            codes.append(code)
+    # Preserve order, drop duplicates.
+    seen: set[int] = set()
+    unique: list[int] = []
+    for c in codes:
+        if c not in seen:
+            seen.add(c)
+            unique.append(c)
+    return unique
 
 
 @dataclass
@@ -178,6 +229,7 @@ class HEPTorchDataset(Dataset):
         task: Task = Task(),
         concat_additional_info=True,
         use_energy_sums=False,
+        event_types: list[int] | None = None,
     ):
         """
         Args:
@@ -251,15 +303,52 @@ class HEPTorchDataset(Dataset):
         self.max_particles = max_particles
         self.task = task
         self._len_full = int(np.sum(self.files_n_events))
+        # Optional filter on GENIE interaction type (truth_labels col 1).
+        # self._event_idx_map[logical_idx] -> physical_idx into the flattened arrays.
+        # When no filter is active it is still the identity map so downstream logic stays uniform.
+        self.event_types: list[int] = list(event_types) if event_types else []
+        if self.event_types:
+            int_type_flat = self._truth_flat[:, TRUTH_INT_TYPE_COL].astype(np.int64)
+            allowed = np.asarray(self.event_types, dtype=np.int64)
+            mask = np.isin(int_type_flat, allowed)
+            self._event_idx_map = np.nonzero(mask)[0].astype(np.int64)
+            kept = int(self._event_idx_map.size)
+            total = int(self._truth_flat.shape[0])
+            names = [INT_TYPE_CODE_TO_NAME.get(c, str(c)) for c in self.event_types]
+            print(
+                f"Filtering to event types {names} (codes {self.event_types}): "
+                f"kept {kept:,} / {total:,} events "
+                f"({100.0 * kept / max(total, 1):.2f}%)"
+            )
+            if kept == 0:
+                raise ValueError(
+                    f"No events remain after filtering to event types {names}. "
+                    "Check that --event-types matches data in this split."
+                )
+        else:
+            self._event_idx_map = np.arange(self._truth_flat.shape[0], dtype=np.int64)
         if self.nevts <= 0:
             print("Number of events per file", self.files_n_events)
         if self.task.type == "classifier":
-            self.class_counts = get_class_counts(
-                self.task.class_idx,
-                self.task.class_idx_map,
-                self.files_truth_labels,
-                self.task.class_label_idx,
-            )
+            if self.event_types:
+                # Compute class counts on the filtered subset so class weights reflect training data.
+                labels_flat = self._truth_flat[
+                    self._event_idx_map, self.task.class_label_idx
+                ].astype(np.int64)
+                mapped = np.asarray(
+                    [self.task.class_idx_map[int(l)] for l in labels_flat],
+                    dtype=np.int64,
+                )
+                self.class_counts = np.bincount(
+                    mapped, minlength=len(self.task.class_idx)
+                ).astype(np.float64)
+            else:
+                self.class_counts = get_class_counts(
+                    self.task.class_idx,
+                    self.task.class_idx_map,
+                    self.files_truth_labels,
+                    self.task.class_label_idx,
+                )
             self.class_weights = 1 / (self.class_counts / np.sum(self.class_counts))
             print("Class weights", self.class_weights)
         elif self.task.type == "regression":
@@ -272,17 +361,21 @@ class HEPTorchDataset(Dataset):
             raise ValueError("Invalid task type")
 
     def __len__(self):
+        n_available = int(self._event_idx_map.size)
         if self.nevts > 0:
-            return min(self.nevts, np.sum(self.files_n_events))
+            return min(self.nevts, n_available)
         print("Number of events per file", self.files_n_events)
-        return np.sum(self.files_n_events)
+        return n_available
 
     def __getitem__(self, idx):
-        file_idx = np.searchsorted(self.files_n_events_sum, idx, side="right")
+        # Remap logical idx -> physical idx in the flattened/concatenated ordering.
+        phys_idx = int(self._event_idx_map[idx])
+        file_idx = np.searchsorted(self.files_n_events_sum, phys_idx, side="right")
         if file_idx > 0:
-            sample_idx = idx - self.files_n_events_sum[file_idx - 1]
+            sample_idx = phys_idx - self.files_n_events_sum[file_idx - 1]
         else:
-            sample_idx = idx
+            sample_idx = phys_idx
+        idx = phys_idx
         off = self.files_offsets[file_idx]
         start, end = off[sample_idx].item(), off[sample_idx + 1].item()
         data = self.files_values[file_idx][start:end]
@@ -365,6 +458,7 @@ def load_data(
     concat_additional_info=True,
     event_sampler_random_state=42,
     use_energy_sums=False,
+    event_types: list[int] | None = None,
 ):
     supported_datasets = [
         "minerva_1A",
@@ -399,6 +493,7 @@ def load_data(
             concat_additional_info=concat_additional_info,
             nevts=-1,  # Here, keep the whole dataset, only later we will sample a subset of the data
             use_energy_sums=use_energy_sums,
+            event_types=event_types,
         )
         if nevts > 0 and nevts < len(data):
             print(f"Using a subset of the data: {nevts} events out of {len(data)}")

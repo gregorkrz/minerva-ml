@@ -20,6 +20,37 @@ MC_INT_TYPE: dict[int, str] = {
     8: "MEC/2p2h",
 }
 
+# Merged interaction-type grouping used by the polished classification plots:
+# everything that is not DIS (3) or RES (2) is collapsed into "Other" (sentinel
+# code 0, which never appears in raw ``int_type_arr``).
+MC_INT_TYPE_MERGED: dict[int, str] = {
+    3: "DIS",
+    2: "RES",
+    0: "Other",
+}
+
+# Fixed colors for the three merged interaction-type categories; used in all
+# composition plots (signal / background / S/B) and shared with any future
+# int-type-colored overlays for style consistency.
+INT_TYPE_COLORS: dict[str, str] = {
+    "DIS": "#1f77b4",
+    "RES": "#ff7f0e",
+    "Other": "#7f7f7f",
+}
+
+
+def merge_int_type_arr(int_type_arr: np.ndarray) -> np.ndarray:
+    """Collapse ``int_type_arr`` into {3=DIS, 2=RES, 0=Other}.
+
+    Any code that is not 2 or 3 (including unknown values) becomes 0.
+    Shape and dtype semantics match :func:`numpy.asarray` on the input.
+    """
+    arr = np.asarray(int_type_arr)
+    merged = np.zeros_like(arr, dtype=int)
+    merged[arr == 3] = 3
+    merged[arr == 2] = 2
+    return merged
+
 
 def _default_signal_label(signal_classes: list[int]) -> str:
     """Short label for the binary signal definition used in classification plots."""

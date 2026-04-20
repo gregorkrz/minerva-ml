@@ -48,6 +48,8 @@ def get_runs_by_model_and_cap(
           generate_cond_only_jobs.py). Same global ablation as Transformer1NR (--zero-cond-feature 2).
           cap is always -1. Names with _cond_only_lowLR_classifier_NR_full_ are classification jobs and
           are excluded here so regression eval only sees regression MLP runs.
+      - BERT-tiny / BERT-tiny-rw: Run_*_BERT_tiny_rw_regression_<cap>_seed... and
+          Run_*_BERT_tiny_regression_<cap>_seed... (``tiny_rw`` before ``tiny`` so names match correctly).
     dataset_cap is -1 for full 6M dataset, or a positive int for smaller caps.
     """
     run_names = fetch_runs_from_wandb(tag, project)
@@ -82,6 +84,14 @@ def get_runs_by_model_and_cap(
                     model = "Transformer-small"
                 else:
                     model = raw
+        if model is None:
+            m = re.search(r"_BERT_tiny_rw_regression_(-?\d+)_", name)
+            if m:
+                model, cap = "BERT-tiny-rw", int(m.group(1))
+        if model is None:
+            m = re.search(r"_BERT_tiny_regression_(-?\d+)_", name)
+            if m:
+                model, cap = "BERT-tiny", int(m.group(1))
         if model is None:
             # Regression NR-full only; do not match _cond_only_lowLR_classifier_NR_full_ (classification).
             m = re.search(r"_cond_only_lowLR_(?!classifier_)NR_full_seed(-?\d+)_", name)
@@ -125,6 +135,8 @@ def get_classification_runs_by_model_and_cap(
           Run_*_cond_only_lowLR_classifier_NR_full_seed... (classifier job template) match.
           "NR" matches training with --zero-cond-feature 2 (same global ablation as
           Transformer1NR; see generate_cond_only_jobs.py). cap is always -1.
+      - BERT-tiny / BERT-tiny-rw: Run_*_BERT_tiny_rw_classifier_<cap>_seed... and
+          Run_*_BERT_tiny_classifier_<cap>_seed... (match ``tiny_rw`` before ``tiny``).
     dataset_cap is -1 for full 6M dataset, or a positive int for smaller caps.
     """
     run_names = fetch_runs_from_wandb(tag, project)
@@ -159,6 +171,14 @@ def get_classification_runs_by_model_and_cap(
                     model = "Transformer-small"
                 else:
                     model = raw
+        if model is None:
+            m = re.search(r"_BERT_tiny_rw_classifier_(-?\d+)_", name)
+            if m:
+                model, cap = "BERT-tiny-rw", int(m.group(1))
+        if model is None:
+            m = re.search(r"_BERT_tiny_classifier_(-?\d+)_", name)
+            if m:
+                model, cap = "BERT-tiny", int(m.group(1))
         if model is None:
             m = re.search(r"_cond_only_lowLR_classifier_NR_full_seed(-?\d+)_", name)
             if m:

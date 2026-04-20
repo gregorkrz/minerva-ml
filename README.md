@@ -158,6 +158,8 @@ python -m src.eval.collect_eval_data --flag Run_2703 --out-dir /global/cfs/cdirs
 
 This writes `out/classification_<TAG>.pkl` and `out/regression_<TAG>.pkl`. Use `--out-dir` optionally.
 
+W&B runs are selected by the **wandb tag** passed as `--flag` (see `fetch_runs_from_wandb` in `src/utils/utils.py`). BERT baselines from `submit_train_jobs.py` use names like `Run_1703_BERT_tiny_{regression|classifier}_<cap>_seed…`; tag those runs in W&B (e.g. `Run_1703`) and pass the same tag to `collect_eval_data` / `plot_*` so they are grouped as **BERT-tiny** and **BERT-tiny-rw**. Training-curve x-positions use FLOPs per step from `src/eval/_constants.py` (`FLOPS_PER_STEP`); BERT-tiny entries match `train.py --calculate-flops` (training heuristic 3× inference per batch). Re-measure if you change batch size, depth, or architecture.
+
 **Optional:** Download latest cached model outputs
 
 * You can use download the latest files with evaluation data (https://huggingface.co/datasets/gregorkrzmanc/minerva-ml-eval), and set $OUT to the path where you download this data.

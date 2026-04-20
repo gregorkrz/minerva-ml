@@ -38,6 +38,7 @@ def generate_cmd(
     resume_run_id="",
     resume_run_name="",
     model_n_layers=4,
+    event_types=None,
 ):
     if continue_from:
         base = f"python -m src.scripts.train --resume {continue_from} -name {resume_run_name} --resume-run-id {resume_run_id} --max_steps 1000000"
@@ -101,6 +102,13 @@ def generate_cmd(
     else:
         raise ValueError(f"Invalid model: {model}")
     cap = f" -cap {data_cap} " if data_cap > 0 else ""
+    # Optional event-type filter (e.g. DIS-only classification runs).
+    if event_types:
+        types_str = " ".join(str(t) for t in event_types)
+        extra = extra + f" --event-types {types_str} "
+        # Tag the run name so it doesn't collide with unfiltered runs.
+        suffix = "_" + "".join(str(t).upper() for t in event_types) + "_only"
+        name = name + suffix
     return base.format(
         bs=bs,
         task=task,
@@ -121,105 +129,158 @@ def generate_cmd(
 
 
 def get_cmds_and_slurm_times():
-    times_data_cap = {  # for 20k: for OLS_RW 100 minutes, for the rest OLS 50 minutes
-        "20000": {
-            "OLS_RW": "01:30:00",
-            "OLS": "00:50:00",
-            "OLS_int": "00:50:00",
-            "OLM_FB": "00:50:00",
-            "BERT-tiny": "00:50:00",
-            "BERT-tiny-rw": "00:50:00",
-            "Transformer1": "00:20:00",
-            "Transformer1NR": "00:20:00",
-        },
-        "50000": {
-            "OLS_RW": "03:00:00",
-            "OLS": "01:00:00",
-            "OLS_int": "01:00:00",
-            "OLM_FB": "01:00:00",
-            "BERT-tiny": "01:00:00",
-            "BERT-tiny-rw": "01:00:00",
-            "Transformer1": "00:20:00",
-            "Transformer1NR": "00:20:00",
-        },
-        "100000": {
-            "OLS_RW": "04:00:00",
-            "Transformer1": "00:20:00",
-            "Transformer1NR": "00:20:00",
-            "OLS": "01:00:00",
-            "OLS_int": "01:00:00",
-            "OLM_FB": "01:00:00",
-            "BERT-tiny": "01:00:00",
-            "BERT-tiny-rw": "01:00:00",
-        },
-        "200000": {
-            "OLS_RW": "05:00:00",
-            "OLS": "01:30:00",
-            "OLS_int": "01:30:00",
-            "OLM_FB": "01:30:00",
-            "BERT-tiny": "01:30:00",
-            "BERT-tiny-rw": "01:30:00",
-            "Transformer1": "00:20:00",
-            "Transformer1NR": "00:20:00",
-        },
-    }
+    """Transformer-large (= ``Transformer2`` preset, d_model=384, depth=8, n_heads=12),
+    trained on DIS events only. Sweeps over seeds and tasks for direct comparison.
+
+    NOTE: the previous BERT-tiny + DIS-only extra run sweep is kept below as a
+    commented reference — uncomment to restore it.
+    """
     cmds = []
     slurm_times = []
-    for seed in [55, 56]:
-        for data_cap in [-1]:
-            for task in ["regression", "classifier"]:
-                for model in ["BERT-tiny"]:  # use "BERT-tiny-rw" for same arch, random BERT weights
-                    if "OL" in model:
-                        bs = 2048
-                        grad_accum_steps = 1
-                        if "OLM_FB" in model or "OLM" in model:
-                            bs = 512
-                            grad_accum_steps = 4
-                            if data_cap == -1:
-                                slurm_times.append("15:00:00")
-                            else:
-                                slurm_times.append(times_data_cap[str(data_cap)][model])
-                        else:
-
-                            if data_cap == -1:
-                                slurm_times.append("12:00:00")
-                            else:
-                                slurm_times.append(times_data_cap[str(data_cap)][model])
-                    elif model in ("BERT-tiny", "BERT-tiny-rw"):
-                        bs = 2048
-                        grad_accum_steps = 1
-                        if data_cap == -1:
-                            slurm_times.append("12:00:00")
-                        else:
-                            slurm_times.append(times_data_cap[str(data_cap)][model])
-                    else:
-                        bs = 2048
-                        grad_accum_steps = 1
-                        if task == "regression":
-                            if data_cap == -1:
-                                slurm_times.append("08:00:00")
-                            else:
-                                slurm_times.append(times_data_cap[str(data_cap)][model])
-                        else:
-                            if data_cap == -1:
-                                slurm_times.append("05:00:00")
-                            else:
-                                slurm_times.append(times_data_cap[str(data_cap)][model])
-                    max_steps = {
-                        "regression": 500000,
-                        "classifier": 500000,
-                    }
-                    cmd = generate_cmd(
-                        data_cap=data_cap,
-                        seed=seed,
-                        task=task,
-                        model=model,
-                        max_steps=max_steps[task],
-                        bs=bs,
-                        grad_accum_steps=grad_accum_steps,
-                    )
-                    cmds.append(cmd)
+    seeds = [55, 56]
+    tasks = ["regression", "classifier"]
+    model = "Transformer2"  # Transformer-large
+    # Transformer2 is ~10x the params of Transformer1/BERT-tiny so per-step compute
+    # dominates; max_steps is unchanged by the event-types filter. Walltime below is
+    # a conservative default — tune after first job finishes.
+    walltime = "20:00:00"
+    for seed in seeds:
+        for task in tasks:
+            cmd = generate_cmd(
+                data_cap=-1,
+                seed=seed,
+                task=task,
+                model=model,
+                max_steps=500000,
+                bs=2048,
+                grad_accum_steps=1,
+                event_types=["DIS"],
+            )
+            cmds.append(cmd)
+            slurm_times.append(walltime)
     return cmds, slurm_times
+
+
+# ---------------------------------------------------------------------------
+# Previous sweep — kept for reference. Uncomment (and rename) to restore.
+# BERT-tiny over (seed, task) plus one extra DIS-only classification run.
+# ---------------------------------------------------------------------------
+# def get_cmds_and_slurm_times_bert_tiny():
+#     times_data_cap = {  # for 20k: for OLS_RW 100 minutes, for the rest OLS 50 minutes
+#         "20000": {
+#             "OLS_RW": "01:30:00",
+#             "OLS": "00:50:00",
+#             "OLS_int": "00:50:00",
+#             "OLM_FB": "00:50:00",
+#             "BERT-tiny": "00:50:00",
+#             "BERT-tiny-rw": "00:50:00",
+#             "Transformer1": "00:20:00",
+#             "Transformer1NR": "00:20:00",
+#         },
+#         "50000": {
+#             "OLS_RW": "03:00:00",
+#             "OLS": "01:00:00",
+#             "OLS_int": "01:00:00",
+#             "OLM_FB": "01:00:00",
+#             "BERT-tiny": "01:00:00",
+#             "BERT-tiny-rw": "01:00:00",
+#             "Transformer1": "00:20:00",
+#             "Transformer1NR": "00:20:00",
+#         },
+#         "100000": {
+#             "OLS_RW": "04:00:00",
+#             "Transformer1": "00:20:00",
+#             "Transformer1NR": "00:20:00",
+#             "OLS": "01:00:00",
+#             "OLS_int": "01:00:00",
+#             "OLM_FB": "01:00:00",
+#             "BERT-tiny": "01:00:00",
+#             "BERT-tiny-rw": "01:00:00",
+#         },
+#         "200000": {
+#             "OLS_RW": "05:00:00",
+#             "OLS": "01:30:00",
+#             "OLS_int": "01:30:00",
+#             "OLM_FB": "01:30:00",
+#             "BERT-tiny": "01:30:00",
+#             "BERT-tiny-rw": "01:30:00",
+#             "Transformer1": "00:20:00",
+#             "Transformer1NR": "00:20:00",
+#         },
+#     }
+#     cmds = []
+#     slurm_times = []
+#     for seed in [55, 56]:
+#         for data_cap in [-1]:
+#             for task in ["regression", "classifier"]:
+#                 for model in ["BERT-tiny"]:  # use "BERT-tiny-rw" for same arch, random BERT weights
+#                     if "OL" in model:
+#                         bs = 2048
+#                         grad_accum_steps = 1
+#                         if "OLM_FB" in model or "OLM" in model:
+#                             bs = 512
+#                             grad_accum_steps = 4
+#                             if data_cap == -1:
+#                                 slurm_times.append("15:00:00")
+#                             else:
+#                                 slurm_times.append(times_data_cap[str(data_cap)][model])
+#                         else:
+#                             if data_cap == -1:
+#                                 slurm_times.append("12:00:00")
+#                             else:
+#                                 slurm_times.append(times_data_cap[str(data_cap)][model])
+#                     elif model in ("BERT-tiny", "BERT-tiny-rw"):
+#                         bs = 2048
+#                         grad_accum_steps = 1
+#                         if data_cap == -1:
+#                             slurm_times.append("12:00:00")
+#                         else:
+#                             slurm_times.append(times_data_cap[str(data_cap)][model])
+#                     else:
+#                         bs = 2048
+#                         grad_accum_steps = 1
+#                         if task == "regression":
+#                             if data_cap == -1:
+#                                 slurm_times.append("08:00:00")
+#                             else:
+#                                 slurm_times.append(times_data_cap[str(data_cap)][model])
+#                         else:
+#                             if data_cap == -1:
+#                                 slurm_times.append("05:00:00")
+#                             else:
+#                                 slurm_times.append(times_data_cap[str(data_cap)][model])
+#                     max_steps = {
+#                         "regression": 500000,
+#                         "classifier": 500000,
+#                     }
+#                     cmd = generate_cmd(
+#                         data_cap=data_cap,
+#                         seed=seed,
+#                         task=task,
+#                         model=model,
+#                         max_steps=max_steps[task],
+#                         bs=bs,
+#                         grad_accum_steps=grad_accum_steps,
+#                     )
+#                     cmds.append(cmd)
+#
+#     # Extra: one DIS-only classification run (BERT-tiny) to investigate poor
+#     # performance of the all-events model on DIS events. Matches the sweep's
+#     # BERT-tiny classifier config (bs, grad_accum, max_steps, walltime).
+#     cmds.append(
+#         generate_cmd(
+#             data_cap=-1,
+#             seed=55,
+#             task="classifier",
+#             model="BERT-tiny",
+#             max_steps=500000,
+#             bs=2048,
+#             grad_accum_steps=1,
+#             event_types=["DIS"],
+#         )
+#     )
+#     slurm_times.append("12:00:00")
+#     return cmds, slurm_times
 
 
 def get_cmds_and_slurm_times_continue():

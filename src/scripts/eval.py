@@ -1,7 +1,7 @@
 """
-Evaluation script for PointGlobalMixedViT on HEP data.
+Evaluation script for trained models on HEP data (PointGlobalMixedViT, OmniLearned PET2, BERT baseline).
 
-This script evaluates a trained ViT model on particle physics data using the HEPTorchDataset.
+This script evaluates a checkpoint on particle physics data using the HEPTorchDataset.
 It supports both regression and classification tasks with wandb logging and metric computation.
 
 Example usage:
@@ -26,7 +26,9 @@ from src.scripts.train import (
     set_seed,
     prepare_batch,
     prepare_batch_omnilearned,
+    prepare_batch_bert,
     create_task,
+    create_bert_model,
     CondOnlyMLP,
 )
 from src.constants.dataset import GLOBAL_COND_BASE_DIM
@@ -89,6 +91,8 @@ def create_model_from_checkpoint(checkpoint_path, device):
             K=10,
             **model_params,
         )
+    elif args_dict.get("use_bert", None):
+        model = create_bert_model(args_attrs, task)
     elif args_dict.get("cond_only", False):
         e_sum_dim = 6 if args_dict.get("include_E_sum", False) else 0
         model = CondOnlyMLP(
@@ -170,6 +174,7 @@ def evaluate(model, dataloader, device, args_dict, use_amp=False):
     include_E_sum = args_dict.get("include_E_sum", False)
     zero_cond_feature = args_dict.get("zero_cond_feature", None)
     use_omnilearned = args_dict.get("use_omnilearned", None)
+    use_bert = args_dict.get("use_bert", None)
 
     # Setup loss function
     if mode == "regression":
@@ -190,6 +195,16 @@ def evaluate(model, dataloader, device, args_dict, use_amp=False):
         if use_omnilearned:
             inputs = prepare_batch_omnilearned(
                 batch, device, use_cond, use_pid, pid_idx, include_E_sum=include_E_sum
+            )
+        elif use_bert:
+            inputs = prepare_batch_bert(
+                batch,
+                device,
+                use_pid=use_pid,
+                pid_idx=pid_idx,
+                use_cond=use_cond,
+                include_E_sum=include_E_sum,
+                zero_cond_feature=zero_cond_feature,
             )
         else:
             inputs = prepare_batch(
@@ -213,6 +228,12 @@ def evaluate(model, dataloader, device, args_dict, use_amp=False):
                     add_info=inputs["add_info"],
                 )
                 logits = outputs["y_pred"]
+            elif use_bert:
+                logits = model(
+                    inputs["X"],
+                    inputs["attention_mask"],
+                    global_cont=inputs.get("global_cont"),
+                )
             elif cond_only:
                 logits = model(inputs["global_cont"])
             else:
@@ -337,7 +358,8 @@ def main():
 
     # Create dataloader
     use_omnilearned = args_dict.get("use_omnilearned", None)
-    concat_additional_info = not bool(use_omnilearned)
+    use_bert = args_dict.get("use_bert", None)
+    concat_additional_info = not (bool(use_omnilearned) or bool(use_bert))
     dataloader, _ = load_data(
         dataset_name=dataset_name,
         path=data_path,

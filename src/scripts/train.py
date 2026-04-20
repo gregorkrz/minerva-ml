@@ -32,6 +32,14 @@ python -m src.scripts.train -bs 10 --mode regression -E-available-no-muon -name 
 ## BERT-tiny architecture with random encoder weights (hub config only; equivalent to `--use-bert tiny --bert-random-init`):
 python -m src.scripts.train -bs 10 --mode regression -E-available-no-muon -name DEBUG --max_steps 250000 --use-bert tiny-rw [-cap {data_cap} -seed-event-sampler {seed} --seed {seed}]
 
+
+# Restrict training + validation to specific GENIE interaction types (QE/RES/DIS/COH/MEC):
+## Train only on DIS events:
+python -m src.scripts.train ... --event-types DIS
+## Train on DIS + RES (names and int codes are both accepted):
+python -m src.scripts.train ... --event-types DIS RES
+python -m src.scripts.train ... --event-types 3 2
+
 """
 
 import argparse
@@ -83,7 +91,12 @@ import wandb
 from tqdm import tqdm
 import numpy as np
 
-from src.dataset.dataloader import load_data, Task
+from src.dataset.dataloader import (
+    load_data,
+    Task,
+    parse_event_types,
+    INT_TYPE_NAME_TO_CODE,
+)
 from src.constants.dataset import GLOBAL_COND_BASE_DIM
 from src.models.vit import PointGlobalMixedViT, PointGlobalMixedViTConfig
 from src.models.omnilearned import (
@@ -578,6 +591,17 @@ def parse_args():
         "--calculate-flops",
         action="store_true",
         help="Only compute FLOPs per batch (inference and approx training) then exit",
+    )
+    parser.add_argument(
+        "--event-types",
+        nargs="+",
+        default=None,
+        metavar="TYPE",
+        help="Restrict training/validation to events with the given GENIE interaction "
+        "types (truth_labels[:, 1] = mc_intType). Accepts names (QE, RES, DIS, COH, MEC) "
+        "and/or integer codes (1=QE, 2=RES, 3=DIS, 4=COH, 8=MEC). "
+        "Example: --event-types DIS, or --event-types 3, or --event-types DIS RES. "
+        "If omitted, train on all event types (current default).",
     )
     return parser.parse_args()
 
@@ -1484,6 +1508,12 @@ def train(args):
     concat_additional_info = not (
         bool(args.use_omnilearned) or bool(getattr(args, "use_bert", None))
     )
+    event_type_codes = parse_event_types(args.event_types) or None
+    if event_type_codes:
+        print(
+            f"Restricting train+val to GENIE interaction types "
+            f"{args.event_types} -> codes {event_type_codes}"
+        )
     train_loader, class_weights = load_data(
         dataset_name=args.dataset_name,
         path=args.data_path,
@@ -1503,6 +1533,7 @@ def train(args):
         event_sampler_random_state=args.event_sampler_random_state,
         nevts=args.event_cap,
         use_energy_sums=args.include_E_sum,
+        event_types=event_type_codes,
     )
 
     val_loader, _ = load_data(
@@ -1522,6 +1553,7 @@ def train(args):
         max_particles=args.max_particles,
         concat_additional_info=concat_additional_info,
         use_energy_sums=args.include_E_sum,
+        event_types=event_type_codes,
     )
 
     print(f"Train samples: {len(train_loader.dataset)}")

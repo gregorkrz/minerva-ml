@@ -15,7 +15,11 @@ REGRESSION_PICKLE_STEM = "regression"
 # FLOPs per training step (batch size 2048) — same tables as notebooks.
 # OmniLearned-medium: scalar used for log-FLOPs plots (full-model training proxy). Frozen-backbone
 # training uses fewer FLOPs per step; measure with ``src.scripts.train --calculate-flops``.
+# BERT-tiny / tiny-rw: ``train.py --calculate-flops`` (bs=2048, max_particles=33): inference
+# 55_128_883_200 FLOPs/batch; table uses training heuristic 3× inference fwd = 165_386_649_600 (same arch).
 FLOPS_PER_STEP: dict[str, float] = {
+    "BERT-tiny": 165_386_649_600.0,
+    "BERT-tiny-rw": 165_386_649_600.0,
     "Transformer-xsmall": 358.5 * 1e9,
     "OmniLearned-small": 1769 * 1e9,
     "OmniLearned-small-int": 1769 * 1e9,
@@ -27,6 +31,8 @@ FLOPS_PER_STEP: dict[str, float] = {
 }
 
 CLRS_CLASSIFICATION: dict[str, str] = {
+    "BERT-tiny": "#8c564b",
+    "BERT-tiny-rw": "#bcbd22",
     "Transformer": "#1f77b4",
     "Transformer-xsmall": "#1f77b4",
     "OmniLearned-small": "#ff7f0e",
@@ -46,6 +52,8 @@ def repo_output_path(repo_root: Path, path: Path) -> Path:
 
 
 CLRS_REGRESSION: dict[str, str] = {
+    "BERT-tiny": "#8c564b",
+    "BERT-tiny-rw": "#bcbd22",
     "Transformer-xsmall": "#1f77b4",
     "Transformer-small": "#17becf",
     "OmniLearned-small": "#ff7f0e",

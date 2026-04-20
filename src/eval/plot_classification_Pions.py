@@ -33,6 +33,7 @@ from src.eval.classification_plots import (
     plot_cc1pi_vs_pion_kinematics,
     plot_multi_classification_vs_W,
     plot_prc_curves,
+    plot_signal_composition_single_pion,
     save_figures_to_pdf,
 )
 from src.eval._bootstrap import silence_classification_empty_bin_warnings
@@ -219,13 +220,10 @@ def main(argv: list[str] | None = None) -> None:
             uncertainties=True,
             reco_baseline_tpr_W=reco_baseline_tpr_W_cc1pi,
             reco_baseline_global_fpr=baseline_fpr_cc1pi,
-            reco_baseline_pred=y_pred_cc1pi,
             colors=clrs,
             title=rf"$CC1\pi^\pm$ tagging - MINERvA Open Data Playlist {playlist}",
             playlist=playlist,
             use_global_fpr=True,
-            results=results,
-            signal_classes=cc1pi_classes,
         )
         figs_cc1pi.append(fig_w_cc1pi)
         plt.close(fig_w_cc1pi)
@@ -237,10 +235,7 @@ def main(argv: list[str] | None = None) -> None:
             uncertainties=True,
             fixed_fpr=[baseline_fpr_cc1pi],
             reco_baseline_tpr=reco_baseline_tpr_cc1pi,
-            reco_baseline_pred=y_pred_cc1pi,
             reco_baseline_global_fpr=baseline_fpr_cc1pi,
-            results=results,
-            signal_classes=cc1pi_classes,
             colors=clrs,
             playlist=playlist,
         )
@@ -388,13 +383,10 @@ def main(argv: list[str] | None = None) -> None:
             uncertainties=True,
             reco_baseline_tpr_W=reco_baseline_tpr_W_pi0,
             reco_baseline_global_fpr=baseline_fpr,
-            reco_baseline_pred=y_pred_baseline,
             colors=clrs,
             title=rf"$CC1\pi^0$ tagging - MINERvA Open Data Playlist {playlist}",
             playlist=playlist,
             use_global_fpr=True,
-            results=results,
-            signal_classes=cc1pi0_classes,
         )
         figs_pi0.append(fig_w_pi0)
         plt.close(fig_w_pi0)
@@ -406,10 +398,7 @@ def main(argv: list[str] | None = None) -> None:
             uncertainties=True,
             fixed_fpr=[baseline_fpr],
             reco_baseline_tpr=reco_baseline_tpr,
-            reco_baseline_pred=y_pred_baseline,
             reco_baseline_global_fpr=baseline_fpr,
-            results=results,
-            signal_classes=cc1pi0_classes,
             colors=clrs,
             suptitle=rf"$CC1\pi^0$ tagging - MINERvA Open Data Playlist {playlist}",
             playlist=playlist,
@@ -464,6 +453,23 @@ def main(argv: list[str] | None = None) -> None:
         plt.close(fig4)
         save_figures_to_pdf(figs_pi0, out_dir / f"eval_cc1pi0_tagging_{playlist}.pdf")
         print("Saved:", out_dir / f"eval_cc1pi0_tagging_{playlist}.pdf")
+
+    # Event-composition plots (signal DIS/RES/Other vs pion E & theta; single
+    # bar for background) — one single-page PDF per playlist.
+    for playlist in playlists:
+        data = data_by_playlist[playlist]
+        first_model = next(iter(results))
+        pid = results[first_model][0][playlist]["pid"]
+        fig_comp = plot_signal_composition_single_pion(
+            data=data,
+            pid=pid,
+            playlist=playlist,
+        )
+        fp = out_dir / f"event_composition_single_pion_{playlist}.pdf"
+        fp.parent.mkdir(parents=True, exist_ok=True)
+        fig_comp.savefig(fp, bbox_inches="tight")
+        plt.close(fig_comp)
+        print("Saved:", fp)
 
     delta_m_values = np.linspace(1, 509, 20)
     for playlist in playlists:

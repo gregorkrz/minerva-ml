@@ -24,6 +24,7 @@ from src.eval.classification_plots import (
     compute_reco_baseline_recall_per_bin,
     compute_signal_baseline_W,
     plot_binned_by_inttype,
+    plot_composition_vs_kinematic,
     plot_multi_classification_vs_W,
     save_figures_to_pdf,
 )
@@ -110,13 +111,10 @@ def _run_w_notebook_style(
             uncertainties=True,
             reco_baseline_tpr_W=reco_baseline_tpr_W_cc1pi,
             reco_baseline_global_fpr=baseline_fpr_cc1pi,
-            reco_baseline_pred=y_pred_cc1pi,
             colors=clrs,
             title=rf"$CC1\pi^\pm$ tagging - MINERvA Open Data Playlist {playlist}",
             use_global_fpr=use_global_fpr,
             playlist=playlist,
-            results=results,
-            signal_classes=cc1pi_classes,
         )
         figs_cc1pi_W.append(fig)
         plt.close(fig)
@@ -193,13 +191,10 @@ def _run_w_notebook_style(
             uncertainties=True,
             reco_baseline_tpr_W=reco_baseline_tpr_W_cc1pi0,
             reco_baseline_global_fpr=baseline_fpr_cc1pi0,
-            reco_baseline_pred=y_pred_cc1pi0,
             colors=clrs,
             title=rf"$CC1\pi^0$ tagging - MINERvA Open Data Playlist {playlist}",
             use_global_fpr=use_global_fpr,
             playlist=playlist,
-            results=results,
-            signal_classes=cc1pi0_classes,
         )
         figs_cc1pi0_W.append(fig)
         plt.close(fig)
@@ -270,13 +265,10 @@ def _run_w_notebook_style(
             uncertainties=True,
             reco_baseline_tpr_W=reco_baseline_tpr_W,
             reco_baseline_global_fpr=baseline_fpr_ccnpi,
-            reco_baseline_pred=y_pred_ccnpi,
             colors=clrs,
             title=rf"$CCN\pi^\pm$ tagging ($N \geq 1$) - MINERvA Open Data Playlist {playlist}",
             use_global_fpr=use_global_fpr,
             playlist=playlist,
-            results=results,
-            signal_classes=multi_pi_classes,
         )
         figs_npi_W.append(fig)
         plt.close(fig)
@@ -369,13 +361,10 @@ def _run_w_ngt1(
             uncertainties=True,
             reco_baseline_tpr_W=reco_baseline_tpr_W,
             reco_baseline_global_fpr=baseline_fpr_ccnpi,
-            reco_baseline_pred=y_pred_ccnpi,
             colors=clrs,
             title=rf"$CCN\pi^\pm$ tagging ($N > 1$) - MINERvA Open Data Playlist {playlist}",
             use_global_fpr=use_global_fpr,
             playlist=playlist,
-            results=results,
-            signal_classes=multi_pi_classes,
         )
         figs_npi_W.append(fig)
         plt.close(fig)
@@ -449,6 +438,23 @@ def main(argv: list[str] | None = None) -> None:
         tag_suffix="",
     )
     _run_w_ngt1(results, data_w_by_playlist, clrs, use_global_fpr, out_dir, playlists)
+
+    # Event-composition (signal + background + S/B vs W) for all three signal
+    # definitions — one single-page PDF per playlist.
+    for playlist in playlists:
+        data_w = data_w_by_playlist[playlist]
+        first_model = next(iter(results))
+        pid = results[first_model][0][playlist]["pid"]
+        fig_comp = plot_composition_vs_kinematic(
+            data=data_w,
+            pid=pid,
+            x_var="W",
+            playlist=playlist,
+        )
+        fp = out_dir / f"event_composition_W_{playlist}.pdf"
+        fig_comp.savefig(fp, bbox_inches="tight")
+        plt.close(fig_comp)
+        print("Saved:", fp)
 
 
 if __name__ == "__main__":

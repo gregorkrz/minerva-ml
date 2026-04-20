@@ -4,28 +4,30 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
+import numpy.ma as ma
 from sklearn.metrics import auc, precision_recall_curve
 
+from ._binning import data_with_signal_pion_bins
 from ._constants import (
     CLASSIFICATION_PERFORMANCE_LEGEND_TITLE,
     DEFAULT_FIXED_FPR,
-    MC_INT_TYPE,
+    INT_TYPE_COLORS,
+    MC_INT_TYPE_MERGED,
     W_METRICS_XLIM_GEV,
     _LABEL_FS,
     _LEGEND_FS,
     _TICK_FS,
     _baseline_legend_with_global_fpr,
     _default_signal_label,
-    _global_reco_baseline_fpr,
     _reco_baseline_fpr_on_mask,
     _tpr_column_title_vs_kinematics,
     _tpr_line_legend_label,
+    merge_int_type_arr,
 )
-from ._metrics_binned import get_signal_probabilities, mc_value_in_bin
+from ._metrics_binned import get_signal_probabilities
 from ._metrics_tasks import (
     compute_all_metrics,
     compute_all_metrics_q3,
@@ -33,10 +35,7 @@ from ._metrics_tasks import (
     compute_signal_baseline,
     compute_signal_baseline_W,
 )
-from ._reco_baseline import (
-    compute_reco_baseline_fpr_per_bin,
-    compute_reco_baseline_recall_per_bin,
-)
+from ._reco_baseline import compute_reco_baseline_recall_per_bin
 
 
 def _set_xlim_w_metrics(ax: plt.Axes) -> None:
@@ -45,13 +44,57 @@ def _set_xlim_w_metrics(ax: plt.Axes) -> None:
     ax.set_xlim(lo, hi)
 
 
+_PER_AXES_LEGEND_MARKER = " (FPR "
+
+
 def _shared_light_legend(fig: plt.Figure, axes: Iterable[plt.Axes]) -> None:
-    """One legend below the figure; first-seen label order, one handle per label."""
+    """One shared legend below the figure; first-seen label order, one handle per label.
+
+    Labels that contain a per-panel annotation (``" (FPR "``, e.g.
+    ``"Baseline (FPR 3.5%)"``) are intentionally excluded from the shared legend
+    because the same visual marker/color is reused across panels with different
+    numeric annotations. For those labels, a compact per-axes legend is placed
+    on each axis where they appear.
+    """
+    axes_list = list(axes)
+
+    # Per-axes legend for FPR-annotated labels (plain strings like "Baseline"
+    # continue to be aggregated into the shared legend below).
+    for ax in axes_list:
+        h_ax, l_ax = ax.get_legend_handles_labels()
+        per_h: list[plt.Artist] = []
+        per_l: list[str] = []
+        seen: set[str] = set()
+        for hi, li in zip(h_ax, l_ax):
+            if _PER_AXES_LEGEND_MARKER not in li:
+                continue
+            if li in seen:
+                continue
+            seen.add(li)
+            per_h.append(hi)
+            per_l.append(li)
+        if per_h:
+            ax.legend(
+                per_h,
+                per_l,
+                loc="best",
+                fontsize=_LEGEND_FS - 1,
+                frameon=True,
+                fancybox=True,
+                facecolor="white",
+                edgecolor="0.4",
+                framealpha=0.85,
+                handletextpad=0.4,
+                borderaxespad=0.3,
+            )
+
     by_label: dict[str, plt.Artist] = {}
     labels_order: list[str] = []
-    for ax in axes:
+    for ax in axes_list:
         h, lab = ax.get_legend_handles_labels()
         for hi, li in zip(h, lab):
+            if _PER_AXES_LEGEND_MARKER in li:
+                continue
             if li in by_label:
                 continue
             by_label[li] = hi
@@ -81,126 +124,6 @@ def _shared_light_legend(fig: plt.Figure, axes: Iterable[plt.Axes]) -> None:
             bbox_to_anchor=(0.5, -0.12),
             **legend_kw,
         )
-
-
-def _histogram_inttype_counts_with_positives(
-    ax: plt.Axes,
-    hist_var: np.ndarray,
-    plot_mask: np.ndarray,
-    y_true_binary: np.ndarray,
-    bin_edges: np.ndarray,
-    *,
-    log_x: bool = False,
-    reco_baseline_pred: np.ndarray | None = None,
-    finite_bin_var: bool = False,
-    has_pion_for_binning: np.ndarray | None = None,
-    show_legend: bool = True,
-) -> None:
-    """Stacked histogram: orange = MC signal (positives) on the **bottom**,
-    blue = not signal stacked **above**.
-
-    Total bar height per bin matches ``np.histogram(hist_var[plot_mask], ...)``.
-    Signal is drawn first (``bottom=0``); ``Other`` uses ``bottom=counts_sig``
-    so the smaller category is not hidden under a large lower block.
-
-    If ``reco_baseline_pred`` is set, a **right** *y* axis shows per-bin baseline
-    FPR on true background within ``plot_mask`` (``Baseline FPR`` line + legend).
-    """
-    counts_all, _ = np.histogram(hist_var[plot_mask], bins=bin_edges)
-    pos_mask = plot_mask & (y_true_binary == 1)
-    counts_sig, _ = np.histogram(hist_var[pos_mask], bins=bin_edges)
-    counts_all = np.asarray(counts_all, dtype=np.int64)
-    counts_sig = np.asarray(counts_sig, dtype=np.int64)
-    counts_sig = np.minimum(counts_sig, counts_all)
-    counts_bg = counts_all - counts_sig
-    widths = np.diff(bin_edges)
-    x0 = bin_edges[:-1]
-
-    ax.bar(
-        x0,
-        counts_sig.astype(float),
-        width=widths,
-        align="edge",
-        color="tab:orange",
-        edgecolor="black",
-        linewidth=0.5,
-        alpha=0.9,
-        label="Signal (positives)",
-    )
-    ax.bar(
-        x0,
-        counts_bg.astype(float),
-        width=widths,
-        align="edge",
-        bottom=counts_sig.astype(float),
-        color="tab:blue",
-        edgecolor="black",
-        linewidth=0.5,
-        alpha=0.65,
-        label="Other (not signal)",
-    )
-    for i, ctot in enumerate(counts_all):
-        if ctot > 0:
-            ax.text(
-                x0[i] + widths[i] / 2,
-                float(ctot),
-                str(int(ctot)),
-                ha="center",
-                va="bottom",
-                fontsize=7,
-            )
-        cs = int(counts_sig[i])
-        if cs > 0:
-            y_mid = float(counts_sig[i]) / 2.0
-            ax.text(
-                x0[i] + widths[i] / 2,
-                y_mid,
-                str(cs),
-                ha="center",
-                va="center",
-                fontsize=6,
-                color="white" if cs >= 3 else "black",
-            )
-    ax.grid(True, axis="y", alpha=0.35)
-    if log_x:
-        ax.set_xscale("log")
-    if show_legend:
-        ax.legend(loc="upper right", fontsize=6, framealpha=0.9)
-
-    if reco_baseline_pred is not None:
-        if len(reco_baseline_pred) != len(hist_var):
-            raise ValueError(
-                f"len(reco_baseline_pred)={len(reco_baseline_pred)} != len(hist_var)={len(hist_var)}"
-            )
-        fpr_bin = compute_reco_baseline_fpr_per_bin(
-            reco_baseline_pred,
-            y_true_binary,
-            hist_var,
-            bin_edges,
-            event_mask=plot_mask,
-            has_pion=has_pion_for_binning,
-            finite_bin_var=finite_bin_var,
-        )
-        x_mid = (bin_edges[:-1] + bin_edges[1:]) / 2.0
-        ax2 = ax.twinx()
-        ax2.plot(
-            x_mid,
-            fpr_bin,
-            color="black",
-            linestyle="-",
-            marker="o",
-            markersize=3,
-            linewidth=1.2,
-            label="Baseline FPR",
-            clip_on=False,
-            zorder=5,
-        )
-        ax2.set_ylabel("Baseline FPR", color="black")
-        ax2.tick_params(axis="y", labelcolor="black")
-        ymax = float(np.nanmax(fpr_bin)) if np.any(np.isfinite(fpr_bin)) else 1.0
-        ax2.set_ylim(0.0, min(1.0, max(0.05, ymax * 1.15)))
-        if show_legend:
-            ax2.legend(loc="upper left", fontsize=6, framealpha=0.9)
 
 
 def _plot_metric_line(
@@ -267,23 +190,15 @@ def plot_cc1pi_vs_pion_kinematics(
     reco_baseline_tpr: dict[str, np.ndarray] | None = None,
     reco_baseline_label: str = "Baseline",
     reco_baseline_global_fpr: float | None = None,
-    reco_baseline_pred: np.ndarray | None = None,
-    results: dict[str, list[dict]] | None = None,
-    signal_classes: list[int] | None = None,
-    pion_bins_require_has_pion: bool = True,
     colors: dict[str, str] | None = None,
     legend_title: str | None = CLASSIFICATION_PERFORMANCE_LEGEND_TITLE,
     suptitle: str | None = None,
     use_global_fpr: bool = True,
     playlist: str = "1A",
 ) -> plt.Figure:
-    """2×3 or 2×4 figure: pion *E* (top) and pion *θ* (bottom).
+    """2×3 figure: pion *E* (top row) and pion *θ* (bottom row).
 
     Columns: AUPRC, AUROC, TPR vs kinematics (global or per-bin FPR; see ``use_global_fpr``).
-    If both *results* and *signal_classes* are passed, a fourth column shows stacked
-    event counts vs *E* or *θ* (same convention as :func:`plot_multi_classification_vs_W`).
-    Optional *reco_baseline_pred* draws per-bin **Baseline FPR** on a twin *y* axis on
-    those histograms.
 
     Parameters
     ----------
@@ -291,69 +206,25 @@ def plot_cc1pi_vs_pion_kinematics(
         each a per-bin recall array for a reconstruction-level baseline.
         Plotted on the TPR panels (column index 2).
     reco_baseline_global_fpr : optional scalar FPR for the baseline legend on the TPR panels.
-        If omitted but *reco_baseline_pred* and *results* / *signal_classes* are set,
-        FPR is computed on the full masked sample like :func:`plot_multi_classification_vs_W`.
-    reco_baseline_pred : optional binary predictions (same length as the test set).
-    results, signal_classes : together enable the fourth-column histograms; must both
-        be set or both omitted.
-    pion_bins_require_has_pion : same meaning as in :func:`compute_binned_metrics_single`
-        and :func:`plot_binned_by_inttype` for the count histograms.
     reco_baseline_label : label for the reconstruction baseline in the legend.
     legend_title : optional legend title (e.g. dataset line); ``None`` to omit.
     suptitle : figure super-title; default
         ``$CC1\\pi^\\pm$ tagging - MINERvA Open Data Playlist {playlist}``.
-    playlist : playlist id for the default *suptitle* and for *y_true* from *results*.
+    playlist : playlist id for the default *suptitle*.
     """
     if fixed_fpr is None:
         fixed_fpr = DEFAULT_FIXED_FPR
-    if (results is None) ^ (signal_classes is None):
-        raise ValueError(
-            "results and signal_classes must both be set or both be omitted"
-        )
 
     tpr_title = _tpr_column_title_vs_kinematics(use_global_fpr)
-    n_cols = 4 if results is not None else 3
-    fig_w = 22.0 if n_cols == 4 else 17.0
-    fig, axes = plt.subplots(2, n_cols, figsize=(fig_w, 9), constrained_layout=True)
+    fig, axes = plt.subplots(2, 3, figsize=(14.5, 8.0), constrained_layout=True)
 
     E_mid = data["pion_E_MC_bins_mid"]
     theta_mid = data["pion_theta_MC_bins_mid"]
 
-    y_true_binary: np.ndarray | None = None
-    if n_cols == 4:
-        first_model = next(iter(results))
-        y_true_binary = get_signal_probabilities(
-            results[first_model][0], signal_classes, playlist
-        )["ytrue"]
-        pE = data["pion_E_MC"]
-        pTh = data["pion_theta_MC"]
-        if len(pE) != len(y_true_binary):
-            raise ValueError(
-                f"len(pion_E_MC)={len(pE)} != len(y_true)={len(y_true_binary)}; "
-                "check playlist alignment for the event-count panels."
-            )
-        if reco_baseline_pred is not None and len(reco_baseline_pred) != len(pE):
-            raise ValueError(
-                f"len(reco_baseline_pred)={len(reco_baseline_pred)} != len(pion_E_MC)={len(pE)}"
-            )
-
     bl_tpr_label = reco_baseline_label
     if reco_baseline_tpr is not None:
-        fpr_for_legend = reco_baseline_global_fpr
-        if (
-            fpr_for_legend is None
-            and reco_baseline_pred is not None
-            and results is not None
-            and signal_classes is not None
-        ):
-            fm = next(iter(results))
-            y_tb = get_signal_probabilities(results[fm][0], signal_classes, playlist)[
-                "ytrue"
-            ]
-            if len(reco_baseline_pred) == len(y_tb):
-                fpr_for_legend = _global_reco_baseline_fpr(reco_baseline_pred, y_tb)
         bl_tpr_label = _baseline_legend_with_global_fpr(
-            reco_baseline_label, fpr_for_legend
+            reco_baseline_label, reco_baseline_global_fpr
         )
 
     # Random baseline (circle markers like models; dashed + gray to distinguish)
@@ -418,44 +289,6 @@ def plot_cc1pi_vs_pion_kinematics(
                 label=bl_tpr_label,
             )
 
-    if n_cols == 4 and y_true_binary is not None:
-        has_pion = data["has_pion"]
-        hp_bin = has_pion if pion_bins_require_has_pion else None
-        plot_mask_e = (
-            has_pion
-            if pion_bins_require_has_pion
-            else np.ones(len(data["pion_E_MC"]), dtype=bool)
-        )
-        plot_mask_th = (
-            has_pion
-            if pion_bins_require_has_pion
-            else np.isfinite(data["pion_theta_MC"])
-        )
-        _histogram_inttype_counts_with_positives(
-            axes[0, 3],
-            data["pion_E_MC"],
-            plot_mask_e,
-            y_true_binary,
-            data["pion_E_MC_bins"],
-            log_x=True,
-            reco_baseline_pred=reco_baseline_pred,
-            finite_bin_var=False,
-            has_pion_for_binning=hp_bin,
-            show_legend=False,
-        )
-        _histogram_inttype_counts_with_positives(
-            axes[1, 3],
-            data["pion_theta_MC"],
-            plot_mask_th,
-            y_true_binary,
-            data["pion_theta_MC_bins"],
-            log_x=False,
-            reco_baseline_pred=reco_baseline_pred,
-            finite_bin_var=True,
-            has_pion_for_binning=hp_bin,
-            show_legend=False,
-        )
-
     col_labels = ["AUPRC", "AUROC", "Efficiency (TPR)"]
     xlabels = [r"True $E_\pi$ [GeV]", r"True $\theta_\pi$ [rad]"]
     for row, kinematic in enumerate(xlabels):
@@ -473,19 +306,6 @@ def plot_cc1pi_vs_pion_kinematics(
             if row == 0:
                 ax.set_xlim(E_mid[0] * 0.8, E_mid[-1] * 1.2)
                 ax.set_xscale("log")
-        if n_cols == 4:
-            axh = axes[row, 3]
-            axh.set_xlabel(kinematic, fontsize=_LABEL_FS)
-            axh.set_ylabel("Events", fontsize=_LABEL_FS)
-            axh.tick_params(axis="both", labelsize=_TICK_FS)
-            x_short = kinematic.split("[")[0].strip()
-            axh.set_title(
-                rf"Event counts vs. {x_short} (top = $N_{{\mathrm{{tot}}}}$; orange = $N_{{\mathrm{{sig}}}}$)"
-            )
-            axh.grid(True, axis="y", alpha=0.35)
-            if row == 0:
-                axh.set_xlim(E_mid[0] * 0.8, E_mid[-1] * 1.2)
-                axh.set_xscale("log")
 
     _shared_light_legend(fig, axes.ravel())
     if suptitle is None:
@@ -586,42 +406,25 @@ def plot_multi_classification_vs_W(
     reco_baseline_tpr_W: np.ndarray | None = None,
     reco_baseline_label: str = "Baseline",
     reco_baseline_global_fpr: float | None = None,
-    reco_baseline_pred: np.ndarray | None = None,
     colors: dict[str, str] | None = None,
     title: str | None = None,
     legend_title: str | None = CLASSIFICATION_PERFORMANCE_LEGEND_TITLE,
     use_global_fpr: bool = True,
     playlist: str = "1A",
-    results: dict[str, list[dict]] | None = None,
-    signal_classes: list[int] | None = None,
 ) -> plt.Figure:
-    """1×3 or 1×4 figure: AUPRC / AUROC / TPR vs *W* (global or per-bin FPR).
+    """1×3 figure: AUPRC / AUROC / TPR vs *W* (global or per-bin FPR).
 
     Same layout as :func:`plot_multi_pion_vs_q3` but with *W* on the *x* axis.
-    If both *results* and *signal_classes* are passed, a fourth panel shows a
-    stacked histogram of **all** test events vs *W* (blue = not signal,
-    orange = signal), with total *N* on top of each bar and *N* signal inside
-    the orange segment — same convention as :func:`plot_binned_by_inttype`.
 
     Pass *reco_baseline_global_fpr* (scalar FP/(FP+TN) on the test set, same
     convention as the notebook) to show it in the column-3 baseline legend,
-    e.g. ``Baseline (FPR 3.5%)``.  If omitted but *reco_baseline_pred* is set
-    and the fourth panel is used, FPR is computed from *reco_baseline_pred* and
-    the task ``y_true`` from *results* / *signal_classes*.  With the fourth
-    panel, *reco_baseline_pred* also draws **Baseline FPR** per *W* bin on a
-    right-hand axis over the stacked counts.
+    e.g. ``Baseline (FPR 3.5%)``.
     """
     if fixed_fpr is None:
         fixed_fpr = DEFAULT_FIXED_FPR
-    if (results is None) ^ (signal_classes is None):
-        raise ValueError(
-            "results and signal_classes must both be set or both be omitted"
-        )
 
     tpr_title = _tpr_column_title_vs_kinematics(use_global_fpr)
-    n_cols = 4 if results is not None else 3
-    fig_w = 22.0 if n_cols == 4 else 17.0
-    fig, axes = plt.subplots(1, n_cols, figsize=(fig_w, 5), constrained_layout=True)
+    fig, axes = plt.subplots(1, 3, figsize=(14.5, 4.6), constrained_layout=True)
 
     w_mid = data["W_bin_mids"]
 
@@ -647,20 +450,9 @@ def plot_multi_classification_vs_W(
             )
 
     if reco_baseline_tpr_W is not None:
-        fpr_for_legend = reco_baseline_global_fpr
-        if (
-            fpr_for_legend is None
-            and reco_baseline_pred is not None
-            and results is not None
-            and signal_classes is not None
-        ):
-            first_model = next(iter(results))
-            y_tb = get_signal_probabilities(
-                results[first_model][0], signal_classes, playlist
-            )["ytrue"]
-            if len(reco_baseline_pred) == len(y_tb):
-                fpr_for_legend = _global_reco_baseline_fpr(reco_baseline_pred, y_tb)
-        bl_lbl = _baseline_legend_with_global_fpr(reco_baseline_label, fpr_for_legend)
+        bl_lbl = _baseline_legend_with_global_fpr(
+            reco_baseline_label, reco_baseline_global_fpr
+        )
         axes[2].plot(w_mid, reco_baseline_tpr_W, "s--", color="black", label=bl_lbl)
 
     col_labels = ["AUPRC", "AUROC", "Efficiency (TPR)"]
@@ -676,40 +468,6 @@ def plot_multi_classification_vs_W(
             ax.set_title(f"{tpr_title} vs. {x_short}")
         ax.grid(True, alpha=0.35)
         _set_xlim_w_metrics(ax)
-
-    if n_cols == 4:
-        first_model = next(iter(results))
-        y_true_binary = get_signal_probabilities(
-            results[first_model][0], signal_classes, playlist
-        )["ytrue"]
-        w_gev = data["W_GeV"]
-        if len(w_gev) != len(y_true_binary):
-            raise ValueError(
-                f"len(W_GeV)={len(w_gev)} != len(y_true)={len(y_true_binary)}; "
-                "check playlist alignment for the event-count panel."
-            )
-        if reco_baseline_pred is not None and len(reco_baseline_pred) != len(w_gev):
-            raise ValueError(
-                f"len(reco_baseline_pred)={len(reco_baseline_pred)} != len(W_GeV)={len(w_gev)}"
-            )
-        ax_h = axes[3]
-        all_mask = np.ones(len(w_gev), dtype=bool)
-        _histogram_inttype_counts_with_positives(
-            ax_h,
-            w_gev,
-            all_mask,
-            y_true_binary,
-            data["W_bin_edges"],
-            reco_baseline_pred=reco_baseline_pred,
-            show_legend=False,
-        )
-        ax_h.set_xlabel(r"$W$ [GeV]", fontsize=_LABEL_FS)
-        ax_h.set_ylabel("Events", fontsize=_LABEL_FS)
-        ax_h.tick_params(axis="both", labelsize=_TICK_FS)
-        ax_h.set_title(
-            r"Event counts vs. $W$ (top = $N_{\mathrm{tot}}$; orange = $N_{\mathrm{sig}}$)"
-        )
-        _set_xlim_w_metrics(ax_h)
 
     _shared_light_legend(fig, axes.ravel())
     if title is None:
@@ -739,38 +497,42 @@ def plot_binned_by_inttype(
     legend_title: str | None = CLASSIFICATION_PERFORMANCE_LEGEND_TITLE,
     use_global_fpr: bool = True,
 ) -> plt.Figure:
-    """One row per interaction type, 4 columns: AUPRC, AUROC, TPR (global or per-bin FPR),
-    and a stacked event-count histogram (blue: not signal, orange: MC positives).
+    """One row per merged interaction type (``{DIS, RES, Other}`` by default),
+    3 columns: AUPRC, AUROC, TPR (global or per-bin FPR).
 
     Parameters
     ----------
     x_var : ``"pion_E"``, ``"pion_theta"``, ``"q3"``, or ``"W"`` (hadronic
         invariant mass; requires ``W_GeV`` / ``W_bin_edges`` on *data*).
+    int_types : mapping ``{code -> label}`` where *code* is compared against
+        :func:`merge_int_type_arr(data["int_type_arr"])`. Defaults to
+        :data:`MC_INT_TYPE_MERGED` (``{3: "DIS", 2: "RES", 0: "Other"}``).
     reco_baseline_pred : optional binary prediction array (same length as
         test set). When provided, the per-bin recall is overlaid on the
-        TPR panel for each interaction type, the baseline legend **FPR** is
-        computed on the **same row mask** as the histogram (interaction type
-        ∩ pion / finiteness rules), and per-bin **Baseline FPR** on that slice
-        is drawn on the right axis of the stacked histogram.
+        TPR panel for each interaction type and the baseline legend **FPR**
+        is computed on the **same row mask** as the metrics
+        (interaction type ∩ pion / finiteness rules).
     use_global_fpr : if True, one global score cut per target FPR; if False,
         TPR is taken from each bin's local ROC (and plot titles/legends match).
     reco_baseline_label : legend label for the reconstruction baseline.
     signal_label : optional name for the signal class definition (e.g.
         ``r"$CC\\pi^0$"``). Used when there are events in an interaction
         type but no signal positives; defaults from *signal_classes*.
-    pion_bins_require_has_pion : if False, pion E/θ histograms
-        and binned metrics include all events (θ requires finite MC angle).
+    pion_bins_require_has_pion : if False, pion E/θ binned metrics include
+        all events (θ requires finite MC angle).
     legend_title : optional legend title on metric panels; ``None`` to omit.
     """
     if fixed_fpr is None:
         fixed_fpr = DEFAULT_FIXED_FPR
     if int_types is None:
-        int_types = MC_INT_TYPE
+        int_types = MC_INT_TYPE_MERGED
     tpr_title = _tpr_column_title_vs_kinematics(use_global_fpr)
 
-    int_type_arr = data["int_type_arr"]
+    int_type_arr = merge_int_type_arr(data["int_type_arr"])
     n_int = len(int_types)
-    fig, axes = plt.subplots(n_int, 4, figsize=(22, 4.5 * n_int), constrained_layout=True)
+    fig, axes = plt.subplots(
+        n_int, 3, figsize=(14.5, 4.0 * n_int), constrained_layout=True
+    )
     if n_int == 1:
         axes = axes[np.newaxis, :]
 
@@ -786,39 +548,24 @@ def plot_binned_by_inttype(
 
     has_pion = data["has_pion"]
 
-    # Resolve bin edges for the histogram column
+    # Resolve the plot mask per x-variable (same convention as binned metrics)
     if x_var == "q3":
-        hist_var = data["q3_GeV"]
-        bin_edges = data["q3_bin_edges"]
-        hist_pion_mask = np.ones(len(hist_var), dtype=bool)
+        hist_pion_mask = np.ones(len(int_type_arr), dtype=bool)
     elif x_var == "W":
-        hist_var = data["W_GeV"]
-        bin_edges = data["W_bin_edges"]
-        hist_pion_mask = np.ones(len(hist_var), dtype=bool)
+        hist_pion_mask = np.ones(len(int_type_arr), dtype=bool)
     elif x_var == "pion_E":
-        hist_var = data["pion_E_MC"]
-        bin_edges = data["pion_E_MC_bins"]
         hist_pion_mask = (
             has_pion
             if pion_bins_require_has_pion
-            else np.ones(len(hist_var), dtype=bool)
+            else np.ones(len(int_type_arr), dtype=bool)
         )
     elif x_var == "pion_theta":
-        hist_var = data["pion_theta_MC"]
-        bin_edges = data["pion_theta_MC_bins"]
         if pion_bins_require_has_pion:
             hist_pion_mask = has_pion
         else:
-            hist_pion_mask = np.isfinite(hist_var)
+            hist_pion_mask = np.isfinite(data["pion_theta_MC"])
     else:
         raise ValueError(f"Unknown x_var: {x_var!r}")
-
-    finite_hist = x_var == "pion_theta"
-    hp_for_bins = (
-        data["has_pion"]
-        if (x_var in ("pion_E", "pion_theta") and pion_bins_require_has_pion)
-        else None
-    )
 
     for row_idx, (int_code, int_name) in enumerate(int_types.items()):
         int_mask = int_type_arr == int_code
@@ -838,7 +585,7 @@ def plot_binned_by_inttype(
             x_mid = data["pion_theta_MC_bins_mid"]
 
         if n_events == 0:
-            for col in range(4):
+            for col in range(3):
                 axes[row_idx, col].text(
                     0.5,
                     0.5,
@@ -851,7 +598,7 @@ def plot_binned_by_inttype(
                 )
                 axes[row_idx, col].set_title(f"{int_name} (N=0)")
             if x_var == "W":
-                for col in range(4):
+                for col in range(3):
                     _set_xlim_w_metrics(axes[row_idx, col])
             continue
 
@@ -873,27 +620,6 @@ def plot_binned_by_inttype(
                     color="gray",
                 )
                 ax.set_title(f"{int_name} (N={n_events:,})")
-            ax_h = axes[row_idx, 3]
-            _histogram_inttype_counts_with_positives(
-                ax_h,
-                hist_var,
-                plot_mask,
-                y_true_binary,
-                bin_edges,
-                log_x=log_x and x_var != "W",
-                reco_baseline_pred=reco_baseline_pred,
-                finite_bin_var=finite_hist,
-                has_pion_for_binning=hp_for_bins,
-                show_legend=False,
-            )
-            ax_h.set_xlabel(xlabel, fontsize=_LABEL_FS)
-            ax_h.set_ylabel("Events", fontsize=_LABEL_FS)
-            ax_h.tick_params(axis="both", labelsize=_TICK_FS)
-            ax_h.set_title(
-                f"{int_name} (N={n_events:,}) — events (orange = signal, bottom)"
-            )
-            if x_var == "W":
-                _set_xlim_w_metrics(ax_h)
             continue
 
         # Compute baseline
@@ -1034,131 +760,317 @@ def plot_binned_by_inttype(
                 ax.set_xlim(x_mid[0] * 0.8, x_mid[-1] * 1.2)
                 ax.set_xscale("log")
 
-        ax_h = axes[row_idx, 3]
-        _histogram_inttype_counts_with_positives(
-            ax_h,
-            hist_var,
-            plot_mask,
-            y_true_binary,
-            bin_edges,
-            log_x=log_x and x_var != "W",
-            reco_baseline_pred=reco_baseline_pred,
-            finite_bin_var=finite_hist,
-            has_pion_for_binning=hp_for_bins,
-            show_legend=False,
-        )
-        ax_h.set_xlabel(xlabel, fontsize=_LABEL_FS)
-        ax_h.set_ylabel("Events", fontsize=_LABEL_FS)
-        ax_h.tick_params(axis="both", labelsize=_TICK_FS)
-        ax_h.set_title(
-            f"{int_name} (N={n_events:,}) — events (orange = signal, bottom)"
-        )
-        if x_var == "W":
-            _set_xlim_w_metrics(ax_h)
-
     _shared_light_legend(fig, axes.ravel())
     fig.suptitle(title, fontsize=14, y=1.005)
     return fig
 
 
-def plot_event_counts_by_inttype(
-    data: dict,
-    x_var: str,
-    xlabel: str,
-    title: str,
-    log_x: bool = False,
-    int_types: dict[int, str] | None = None,
-    pion_bins_require_has_pion: bool = True,
-) -> plt.Figure:
-    """Histogram of event counts per bin, one row per interaction type.
+# ---------------------------------------------------------------------------
+# Composition plots (signal / background / S/B by merged interaction type)
+# ---------------------------------------------------------------------------
 
-    The bar heights in each row sum to the total N for that interaction
-    type (shown in the row title).
 
-    Parameters
-    ----------
-    x_var : ``"pion_E"``, ``"pion_theta"``, ``"q3"``, or ``"W"``.
-    pion_bins_require_has_pion : same meaning as in :func:`plot_binned_by_inttype`.
+def _composition_counts_by_inttype(
+    merged_int_arr: np.ndarray,
+    plot_mask: np.ndarray,
+    hist_var: np.ndarray,
+    bin_edges: np.ndarray,
+) -> dict[str, np.ndarray]:
+    """Per-bin event counts split by {DIS, RES, Other} within ``plot_mask``.
+
+    Returns a mapping label → array of length ``len(bin_edges) - 1``.
     """
-    if int_types is None:
-        int_types = MC_INT_TYPE
+    out: dict[str, np.ndarray] = {}
+    for code, label in MC_INT_TYPE_MERGED.items():
+        m = plot_mask & (merged_int_arr == code)
+        counts, _ = np.histogram(hist_var[m], bins=bin_edges)
+        out[label] = np.asarray(counts, dtype=np.int64)
+    return out
 
-    int_type_arr = data["int_type_arr"]
 
-    if x_var == "q3":
-        var = data["q3_GeV"]
-        bin_edges = data["q3_bin_edges"]
-    elif x_var == "W":
-        var = data["W_GeV"]
-        bin_edges = data["W_bin_edges"]
-    elif x_var == "pion_E":
-        var = data["pion_E_MC"]
-        bin_edges = data["pion_E_MC_bins"]
-    elif x_var == "pion_theta":
-        var = data["pion_theta_MC"]
-        bin_edges = data["pion_theta_MC_bins"]
-    else:
-        raise ValueError(f"Unknown x_var: {x_var!r}")
-
-    if x_var == "q3":
-        kin_mask = np.ones(len(var), dtype=bool)
-    elif x_var == "W":
-        kin_mask = np.ones(len(var), dtype=bool)
-    elif x_var == "pion_E":
-        kin_mask = (
-            data["has_pion"]
-            if pion_bins_require_has_pion
-            else np.ones(len(var), dtype=bool)
-        )
-    else:
-        kin_mask = data["has_pion"] if pion_bins_require_has_pion else np.isfinite(var)
-
-    n_int = len(int_types)
-    fig, axes = plt.subplots(n_int, 1, figsize=(8, 3.0 * n_int), constrained_layout=True)
-    if n_int == 1:
-        axes = np.array([axes])
-
-    for row_idx, (int_code, int_name) in enumerate(int_types.items()):
-        ax = axes[row_idx]
-        int_mask = int_type_arr == int_code
-
-        mask = int_mask & kin_mask
-        counts, _ = np.histogram(var[mask], bins=bin_edges)
-        n_plotted = int(counts.sum())
-
-        widths = np.diff(bin_edges)
+def _stack_bars_by_inttype(
+    ax: plt.Axes,
+    bin_edges: np.ndarray,
+    counts_by_label: dict[str, np.ndarray],
+    *,
+    log_x: bool = False,
+    annotate_total: bool = True,
+    stack_order: tuple[str, ...] = ("DIS", "RES", "Other"),
+) -> None:
+    """Stacked bar plot with consistent DIS/RES/Other colors."""
+    edges = np.asarray(bin_edges, dtype=float)
+    widths = np.diff(edges)
+    x0 = edges[:-1]
+    bottoms = np.zeros(len(widths), dtype=float)
+    totals = np.zeros(len(widths), dtype=float)
+    for label in stack_order:
+        counts = counts_by_label.get(label)
+        if counts is None:
+            continue
+        counts_f = np.asarray(counts, dtype=float)
         ax.bar(
-            bin_edges[:-1],
-            counts,
+            x0,
+            counts_f,
             width=widths,
             align="edge",
-            edgecolor="black",
-            linewidth=0.5,
-            alpha=0.7,
+            bottom=bottoms,
+            color=INT_TYPE_COLORS[label],
+            edgecolor="0.25",
+            linewidth=0.35,
+            alpha=0.85,
+            label=label,
         )
+        bottoms = bottoms + counts_f
+        totals = totals + counts_f
 
-        for i, c in enumerate(counts):
-            if c > 0:
+    if annotate_total:
+        for i, tot in enumerate(totals):
+            if tot > 0:
                 ax.text(
-                    bin_edges[i] + widths[i] / 2,
-                    c,
-                    str(c),
+                    x0[i] + widths[i] / 2,
+                    float(tot),
+                    str(int(tot)),
                     ha="center",
                     va="bottom",
-                    fontsize=7,
+                    fontsize=8,
                 )
 
-        ax.set_xlabel(xlabel, fontsize=_LABEL_FS)
-        ax.set_ylabel("Events", fontsize=_LABEL_FS)
-        ax.tick_params(axis="both", labelsize=_TICK_FS)
-        ax.set_title(f"{int_name} (N={n_plotted:,})")
-        ax.grid(True, axis="y", alpha=0.35)
-        if x_var == "W":
-            _set_xlim_w_metrics(ax)
-        elif log_x:
-            ax.set_xscale("log")
+    ax.grid(True, axis="y", alpha=0.35)
+    if log_x:
+        ax.set_xscale("log")
 
-    fig.suptitle(title, fontsize=14, y=1.005)
+
+def _single_bkg_bar(
+    ax: plt.Axes,
+    merged_int_arr: np.ndarray,
+    bkg_mask: np.ndarray,
+    *,
+    stack_order: tuple[str, ...] = ("DIS", "RES", "Other"),
+) -> None:
+    """Single stacked bar labelled 'Background' split by {DIS, RES, Other}."""
+    totals_per_label: dict[str, int] = {}
+    for code, label in MC_INT_TYPE_MERGED.items():
+        totals_per_label[label] = int((bkg_mask & (merged_int_arr == code)).sum())
+
+    bottom = 0.0
+    total = 0
+    for label in stack_order:
+        count = totals_per_label.get(label, 0)
+        ax.bar(
+            [0.0],
+            [float(count)],
+            width=0.7,
+            align="center",
+            bottom=[bottom],
+            color=INT_TYPE_COLORS[label],
+            edgecolor="0.25",
+            linewidth=0.35,
+            alpha=0.85,
+            label=label,
+        )
+        bottom += float(count)
+        total += int(count)
+
+    if total > 0:
+        ax.text(0.0, float(total), f"{total:,}", ha="center", va="bottom", fontsize=9)
+
+    ax.set_xticks([0.0])
+    ax.set_xticklabels(["Background"])
+    ax.set_xlim(-0.7, 0.7)
+    ax.grid(True, axis="y", alpha=0.35)
+
+
+def _sb_stairs_plot(
+    ax: plt.Axes,
+    bin_edges: np.ndarray,
+    n_sig: np.ndarray,
+    n_bkg: np.ndarray,
+    *,
+    log_x: bool = False,
+) -> None:
+    """Step line of S/B per bin (``S / B``; B = non-signal events in bin)."""
+    n_sig = np.asarray(n_sig, dtype=float)
+    n_bkg = np.asarray(n_bkg, dtype=float)
+    sb = np.divide(n_sig, n_bkg, out=np.full_like(n_sig, np.nan), where=n_bkg > 0)
+    sb_plot = ma.masked_invalid(sb)
+    ax.stairs(sb_plot, np.asarray(bin_edges, dtype=float), color="#2ca02c", linewidth=1.8, label=r"$S/B$")
+    ax.grid(True, alpha=0.35)
+    if log_x:
+        ax.set_xscale("log")
+
+
+def _pion_signal_bins(
+    data: dict, pid: np.ndarray, signal_classes: list[int]
+) -> dict:
+    """Shallow copy of *data* with equal-frequency pion-E/θ edges on signal."""
+    return data_with_signal_pion_bins(
+        data,
+        pid,
+        signal_classes,
+        pion_quantile_require_has_pion=False,
+        pion_bin_edge_method="equal_frequency",
+    )
+
+
+def plot_signal_composition_single_pion(
+    data: dict,
+    pid: np.ndarray,
+    playlist: str = "1A",
+) -> plt.Figure:
+    """2-row × 3-col event-composition figure for single-pion signals.
+
+    Rows: CC1π± (signal class 0) and CC1π⁰ (signal class 2).
+    Columns:
+      0. N_signal events vs pion *E* stacked by {DIS, RES, Other}.
+      1. Same vs pion *θ*.
+      2. Single stacked bar of N_background events split by {DIS, RES, Other}.
+
+    *data* must contain ``int_type_arr``, ``pion_E_MC``, ``pion_theta_MC``,
+    ``has_pion`` (along with the default pion-bin edges — these are replaced
+    per signal definition using equal-frequency edges on signal events).
+    """
+    signals = [
+        (r"$CC1\pi^\pm$", [0]),
+        (r"$CC1\pi^0$", [2]),
+    ]
+    merged_int = merge_int_type_arr(data["int_type_arr"])
+    pion_E = np.asarray(data["pion_E_MC"])
+    pion_theta = np.asarray(data["pion_theta_MC"])
+
+    fig, axes = plt.subplots(2, 3, figsize=(14.5, 8.0), constrained_layout=True)
+
+    for row_idx, (row_label, classes) in enumerate(signals):
+        data_sp = _pion_signal_bins(data, pid, classes)
+        sig_mask = np.isin(pid, classes)
+        bkg_mask = ~sig_mask
+
+        finite_E = np.isfinite(pion_E)
+        finite_th = np.isfinite(pion_theta)
+
+        e_edges = data_sp["pion_E_MC_bins"]
+        th_edges = data_sp["pion_theta_MC_bins"]
+
+        counts_E = _composition_counts_by_inttype(
+            merged_int, sig_mask & finite_E, pion_E, e_edges
+        )
+        counts_th = _composition_counts_by_inttype(
+            merged_int, sig_mask & finite_th, pion_theta, th_edges
+        )
+
+        ax_e = axes[row_idx, 0]
+        _stack_bars_by_inttype(ax_e, e_edges, counts_E, log_x=True)
+        ax_e.set_xlabel(r"True $E_\pi$ [GeV]", fontsize=_LABEL_FS)
+        ax_e.set_ylabel(f"{row_label} signal events", fontsize=_LABEL_FS)
+        ax_e.tick_params(axis="both", labelsize=_TICK_FS)
+        ax_e.set_title(rf"{row_label}: signal composition vs. True $E_\pi$")
+        e_mid = data_sp["pion_E_MC_bins_mid"]
+        if len(e_mid) > 0 and np.all(np.isfinite(e_mid[[0, -1]])):
+            ax_e.set_xlim(float(e_mid[0]) * 0.8, float(e_mid[-1]) * 1.2)
+
+        ax_th = axes[row_idx, 1]
+        _stack_bars_by_inttype(ax_th, th_edges, counts_th, log_x=False)
+        ax_th.set_xlabel(r"True $\theta_\pi$ [rad]", fontsize=_LABEL_FS)
+        ax_th.set_ylabel(f"{row_label} signal events", fontsize=_LABEL_FS)
+        ax_th.tick_params(axis="both", labelsize=_TICK_FS)
+        ax_th.set_title(rf"{row_label}: signal composition vs. True $\theta_\pi$")
+
+        ax_bkg = axes[row_idx, 2]
+        _single_bkg_bar(ax_bkg, merged_int, bkg_mask)
+        ax_bkg.set_ylabel(f"{row_label} background events", fontsize=_LABEL_FS)
+        ax_bkg.tick_params(axis="both", labelsize=_TICK_FS)
+        ax_bkg.set_title(f"{row_label}: background composition")
+
+    _shared_light_legend(fig, axes.ravel())
+    fig.suptitle(
+        rf"Event composition (single-pion) - MINERvA Open Data Playlist {playlist}",
+        fontsize=14,
+    )
+    return fig
+
+
+def plot_composition_vs_kinematic(
+    data: dict,
+    pid: np.ndarray,
+    x_var: str,
+    playlist: str = "1A",
+) -> plt.Figure:
+    """3-row × 3-col event-composition figure for CC1π±, CC1π⁰, CCNπ±.
+
+    Rows: CC1π± (class 0), CC1π⁰ (class 2), CCNπ± (classes [0, 1]).
+    Columns:
+      0. N_signal events per *x* bin, stacked by {DIS, RES, Other}.
+      1. N_background events per *x* bin, stacked by {DIS, RES, Other}.
+      2. S/B ratio per *x* bin (green step line; B = non-signal events in bin).
+
+    *x_var* must be ``"W"`` (requires ``W_GeV`` / ``W_bin_edges``) or ``"q3"``.
+    """
+    if x_var == "W":
+        hist_var = np.asarray(data["W_GeV"])
+        bin_edges = np.asarray(data["W_bin_edges"])
+        xlabel = r"True hadronic $W$ [GeV]"
+        x_is_W = True
+    elif x_var == "q3":
+        hist_var = np.asarray(data["q3_GeV"])
+        bin_edges = np.asarray(data["q3_bin_edges"])
+        xlabel = r"True $q_3$ [GeV]"
+        x_is_W = False
+    else:
+        raise ValueError(f"Unknown x_var: {x_var!r}; expected 'W' or 'q3'")
+
+    signals = [
+        (r"$CC1\pi^\pm$", [0]),
+        (r"$CC1\pi^0$", [2]),
+        (r"$CCN\pi^\pm$ ($N \geq 1$)", [0, 1]),
+    ]
+    merged_int = merge_int_type_arr(data["int_type_arr"])
+    all_mask = np.ones(len(hist_var), dtype=bool)
+
+    fig, axes = plt.subplots(3, 3, figsize=(14.5, 11.0), constrained_layout=True)
+
+    for row_idx, (row_label, classes) in enumerate(signals):
+        sig_mask = np.isin(pid, classes)
+        bkg_mask = ~sig_mask
+
+        counts_sig = _composition_counts_by_inttype(
+            merged_int, sig_mask & all_mask, hist_var, bin_edges
+        )
+        counts_bkg = _composition_counts_by_inttype(
+            merged_int, bkg_mask & all_mask, hist_var, bin_edges
+        )
+        n_sig_tot = sum(counts_sig.values())
+        n_bkg_tot = sum(counts_bkg.values())
+
+        ax_sig = axes[row_idx, 0]
+        _stack_bars_by_inttype(ax_sig, bin_edges, counts_sig)
+        ax_sig.set_xlabel(xlabel, fontsize=_LABEL_FS)
+        ax_sig.set_ylabel(f"{row_label} signal events", fontsize=_LABEL_FS)
+        ax_sig.tick_params(axis="both", labelsize=_TICK_FS)
+        ax_sig.set_title(rf"{row_label}: signal composition")
+
+        ax_bkg = axes[row_idx, 1]
+        _stack_bars_by_inttype(ax_bkg, bin_edges, counts_bkg)
+        ax_bkg.set_xlabel(xlabel, fontsize=_LABEL_FS)
+        ax_bkg.set_ylabel(f"{row_label} background events", fontsize=_LABEL_FS)
+        ax_bkg.tick_params(axis="both", labelsize=_TICK_FS)
+        ax_bkg.set_title(rf"{row_label}: background composition")
+
+        ax_sb = axes[row_idx, 2]
+        _sb_stairs_plot(ax_sb, bin_edges, n_sig_tot, n_bkg_tot)
+        ax_sb.set_xlabel(xlabel, fontsize=_LABEL_FS)
+        ax_sb.set_ylabel(r"Signal / background ($S/B$)", fontsize=_LABEL_FS)
+        ax_sb.tick_params(axis="both", labelsize=_TICK_FS)
+        ax_sb.set_title(rf"{row_label}: $S/B$")
+
+        if x_is_W:
+            for col in range(3):
+                _set_xlim_w_metrics(axes[row_idx, col])
+
+    _shared_light_legend(fig, axes.ravel())
+    kin_title = r"$W$" if x_is_W else r"$q_3$"
+    fig.suptitle(
+        rf"Event composition vs. true {kin_title} - MINERvA Open Data Playlist {playlist}",
+        fontsize=14,
+    )
     return fig
 
 
