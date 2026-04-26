@@ -33,6 +33,7 @@ from src.eval._constants import (
     DEFAULT_PLOTS_DIR,
     DEFAULT_WANDB_TAG,
     REGRESSION_PICKLE_STEM,
+    plot_model_label,
     repo_output_path,
 )
 
@@ -131,7 +132,7 @@ def _draw_flops_curves(
         )
         cum_flops = steps_grid * flops
         x = np.log10(cum_flops + 1)
-        ax.plot(x, mean_loss, color=color, label=model)
+        ax.plot(x, mean_loss, color=color, label=plot_model_label(model))
         if losses_aligned.shape[0] > 1:
             ax.fill_between(
                 x,
@@ -219,7 +220,9 @@ def _draw_steps_curves(
         mean_loss_plot = mean_loss[step_mask]
         sigma_loss_plot = sigma_loss[step_mask]
         log_steps_plot = np.log10(steps_plot + 1)
-        ax.plot(log_steps_plot, mean_loss_plot, color=color, label=model)
+        ax.plot(
+            log_steps_plot, mean_loss_plot, color=color, label=plot_model_label(model)
+        )
         if losses_aligned.shape[0] > 1:
             ax.fill_between(
                 log_steps_plot,

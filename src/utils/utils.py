@@ -50,6 +50,8 @@ def get_runs_by_model_and_cap(
           are excluded here so regression eval only sees regression MLP runs.
       - BERT-tiny / BERT-tiny-rw: Run_*_BERT_tiny_rw_regression_<cap>_seed... and
           Run_*_BERT_tiny_regression_<cap>_seed... (``tiny_rw`` before ``tiny`` so names match correctly).
+      - Transformer2 DIS-only: names containing ..._regression_Transformer2_data_cap_<cap>_..._DIS_only_...
+          map to model key ``Transformer2-DIS`` (all-events Transformer2 stays ``Transformer2``).
     dataset_cap is -1 for full 6M dataset, or a positive int for smaller caps.
     """
     run_names = fetch_runs_from_wandb(tag, project)
@@ -78,7 +80,9 @@ def get_runs_by_model_and_cap(
             m = re.search(r"_regression_(Transformer[^_]+)_data_cap_(-?\d+)_", name)
             if m:
                 raw, cap = m.group(1), int(m.group(2))
-                if raw in ("Transformer1", "Transformer1NR"):
+                if "_DIS_only_" in name and raw == "Transformer2":
+                    model = "Transformer2-DIS"
+                elif raw in ("Transformer1", "Transformer1NR"):
                     model = "Transformer-xsmall"
                 elif raw == "Transformer3NR":
                     model = "Transformer-small"
@@ -137,6 +141,7 @@ def get_classification_runs_by_model_and_cap(
           Transformer1NR; see generate_cond_only_jobs.py). cap is always -1.
       - BERT-tiny / BERT-tiny-rw: Run_*_BERT_tiny_rw_classifier_<cap>_seed... and
           Run_*_BERT_tiny_classifier_<cap>_seed... (match ``tiny_rw`` before ``tiny``).
+      - Transformer2 DIS-only: ..._classifier_Transformer2_data_cap_<cap>_..._DIS_only_... → ``Transformer2-DIS``.
     dataset_cap is -1 for full 6M dataset, or a positive int for smaller caps.
     """
     run_names = fetch_runs_from_wandb(tag, project)
@@ -165,7 +170,9 @@ def get_classification_runs_by_model_and_cap(
             m = re.search(r"_classifier_(Transformer[^_]+)_data_cap_(-?\d+)_", name)
             if m:
                 raw, cap = m.group(1), int(m.group(2))
-                if raw in ("Transformer1", "Transformer1NR"):
+                if "_DIS_only_" in name and raw == "Transformer2":
+                    model = "Transformer2-DIS"
+                elif raw in ("Transformer1", "Transformer1NR"):
                     model = "Transformer-xsmall"
                 elif raw == "Transformer3NR":
                     model = "Transformer-small"

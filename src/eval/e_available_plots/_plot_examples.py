@@ -9,6 +9,8 @@ import warnings
 import matplotlib.pyplot as plt
 import numpy as np
 
+from src.eval._constants import plot_model_label
+
 from ._constants import DEFAULT_BASELINE_KEY
 from ._load import _build_event_mask
 from ._grouped import (
@@ -91,7 +93,7 @@ def plot_example_E_pred_true(
         dp, Enu_filters, Enu_baselines, baseline_key, use_cc_selection
     )
 
-    entries: list[tuple[str, str, str, np.ndarray, np.ndarray]] = []
+    entries: list[tuple[str, str, str, np.ndarray, np.ndarray, str]] = []
     all_labels: list[str] = []
     for loss in training_names_grouped:
         for config_label, runs in training_names_grouped[loss].items():
@@ -120,8 +122,9 @@ def plot_example_E_pred_true(
                 pick = rng.choice(idx, size=k, replace=False)
                 t = true_vec[pick]
                 p = pred_vec[pick]
-                title = f"{config_label}" if first_seed_only else f"{config_label} §{s}"
-                entries.append((title, loss, flat_key, t, p))
+                base = plot_model_label(config_label)
+                title = f"{base}" if first_seed_only else f"{base} §{s}"
+                entries.append((title, loss, flat_key, t, p, config_label))
                 if config_label not in all_labels:
                     all_labels.append(config_label)
 
@@ -141,12 +144,11 @@ def plot_example_E_pred_true(
     for ax in axes.flat:
         ax.set_visible(False)
 
-    for i, (title, loss, flat_key, t, p) in enumerate(entries):
+    for i, (title, loss, flat_key, t, p, cfg_key) in enumerate(entries):
         r, c = divmod(i, ncols)
         ax = axes[r, c]
         ax.set_visible(True)
-        cfg = title.split(" §")[0] if " §" in title else title
-        color = color_map.get(cfg, "tab:gray")
+        color = color_map.get(cfg_key, "tab:gray")
         lo = float(min(t.min(), p.min()))
         hi = float(max(t.max(), p.max()))
         if lo >= hi:
@@ -241,7 +243,7 @@ def plot_scaling_law(
                 capsize=4,
             )
             ax.annotate(
-                config_label,
+                plot_model_label(config_label),
                 (n_samples, y_mean),
                 textcoords="offset points",
                 xytext=(6, 4),

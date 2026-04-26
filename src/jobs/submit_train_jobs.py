@@ -131,6 +131,8 @@ def generate_cmd(
 def get_cmds_and_slurm_times():
     """Transformer-large (= ``Transformer2`` preset, d_model=384, depth=8, n_heads=12),
     trained on DIS events only. Sweeps over seeds and tasks for direct comparison.
+    Also submits two BERT-tiny classification and two BERT-tiny regression runs
+    (same seeds and training budget as the Transformer2 sweep; all events, no DIS filter).
 
     NOTE: the previous BERT-tiny + DIS-only extra run sweep is kept below as a
     commented reference — uncomment to restore it.
@@ -158,6 +160,21 @@ def get_cmds_and_slurm_times():
             )
             cmds.append(cmd)
             slurm_times.append(walltime)
+    # BERT-tiny: 2× regression + 2× classification (seeds 55, 56), all events.
+    walltime_bert = "05:00:00"
+    for seed in seeds:
+        for task in tasks:
+            cmd = generate_cmd(
+                data_cap=-1,
+                seed=seed,
+                task=task,
+                model="BERT-tiny",
+                max_steps=500000,
+                bs=2048,
+                grad_accum_steps=1,
+            )
+            cmds.append(cmd)
+            slurm_times.append(walltime_bert)
     return cmds, slurm_times
 
 

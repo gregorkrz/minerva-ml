@@ -9,6 +9,8 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 
+from src.eval._constants import plot_model_label
+
 from ._grouped import _resolve_color_map, _SEED_SEP
 from ._constants import DEFAULT_BASELINE_KEY, SMALL_PAPER_COMPACT_IQR_MPV_FIGSIZE_INCHES
 from ._load import _build_event_mask, load_eval_data
@@ -115,7 +117,7 @@ def plot_residuals_by_energy(
                 if has_baselines:
                     reco = E_pred_dict[dp][loss][model][mask]
                     ratio_model = reco[valid] / true[valid]
-                    mlab = f"{model} ({loss})"
+                    mlab = f"{plot_model_label(model)} ({loss})"
                     ax[0, i].hist(
                         reco - true,
                         bins=residual_bins_list[i],
@@ -333,18 +335,19 @@ def plot_residuals_by_q3(
                 ratio_model = reco[valid] / true[valid]
                 mlab = _model_color_key(model)
                 mcol = color_by_model_base.get(mlab, "tab:gray")
+                mlab_disp = plot_model_label(mlab)
                 ax[0, i].hist(
                     reco[valid] - true[valid],
                     bins=residual_bins,
                     histtype="step",
-                    label=mlab,
+                    label=mlab_disp,
                     color=mcol,
                 )
                 ax[1, i].hist(
                     ratio_model,
                     bins=ratio_bins,
                     histtype="step",
-                    label=mlab,
+                    label=mlab_disp,
                     color=mcol,
                 )
 
@@ -528,7 +531,9 @@ def plot_ratio_histogram_q3_two_panels(
                 ratio_model = reco[valid] / true[valid]
                 mlab = _model_color_key(model)
                 mcol = color_by_model_base.get(mlab, "tab:gray")
-                lab = mlab if use_legend_labels else "_nolegend_"
+                lab = (
+                    plot_model_label(mlab) if use_legend_labels else "_nolegend_"
+                )
                 ax.hist(
                     ratio_model,
                     bins=ratio_bins,

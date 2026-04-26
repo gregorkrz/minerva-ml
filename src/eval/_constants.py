@@ -27,12 +27,17 @@ FLOPS_PER_STEP: dict[str, float] = {
     "OmniLearned-medium": 8035 * 1e9,
     "OmniLearned-small-rw": 1769 * 1e9,
     "Transformer2": 6236 * 1e9,
+    # Same architecture / step cost as Transformer2; training data filtered to DIS in submit_train_jobs.
+    "Transformer2-DIS": 6236 * 1e9,
     "Transformer-small": 1263 * 1e9,
 }
 
 CLRS_CLASSIFICATION: dict[str, str] = {
-    "BERT-tiny": "#8c564b",
-    "BERT-tiny-rw": "#bcbd22",
+    "BERT-tiny": "#0d9488",  # teal
+    "BERT-tiny-rw": "#7c3aed",  # violet
+    # Aliases (same as above): figures use :func:`plot_model_label` for display names.
+    "BERT-small": "#0d9488",
+    "BERT-small-rw": "#7c3aed",
     "Transformer": "#1f77b4",
     "Transformer-xsmall": "#1f77b4",
     "OmniLearned-small": "#ff7f0e",
@@ -42,7 +47,26 @@ CLRS_CLASSIFICATION: dict[str, str] = {
     "OmniLearned-medium": "#9467bd",
     "OmniLearned-small-rw": "#e377c2",
     "Transformer2": "#d62728",
+    "Transformer2-DIS": "#f59e0b",  # amber — distinct from full-data Transformer2 (red)
 }
+
+
+def plot_model_label(name: str) -> str:
+    """Human-readable model name for figure legends/titles only.
+
+    Wandb keys and internal dict keys stay ``BERT-tiny`` / ``BERT-tiny-rw``; this
+    maps them to ``BERT-small`` / ``BERT-small-rw`` for display. Suffixes such as
+    `` 6M`` or ``§0`` are preserved.
+
+    If a series never appears in a plot, the pickle is missing that model: runs must
+    be discoverable for the tag (``get_*_runs_by_model_and_cap``) with ``data_cap=-1``,
+    and for training-curve PDFs, wandb history must include non-empty ``eval_loss``.
+    """
+    if name.startswith("BERT-tiny-rw"):
+        return "BERT-small-rw" + name[len("BERT-tiny-rw") :]
+    if name.startswith("BERT-tiny"):
+        return "BERT-small" + name[len("BERT-tiny") :]
+    return name
 
 
 def repo_output_path(repo_root: Path, path: Path) -> Path:
@@ -52,10 +76,14 @@ def repo_output_path(repo_root: Path, path: Path) -> Path:
 
 
 CLRS_REGRESSION: dict[str, str] = {
-    "BERT-tiny": "#8c564b",
-    "BERT-tiny-rw": "#bcbd22",
+    "BERT-tiny": "#0d9488",  # teal
+    "BERT-tiny-rw": "#7c3aed",  # violet
+    "BERT-small": "#0d9488",
+    "BERT-small-rw": "#7c3aed",
     "Transformer-xsmall": "#1f77b4",
     "Transformer-small": "#17becf",
+    "Transformer2": "#d62728",
+    "Transformer2-DIS": "#f59e0b",  # amber
     "OmniLearned-small": "#ff7f0e",
     "OmniLearned-small-int": "#66c2a5",
     "MLP": "#2ca02c",

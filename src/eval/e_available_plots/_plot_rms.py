@@ -9,6 +9,8 @@ import warnings
 import matplotlib.pyplot as plt
 import numpy as np
 
+from src.eval._constants import plot_model_label
+
 from ._constants import DEFAULT_BASELINE_KEY
 from ._load import _build_event_mask, load_eval_data
 
@@ -306,10 +308,10 @@ def plot_rms_iqr(
                             else float("nan")
                         )
                         label = (
-                            f"{model}-{loss} (RMS={model_rms:.3f}, "
+                            f"{plot_model_label(model)}-{loss} (RMS={model_rms:.3f}, "
                             f"plotted={frac_plotted:.1f}% of IQR sample)"
                             if not np.isnan(frac_plotted)
-                            else f"{model}-{loss} (RMS={model_rms:.3f})"
+                            else f"{plot_model_label(model)}-{loss} (RMS={model_rms:.3f})"
                         )
                         hist_ax[0, i].hist(
                             ratio_hist,
@@ -371,10 +373,10 @@ def plot_rms_iqr(
             color = color_by_lm[(loss, model)]
             if single_dataset:
                 ls = default_linestyle
-                lab = f"{model}"
+                lab = plot_model_label(model)
             else:
                 ls = dataset_to_linestyle.get(dp, "-")
-                lab = f"{model}"
+                lab = plot_model_label(model)
             ax[0].plot(q3_bin_mids, rms_vals, ls, color=color, label=lab)
             ax[1].plot(q3_bin_mids, iqr_vals, ls, color=color, label=lab)
 

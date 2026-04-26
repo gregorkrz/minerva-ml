@@ -74,6 +74,10 @@ def collect_classification(
     from src.utils.utils import get_classification_runs_by_model_and_cap
 
     runs_by_model_cap = get_classification_runs_by_model_and_cap(wandb_tag)
+    print(
+        "  Models from wandb (classification):",
+        ", ".join(sorted(runs_by_model_cap.keys())) or "(none)",
+    )
     training_names = {
         key: value[-1]
         for key, value in sorted(runs_by_model_cap.items(), key=lambda kv: kv[0])
@@ -91,6 +95,10 @@ def collect_classification(
 
     runs_per_model = classification_runs_per_model(runs_by_model_cap, training_names)
     loss_histories = collect_histories_for_runs(runs_per_model)
+    print(
+        "  Loss histories (classification, non-empty eval_loss):",
+        ", ".join(sorted(loss_histories.keys())) or "(none)",
+    )
 
     return {
         "schema_version": SCHEMA_VERSION_CLASSIFICATION,
@@ -114,6 +122,10 @@ def collect_regression(ckpt_dir: Path, wandb_tag: str, suppress_errors: bool) ->
     from src.utils.utils import get_runs_by_model_and_cap
 
     runs_by_model_cap = get_runs_by_model_and_cap(wandb_tag)
+    print(
+        "  Models from wandb (regression):",
+        ", ".join(sorted(runs_by_model_cap.keys())) or "(none)",
+    )
     training_names_full: dict = {"Log1p": {}}
     baseline_run = None
     for model, caps in runs_by_model_cap.items():
@@ -147,6 +159,10 @@ def collect_regression(ckpt_dir: Path, wandb_tag: str, suppress_errors: bool) ->
 
     runs_per_model = regression_runs_per_model(runs_by_model_cap, training_names_full)
     loss_histories = collect_histories_for_runs(runs_per_model)
+    print(
+        "  Loss histories (regression, non-empty eval_loss):",
+        ", ".join(sorted(loss_histories.keys())) or "(none)",
+    )
 
     # Grouped layout for multi-seed models (matches plot_rms_iqr_with_uncertainty).
     grouped_no_rw: dict[str, dict[str, list[str]]] = {"Log1p": {}}

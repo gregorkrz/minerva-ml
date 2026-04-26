@@ -9,6 +9,8 @@ from typing import Any
 import matplotlib.pyplot as plt
 import numpy as np
 
+from src.eval._constants import plot_model_label
+
 from ._constants import DEFAULT_BASELINE_KEY
 from ._grouped import (
     _SEED_SEP,
@@ -345,7 +347,7 @@ def plot_rms_iqr_with_uncertainty(
             }
 
             color = color_map[config_label]
-            lbl = f"{config_label}"
+            lbl = plot_model_label(config_label)
 
             with np.errstate(divide="ignore", invalid="ignore"):
                 rms_over_mpv = mean_rms / mean_mpv

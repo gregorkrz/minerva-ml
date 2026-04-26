@@ -8,6 +8,8 @@ from typing import Any
 import numpy as np
 from sklearn.metrics import roc_curve
 
+from src.eval._constants import plot_model_label
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -81,7 +83,7 @@ def _tpr_line_legend_label(
     model_name: str, _fpr_val: float, _use_global_fpr: bool
 ) -> str:
     """Legend entry for a model TPR line (no FPR suffix; baseline uses :func:`_baseline_legend_with_global_fpr`)."""
-    return model_name
+    return plot_model_label(model_name)
 
 
 def _global_reco_baseline_fpr(

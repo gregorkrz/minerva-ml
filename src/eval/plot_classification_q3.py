@@ -37,6 +37,7 @@ from src.eval._bootstrap import silence_classification_empty_bin_warnings
 from src.eval._classification_light import save_light_classification_pdfs
 from src.eval._constants import (
     CLASSIFICATION_PICKLE_STEM,
+    plot_model_label,
     DEFAULT_OUT_DIR,
     DEFAULT_PLOTS_DIR,
     DEFAULT_WANDB_TAG,
@@ -111,7 +112,7 @@ def main(argv: list[str] | None = None) -> None:
             )
             ax.set_xlabel(r"Predicted class")
             ax.set_ylabel(r"True class")
-            ax.set_title(model_name)
+            ax.set_title(plot_model_label(model_name))
         fig.suptitle(
             f"Confusion matrices (first run per model) — {playlist}", fontsize=14
         )

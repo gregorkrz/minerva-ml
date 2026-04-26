@@ -20,6 +20,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import numpy.ma as ma
 
+from src.eval._constants import plot_model_label
 from src.eval.classification_plots import (
     compute_all_metrics,
     compute_all_metrics_q3,
@@ -111,8 +112,8 @@ def _figure_metrics_1x3(
 
     for model_name, agg in sorted(all_metrics.items(), key=lambda kv: kv[0]):
         clr = {"color": colors.get(model_name, "tab:gray")}
-        _plot_metric_line(axes[0], x, agg["auprc"], model_name, True, **clr)
-        _plot_metric_line(axes[1], x, agg["auroc"], model_name, True, **clr)
+        _plot_metric_line(axes[0], x, agg["auprc"], plot_model_label(model_name), True, **clr)
+        _plot_metric_line(axes[1], x, agg["auroc"], plot_model_label(model_name), True, **clr)
         for fpr_val in fixed_fpr:
             key = f"tpr@{fpr_val}"
             lbl = _tpr_line_legend_label(model_name, fpr_val, True)
@@ -165,10 +166,18 @@ def _figure_metrics_2x3_pion(
     for model_name, m in sorted(all_metrics.items(), key=lambda kv: kv[0]):
         clr = {"color": colors.get(model_name, "tab:gray")}
         agg_E, agg_th = m["E"], m["theta"]
-        _plot_metric_line(axes[0, 0], x_E, agg_E["auprc"], model_name, True, **clr)
-        _plot_metric_line(axes[0, 1], x_E, agg_E["auroc"], model_name, True, **clr)
-        _plot_metric_line(axes[1, 0], x_theta, agg_th["auprc"], model_name, True, **clr)
-        _plot_metric_line(axes[1, 1], x_theta, agg_th["auroc"], model_name, True, **clr)
+        _plot_metric_line(
+            axes[0, 0], x_E, agg_E["auprc"], plot_model_label(model_name), True, **clr
+        )
+        _plot_metric_line(
+            axes[0, 1], x_E, agg_E["auroc"], plot_model_label(model_name), True, **clr
+        )
+        _plot_metric_line(
+            axes[1, 0], x_theta, agg_th["auprc"], plot_model_label(model_name), True, **clr
+        )
+        _plot_metric_line(
+            axes[1, 1], x_theta, agg_th["auroc"], plot_model_label(model_name), True, **clr
+        )
         for fpr_val in fixed_fpr:
             key = f"tpr@{fpr_val}"
             lab = _tpr_line_legend_label(model_name, fpr_val, True)
@@ -666,7 +675,7 @@ def plot_tpr_fixed_fpr_two_panel(
                 ax_l,
                 x_left,
                 model_metrics[left_key][key],
-                f"{model_name} (FPR={fpr_val:.0%})",
+                f"{plot_model_label(model_name)} (FPR={fpr_val:.0%})",
                 True,
                 **clr,
             )
@@ -674,7 +683,7 @@ def plot_tpr_fixed_fpr_two_panel(
                 ax_r,
                 x_right,
                 model_metrics[right_key][key],
-                f"{model_name} (FPR={fpr_val:.0%})",
+                f"{plot_model_label(model_name)} (FPR={fpr_val:.0%})",
                 True,
                 **clr,
             )

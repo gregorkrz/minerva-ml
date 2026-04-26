@@ -10,6 +10,8 @@ import numpy as np
 import numpy.ma as ma
 from sklearn.metrics import auc, precision_recall_curve
 
+from src.eval._constants import plot_model_label
+
 from ._binning import data_with_signal_pion_bins
 from ._constants import (
     CLASSIFICATION_PERFORMANCE_LEGEND_TITLE,
@@ -239,16 +241,36 @@ def plot_cc1pi_vs_pion_kinematics(
         clr = {} if colors is None else {"color": colors.get(model_name)}
 
         _plot_metric_line(
-            axes[0, 0], E_mid, agg_E["auprc"], model_name, uncertainties, **clr
+            axes[0, 0],
+            E_mid,
+            agg_E["auprc"],
+            plot_model_label(model_name),
+            uncertainties,
+            **clr,
         )
         _plot_metric_line(
-            axes[1, 0], theta_mid, agg_theta["auprc"], model_name, uncertainties, **clr
+            axes[1, 0],
+            theta_mid,
+            agg_theta["auprc"],
+            plot_model_label(model_name),
+            uncertainties,
+            **clr,
         )
         _plot_metric_line(
-            axes[0, 1], E_mid, agg_E["auroc"], model_name, uncertainties, **clr
+            axes[0, 1],
+            E_mid,
+            agg_E["auroc"],
+            plot_model_label(model_name),
+            uncertainties,
+            **clr,
         )
         _plot_metric_line(
-            axes[1, 1], theta_mid, agg_theta["auroc"], model_name, uncertainties, **clr
+            axes[1, 1],
+            theta_mid,
+            agg_theta["auroc"],
+            plot_model_label(model_name),
+            uncertainties,
+            **clr,
         )
 
         for fpr_val in fixed_fpr:
@@ -352,10 +374,10 @@ def plot_multi_pion_vs_q3(
     for model_name, agg in sorted(all_metrics_q3.items(), key=lambda kv: kv[0]):
         clr = {} if colors is None else {"color": colors.get(model_name)}
         _plot_metric_line(
-            axes[0], q3_mid, agg["auprc"], model_name, uncertainties, **clr
+            axes[0], q3_mid, agg["auprc"], plot_model_label(model_name), uncertainties, **clr
         )
         _plot_metric_line(
-            axes[1], q3_mid, agg["auroc"], model_name, uncertainties, **clr
+            axes[1], q3_mid, agg["auroc"], plot_model_label(model_name), uncertainties, **clr
         )
         for fpr_val in fixed_fpr:
             key = f"tpr@{fpr_val}"
@@ -433,10 +455,10 @@ def plot_multi_classification_vs_W(
     for model_name, agg in sorted(all_metrics_W.items(), key=lambda kv: kv[0]):
         clr = {} if colors is None else {"color": colors.get(model_name)}
         _plot_metric_line(
-            axes[0], w_mid, agg["auprc"], model_name, uncertainties, **clr
+            axes[0], w_mid, agg["auprc"], plot_model_label(model_name), uncertainties, **clr
         )
         _plot_metric_line(
-            axes[1], w_mid, agg["auroc"], model_name, uncertainties, **clr
+            axes[1], w_mid, agg["auroc"], plot_model_label(model_name), uncertainties, **clr
         )
         for fpr_val in fixed_fpr:
             key = f"tpr@{fpr_val}"
@@ -686,10 +708,20 @@ def plot_binned_by_inttype(
         for model_name, agg in sorted(all_agg.items(), key=lambda kv: kv[0]):
             clr = {} if colors is None else {"color": colors.get(model_name)}
             _plot_metric_line(
-                axes[row_idx, 0], x_mid, agg["auprc"], model_name, uncertainties, **clr
+                axes[row_idx, 0],
+                x_mid,
+                agg["auprc"],
+                plot_model_label(model_name),
+                uncertainties,
+                **clr,
             )
             _plot_metric_line(
-                axes[row_idx, 1], x_mid, agg["auroc"], model_name, uncertainties, **clr
+                axes[row_idx, 1],
+                x_mid,
+                agg["auroc"],
+                plot_model_label(model_name),
+                uncertainties,
+                **clr,
             )
             for fpr_val in fixed_fpr:
                 key = f"tpr@{fpr_val}"
@@ -928,6 +960,9 @@ def plot_signal_composition_single_pion(
     *data* must contain ``int_type_arr``, ``pion_E_MC``, ``pion_theta_MC``,
     ``has_pion`` (along with the default pion-bin edges — these are replaced
     per signal definition using equal-frequency edges on signal events).
+
+    *playlist* is kept for call-site compatibility; panel titles and the shared
+    legend describe the content (no figure-level suptitle).
     """
     signals = [
         (r"$CC1\pi^\pm$", [0]),
@@ -962,7 +997,7 @@ def plot_signal_composition_single_pion(
         ax_e.set_xlabel(r"True $E_\pi$ [GeV]", fontsize=_LABEL_FS)
         ax_e.set_ylabel(f"{row_label} signal events", fontsize=_LABEL_FS)
         ax_e.tick_params(axis="both", labelsize=_TICK_FS)
-        ax_e.set_title(rf"{row_label}: signal composition vs. True $E_\pi$")
+        ax_e.set_title(rf"{row_label}: signal in bins of $E_\pi$")
         e_mid = data_sp["pion_E_MC_bins_mid"]
         if len(e_mid) > 0 and np.all(np.isfinite(e_mid[[0, -1]])):
             ax_e.set_xlim(float(e_mid[0]) * 0.8, float(e_mid[-1]) * 1.2)
@@ -972,19 +1007,15 @@ def plot_signal_composition_single_pion(
         ax_th.set_xlabel(r"True $\theta_\pi$ [rad]", fontsize=_LABEL_FS)
         ax_th.set_ylabel(f"{row_label} signal events", fontsize=_LABEL_FS)
         ax_th.tick_params(axis="both", labelsize=_TICK_FS)
-        ax_th.set_title(rf"{row_label}: signal composition vs. True $\theta_\pi$")
+        ax_th.set_title(rf"{row_label}: signal in bins of $\theta_\pi$")
 
         ax_bkg = axes[row_idx, 2]
         _single_bkg_bar(ax_bkg, merged_int, bkg_mask)
         ax_bkg.set_ylabel(f"{row_label} background events", fontsize=_LABEL_FS)
         ax_bkg.tick_params(axis="both", labelsize=_TICK_FS)
-        ax_bkg.set_title(f"{row_label}: background composition")
+        ax_bkg.set_title(rf"{row_label}: background composition")
 
     _shared_light_legend(fig, axes.ravel())
-    fig.suptitle(
-        rf"Event composition (single-pion) - MINERvA Open Data Playlist {playlist}",
-        fontsize=14,
-    )
     return fig
 
 
@@ -1166,9 +1197,9 @@ def plot_prc_curves(
         auprc_m = c["auprc_mean"]
         auprc_s = c["auprc_std"]
         if uncertainties and auprc_s > 0:
-            label = f"{model_name} (AUPRC={auprc_m:.3f}±{auprc_s:.3f})"
+            label = f"{plot_model_label(model_name)} (AUPRC={auprc_m:.3f}±{auprc_s:.3f})"
         else:
-            label = f"{model_name} (AUPRC={auprc_m:.3f})"
+            label = f"{plot_model_label(model_name)} (AUPRC={auprc_m:.3f})"
         clr = {} if colors is None else {"color": colors.get(model_name)}
 
         for ax_idx, ax in enumerate(axes):

@@ -13,6 +13,7 @@ The processed dataset used by this project is available on Hugging Face:
 
 For detailed data fields and semantics, see **[DATASET.md](DATASET.md)**.
 For model architecture details, see **[MODELS.md](MODELS.md)**.
+
 ## Repository workflow
 
 The typical workflow is:
@@ -162,8 +163,7 @@ W&B runs are selected by the **wandb tag** passed as `--flag` (see `fetch_runs_f
 
 **Optional:** Download latest cached model outputs
 
-* You can use download the latest files with evaluation data (https://huggingface.co/datasets/gregorkrzmanc/minerva-ml-eval), and set $OUT to the path where you download this data.
-
+* Instead of using `python -m src.eval.collect_eval_data`, you can use download the latest files with evaluation data (https://huggingface.co/datasets/gregorkrzmanc/minerva-ml-eval), and set $OUT to the path where you download this data.
 **2. Generate PDFs** (each script accepts `--flag`, `--out-dir`, and `--plots-dir`; defaults match the layout below). Plotting code lives under ``src.eval.classification_plots`` and ``src.eval.e_available_plots`` (several modules each); notebooks may still use ``from eval_*_plots import …`` via thin shims in ``notebooks/``.
 
 ```bash

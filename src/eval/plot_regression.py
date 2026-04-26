@@ -34,6 +34,7 @@ from src.eval._constants import (
     DEFAULT_PLOTS_DIR,
     DEFAULT_WANDB_TAG,
     REGRESSION_PICKLE_STEM,
+    plot_model_label,
     repo_output_path,
 )
 
@@ -232,10 +233,22 @@ def main(argv: list[str] | None = None) -> None:
         for cfg_label, vA in vals_1A[loss].items():
             method = cfg_label.split()[0]
             color = clrs.get(method, "tab:gray")
-            ax.plot(q3, vA["iqr_mean"], "--", color=color, label=f"{method} (1A)")
+            ax.plot(
+                q3,
+                vA["iqr_mean"],
+                "--",
+                color=color,
+                label=f"{plot_model_label(method)} (1A)",
+            )
             vB = vals_1B.get(loss, {}).get(cfg_label)
             if vB is not None:
-                ax.plot(q3, vB["iqr_mean"], "-", color=color, label=f"{method} (1B)")
+                ax.plot(
+                    q3,
+                    vB["iqr_mean"],
+                    "-",
+                    color=color,
+                    label=f"{plot_model_label(method)} (1B)",
+                )
 
     if "baseline" in vals_1A:
         bl = vals_1A["baseline"]
@@ -357,7 +370,9 @@ def main(argv: list[str] | None = None) -> None:
     fig_iii, axs = plt.subplots(figsize=(7, 5))
     for method, pts in methods.items():
         xs, ys, yerrs = zip(*pts)
-        axs.errorbar(xs, ys, yerr=yerrs, marker="o", capsize=4, label=method)
+        axs.errorbar(
+            xs, ys, yerr=yerrs, marker="o", capsize=4, label=plot_model_label(method)
+        )
 
     if "baseline" in values:
         axs.axhline(
