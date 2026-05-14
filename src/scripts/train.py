@@ -1,5 +1,5 @@
 """
-Training script for PointGlobalMixedViT, OmniLearned, or a BERT baseline on HEP data.
+Training script for PointGlobalMixedViT, OmniLearned, BERT, or HyperScale on HEP data.
 
 # Energy regression training:
 ## ViT-like transformer training:
@@ -31,6 +31,10 @@ python -m src.scripts.train -bs 10 --mode regression -E-available-no-muon -name 
 
 ## BERT-tiny architecture with random encoder weights (hub config only; equivalent to `--use-bert tiny --bert-random-init`):
 python -m src.scripts.train -bs 10 --mode regression -E-available-no-muon -name DEBUG --max_steps 250000 --use-bert tiny-rw [-cap {data_cap} -seed-event-sampler {seed} --seed {seed}]
+
+
+## HyperScale ParticleViT (basic / embedding / pool variant; same particle features as OmniLearned):
+python -m src.scripts.train -bs 10 --mode regression -E-available-no-muon -name DEBUG --d_model 256 --depth 3 --n_heads 8 --max_steps 250000 --use-hyperscale basic [-cap {data_cap} -seed-event-sampler {seed} --seed {seed}]
 
 
 # Restrict training + validation to specific GENIE interaction types (QE/RES/DIS/COH/MEC):
@@ -104,6 +108,15 @@ from src.models.omnilearned import (
     get_model_parameters,
     load_pretrained_omnilearned,
 )
+from src.models.hyperscale import (
+    ParticleVIT as _HSParticleVIT,
+    ParticleVIT_Embedding as _HSParticleVIT_Embedding,
+    ParticleVIT_Pool as _HSParticleVIT_Pool,
+    init_olmo_weights as _hs_init_olmo_weights,
+    _zero_masked_tokens as _hs_zero_masked_tokens,
+)
+
+HYPERSCALE_VARIANTS = ("basic", "embedding", "pool")
 
 # print CUDA_VISIBLE_DEVICES
 print(f"CUDA_VISIBLE_DEVICES: {os.environ.get('CUDA_VISIBLE_DEVICES')}")
@@ -201,6 +214,105 @@ class BertBaseline(nn.Module):
         else:
             w = mask.unsqueeze(-1).to(dtype=hs.dtype)
             pooled = (hs * w).sum(dim=1) / w.sum(dim=1).clamp(min=1e-6)
+        return self.head(pooled)
+
+
+class HyperScaleBaseline(nn.Module):
+    """HyperScale ParticleViT (basic/embedding/pool variant) wrapped to optionally
+    consume a projected global-feature token (mirrors BertBaseline)."""
+
+    def __init__(
+        self,
+        input_dim: int,
+        output_dim: int,
+        embed_dim: int,
+        depth: int,
+        num_heads: int,
+        variant: str = "basic",
+        mlp_ratio: float = 8 / 3,
+        global_cont_dim: int = 0,
+    ):
+        super().__init__()
+        if variant not in HYPERSCALE_VARIANTS:
+            raise ValueError(
+                f"Unknown HyperScale variant {variant!r}; expected one of {HYPERSCALE_VARIANTS}"
+            )
+        if variant == "basic":
+            inner = _HSParticleVIT(
+                input_dim, output_dim, embed_dim, depth, num_heads, mlp_ratio
+            )
+        elif variant == "embedding":
+            inner = _HSParticleVIT_Embedding(
+                input_dim, output_dim, embed_dim, depth, num_heads, mlp_ratio
+            )
+        else:  # pool
+            inner = _HSParticleVIT_Pool(
+                input_dim, output_dim, embed_dim, depth, num_heads, mlp_ratio
+            )
+
+        self.variant = variant
+        self.embed_dim = embed_dim
+        # Reuse Hyperscale-initialized submodules directly.
+        self.token_embed = inner.token_embed
+        self.blocks = inner.blocks
+        self.norm = inner.norm
+        self.head = inner.head
+        self.cls_token = getattr(inner, "cls_token", None)
+        self.pool = getattr(inner, "pool", None)
+
+        if global_cont_dim > 0:
+            self.global_proj = nn.Linear(global_cont_dim, embed_dim)
+            _hs_init_olmo_weights(self.global_proj)
+        else:
+            self.global_proj = None
+
+    def forward(self, X, mask, global_cont=None):
+        # X: (B, N, input_dim); mask: (B, N) {0,1} float or bool; global_cont: (B, gcd) or None
+        attn_mask = mask.to(dtype=torch.bool) if mask is not None else None
+
+        if self.variant == "embedding":
+            x = self.token_embed(X, attn_mask=attn_mask)
+        else:
+            x = self.token_embed(X)
+        x = _hs_zero_masked_tokens(x, attn_mask)
+
+        bs = x.shape[0]
+        if self.global_proj is not None:
+            if global_cont is None:
+                raise ValueError(
+                    "HyperScale global token enabled but global_cont is missing"
+                )
+            g = (
+                self.global_proj(global_cont)
+                .unsqueeze(1)
+                .to(device=x.device, dtype=x.dtype)
+            )
+            x = torch.cat([g, x], dim=1)
+            if attn_mask is not None:
+                ones = torch.ones(
+                    bs, 1, dtype=torch.bool, device=attn_mask.device
+                )
+                attn_mask = torch.cat([ones, attn_mask], dim=1)
+
+        if self.cls_token is not None:
+            cls = self.cls_token.expand(bs, -1, -1)
+            x = torch.cat([cls, x], dim=1)
+            if attn_mask is not None:
+                ones = torch.ones(
+                    bs, 1, dtype=torch.bool, device=attn_mask.device
+                )
+                attn_mask = torch.cat([ones, attn_mask], dim=1)
+
+        for block in self.blocks:
+            x = block(x, attn_mask=attn_mask)
+
+        x = self.norm(x)
+        x = _hs_zero_masked_tokens(x, attn_mask)
+
+        if self.pool is not None:
+            pooled = self.pool(x, attn_mask=attn_mask)
+        else:
+            pooled = x[:, 0]
         return self.head(pooled)
 
 
@@ -538,6 +650,27 @@ def parse_args():
         help="With --use-bert: use hub config for architecture but randomly initialize BERT weights "
         "(no pretrained checkpoint).",
     )
+    # HyperScale ParticleViT arguments
+    parser.add_argument(
+        "--use-hyperscale",
+        type=str,
+        nargs="?",
+        const="basic",
+        default=None,
+        choices=list(HYPERSCALE_VARIANTS),
+        metavar="VARIANT",
+        help="Use HyperScale ParticleViT (gregorkrz/HyperScale) instead of ViT. "
+        "VARIANT selects the input head: basic (linear embed + CLS), "
+        "embedding (split kin/PID/vertex embeds, requires 9 features), "
+        "pool (linear embed + attention pool, no CLS). "
+        "Architecture knobs come from --d_model, --depth, --n_heads, --hs-mlp-ratio.",
+    )
+    parser.add_argument(
+        "--hs-mlp-ratio",
+        type=float,
+        default=8 / 3,
+        help="MLP ratio for HyperScale SwiGLU FFN (default 8/3, matches upstream HyperScale).",
+    )
     parser.add_argument(
         "--use-pretrained",
         type=str,
@@ -829,6 +962,89 @@ def create_bert_model(args, task):
     )
 
 
+def _hyperscale_input_dim(args):
+    """Per-particle feature width seen by the HyperScale embedding.
+
+    The minerva dataset stores X as ``[..., point_cont_dim + 1]`` when ``use_pid`` is True
+    (PID lives at ``pid_idx``). HyperScale's basic/pool variants accept any width via a
+    Linear; the embedding variant requires exactly 9 (4 kin + 1 PID + 4 vertex), so the
+    wrapper truncates X to 9 features in ``prepare_batch_hyperscale``.
+    """
+    if getattr(args, "use_hyperscale", None) == "embedding":
+        return 9
+    return args.point_cont_dim + (1 if args.use_pid else 0)
+
+
+def create_hyperscale_model(args, task):
+    """Create a HyperScaleBaseline (ParticleVIT basic / embedding / pool variant)."""
+    if task.type == "classifier":
+        num_classes = len(task.class_idx)
+    elif task.type == "regression":
+        num_classes = 1
+    else:
+        raise ValueError("Invalid task type")
+    e_sum_dim = 6 if args.include_E_sum else 0
+    global_cont_dim = (GLOBAL_COND_BASE_DIM if args.use_cond else 0) + e_sum_dim
+    return HyperScaleBaseline(
+        input_dim=_hyperscale_input_dim(args),
+        output_dim=num_classes,
+        embed_dim=args.d_model,
+        depth=args.depth,
+        num_heads=args.n_heads,
+        variant=args.use_hyperscale,
+        mlp_ratio=args.hs_mlp_ratio,
+        global_cont_dim=global_cont_dim,
+    )
+
+
+def prepare_batch_hyperscale(
+    batch,
+    device,
+    use_pid=False,
+    pid_idx=4,
+    use_cond=False,
+    include_E_sum=False,
+    zero_cond_feature=None,
+    variant="basic",
+):
+    """Prepare batch for HyperScaleBaseline.
+
+    Keeps PID inline (the embedding variant indexes it from X[..., 4]); when use_pid=False
+    the PID column is stripped to match the BERT/OmniLearned no-PID layout. The embedding
+    variant requires exactly 9 features and X is truncated accordingly.
+    """
+    X = batch["X"].to(device, dtype=torch.float32)
+    y = batch["y"].to(device)
+    mask = batch["attention_mask"].to(device, dtype=torch.float32)
+
+    if not use_pid and batch.get("pid") is not None:
+        X = torch.cat([X[:, :, :pid_idx], X[:, :, pid_idx + 1 :]], dim=2)
+
+    if variant == "embedding" and X.shape[-1] > 9:
+        X = X[:, :, :9]
+
+    global_cont = None
+    if use_cond and batch.get("cond") is not None:
+        global_cont = batch["cond"].to(device, dtype=torch.float32)
+
+    if include_E_sum:
+        if batch.get("energy_sums") is not None:
+            e_sums = batch["energy_sums"].to(device, dtype=torch.float32)
+            e_sums = torch.log(e_sums + 1e-3)
+            if global_cont is not None:
+                global_cont = torch.cat([global_cont, e_sums], dim=1)
+            else:
+                global_cont = e_sums
+        elif global_cont is not None and global_cont.shape[1] in (10, 13, 16):
+            pass
+
+    if zero_cond_feature is not None and global_cont is not None:
+        for idx in zero_cond_feature:
+            global_cont[:, idx] = 0.0
+
+    return {"X": X, "y": y, "attention_mask": mask, "global_cont": global_cont}
+
+
 def prepare_batch_bert(
     batch,
     device,
@@ -964,6 +1180,7 @@ def _make_dummy_batch(args, device):
         ol_num_feat = getattr(args, "ol_num_feat", 4)
         total_feat_dim = ol_num_feat + (1 if use_pid else 0)
     else:
+        # ViT, CondOnly, and HyperScale all see the full point_cont + optional PID layout.
         total_feat_dim = point_cont_dim + (1 if use_pid else 0)
     X = torch.zeros(B, N, total_feat_dim, device=device, dtype=torch.float32)
     if args.mode == "regression":
@@ -988,6 +1205,8 @@ def _make_dummy_batch(args, device):
         X[:, :, 2:3] = 1.0
     elif getattr(args, "use_bert", None) and use_pid:
         batch["pid"] = torch.zeros(B, N, device=device, dtype=torch.long)
+    elif getattr(args, "use_hyperscale", None) and use_pid:
+        batch["pid"] = torch.zeros(B, N, device=device, dtype=torch.long)
     return batch
 
 
@@ -1009,6 +1228,8 @@ def run_calculate_flops(args):
         model = create_omnilearned_model(args, task)
     elif getattr(args, "use_bert", None):
         model = create_bert_model(args, task)
+    elif getattr(args, "use_hyperscale", None):
+        model = create_hyperscale_model(args, task)
     else:
         model = create_model(args, task)
     model = model.to(device)
@@ -1036,6 +1257,17 @@ def run_calculate_flops(args):
             use_cond=args.use_cond,
             include_E_sum=args.include_E_sum,
             zero_cond_feature=args.zero_cond_feature,
+        )
+    elif getattr(args, "use_hyperscale", None):
+        inputs = prepare_batch_hyperscale(
+            dummy_batch,
+            device,
+            args.use_pid,
+            args.pid_idx,
+            use_cond=args.use_cond,
+            include_E_sum=args.include_E_sum,
+            zero_cond_feature=args.zero_cond_feature,
+            variant=args.use_hyperscale,
         )
     else:
         inputs = prepare_batch(
@@ -1129,8 +1361,12 @@ def run_calculate_flops(args):
 
 
 def forward_model(model, inputs, args):
-    """Run forward pass for ViT, PET2, or BertBaseline; returns logits."""
+    """Run forward pass for ViT, PET2, BertBaseline, or HyperScaleBaseline; returns logits."""
     if getattr(args, "use_bert", None):
+        return model(
+            inputs["X"], inputs["attention_mask"], global_cont=inputs.get("global_cont")
+        )
+    if getattr(args, "use_hyperscale", None):
         return model(
             inputs["X"], inputs["attention_mask"], global_cont=inputs.get("global_cont")
         )
@@ -1304,6 +1540,17 @@ def evaluate(model, dataloader, device, args, class_weights, use_amp=False, step
                 use_cond=args.use_cond,
                 include_E_sum=args.include_E_sum,
                 zero_cond_feature=args.zero_cond_feature,
+            )
+        elif getattr(args, "use_hyperscale", None):
+            inputs = prepare_batch_hyperscale(
+                batch,
+                device,
+                args.use_pid,
+                args.pid_idx,
+                use_cond=args.use_cond,
+                include_E_sum=args.include_E_sum,
+                zero_cond_feature=args.zero_cond_feature,
+                variant=args.use_hyperscale,
             )
         else:
             inputs = prepare_batch(
@@ -1490,6 +1737,15 @@ def train(args):
             raise ValueError("Cannot use --use-bert together with --use-omnilearned")
         if args.cond_only:
             raise ValueError("Cannot use --use-bert together with --cond-only")
+        if getattr(args, "use_hyperscale", None):
+            raise ValueError("Cannot use --use-bert together with --use-hyperscale")
+    elif getattr(args, "use_hyperscale", None):
+        if args.use_omnilearned:
+            raise ValueError(
+                "Cannot use --use-hyperscale together with --use-omnilearned"
+            )
+        if args.cond_only:
+            raise ValueError("Cannot use --use-hyperscale together with --cond-only")
     elif getattr(args, "use_cls_token", False):
         raise ValueError("--use-cls-token requires --use-bert")
     elif getattr(args, "bert_random_init", False):
@@ -1505,6 +1761,8 @@ def train(args):
     # Create dataloaders
     print("Creating dataloaders...")
     task = create_task(args)
+    # HyperScale uses the ViT-style packed layout (point_cont_dim + PID per particle);
+    # only OmniLearned/BERT split add_info out into a separate tensor.
     concat_additional_info = not (
         bool(args.use_omnilearned) or bool(getattr(args, "use_bert", None))
     )
@@ -1565,6 +1823,8 @@ def train(args):
         model = create_omnilearned_model(args, task)
     elif getattr(args, "use_bert", None):
         model = create_bert_model(args, task)
+    elif getattr(args, "use_hyperscale", None):
+        model = create_hyperscale_model(args, task)
     else:
         model = create_model(args, task)
     model = model.to(device)
@@ -1808,6 +2068,17 @@ def train(args):
                     use_cond=args.use_cond,
                     include_E_sum=args.include_E_sum,
                     zero_cond_feature=args.zero_cond_feature,
+                )
+            elif getattr(args, "use_hyperscale", None):
+                inputs = prepare_batch_hyperscale(
+                    batch,
+                    device,
+                    args.use_pid,
+                    args.pid_idx,
+                    use_cond=args.use_cond,
+                    include_E_sum=args.include_E_sum,
+                    zero_cond_feature=args.zero_cond_feature,
+                    variant=args.use_hyperscale,
                 )
             else:
                 inputs = prepare_batch(

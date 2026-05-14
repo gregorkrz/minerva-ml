@@ -205,6 +205,194 @@ class TestCondOnlyMLP:
         assert out.shape == (B, 5)
 
 
+class TestHyperScale:
+    """Vendored HyperScale ParticleViT models (no wrapper)."""
+
+    def test_basic_forward(self):
+        from src.models.hyperscale import ParticleVIT
+
+        m = ParticleVIT(
+            num_features=10,
+            num_classes=1,
+            embed_dim=64,
+            depth=2,
+            num_heads=4,
+            mlp_ratio=8 / 3,
+        )
+        m.eval()
+        mask = torch.ones(B, N, dtype=torch.bool)
+        mask[:, 20:] = False
+        with torch.no_grad():
+            out = m(torch.randn(B, N, 10), attn_mask=mask)
+        assert out.shape == (B, 1)
+
+    def test_embedding_forward(self):
+        from src.models.hyperscale import ParticleVIT_Embedding
+
+        m = ParticleVIT_Embedding(
+            num_features=9,
+            num_classes=5,
+            embed_dim=64,
+            depth=2,
+            num_heads=4,
+            mlp_ratio=8 / 3,
+        )
+        m.eval()
+        X = torch.randn(B, N, 9)
+        X[:, :, 4] = torch.randint(0, 9, (B, N)).float()
+        mask = torch.ones(B, N, dtype=torch.bool)
+        with torch.no_grad():
+            out = m(X, attn_mask=mask)
+        assert out.shape == (B, 5)
+
+    def test_embedding_requires_9_features(self):
+        from src.models.hyperscale import ParticleVIT_Embedding
+
+        with pytest.raises(ValueError, match="expects 9 features"):
+            ParticleVIT_Embedding(
+                num_features=10,
+                num_classes=1,
+                embed_dim=64,
+                depth=1,
+                num_heads=4,
+                mlp_ratio=8 / 3,
+            )
+
+    def test_pool_forward(self):
+        from src.models.hyperscale import ParticleVIT_Pool
+
+        m = ParticleVIT_Pool(
+            num_features=10,
+            num_classes=1,
+            embed_dim=64,
+            depth=2,
+            num_heads=4,
+            mlp_ratio=8 / 3,
+        )
+        m.eval()
+        mask = torch.ones(B, N, dtype=torch.bool)
+        mask[:, 25:] = False
+        with torch.no_grad():
+            out = m(torch.randn(B, N, 10), attn_mask=mask)
+        assert out.shape == (B, 1)
+
+
+class TestHyperScaleBaseline:
+    """Train.py wrapper that adds an optional projected global token."""
+
+    def test_basic_forward(self):
+        from src.scripts.train import HyperScaleBaseline
+
+        model = HyperScaleBaseline(
+            input_dim=10,
+            output_dim=1,
+            embed_dim=64,
+            depth=2,
+            num_heads=4,
+            variant="basic",
+            mlp_ratio=8 / 3,
+        )
+        model.eval()
+        with torch.no_grad():
+            out = model(torch.randn(B, N, 10), torch.ones(B, N))
+        assert out.shape == (B, 1)
+
+    def test_basic_with_global_token(self):
+        from src.scripts.train import HyperScaleBaseline
+
+        model = HyperScaleBaseline(
+            input_dim=10,
+            output_dim=5,
+            embed_dim=64,
+            depth=2,
+            num_heads=4,
+            variant="basic",
+            mlp_ratio=8 / 3,
+            global_cont_dim=16,
+        )
+        model.eval()
+        with torch.no_grad():
+            out = model(
+                torch.randn(B, N, 10),
+                torch.ones(B, N),
+                global_cont=torch.randn(B, 16),
+            )
+        assert out.shape == (B, 5)
+
+    def test_global_token_requires_cond(self):
+        from src.scripts.train import HyperScaleBaseline
+
+        model = HyperScaleBaseline(
+            input_dim=10,
+            output_dim=1,
+            embed_dim=64,
+            depth=2,
+            num_heads=4,
+            variant="basic",
+            mlp_ratio=8 / 3,
+            global_cont_dim=16,
+        )
+        model.eval()
+        with pytest.raises(ValueError, match="global_cont is missing"):
+            with torch.no_grad():
+                _ = model(torch.randn(B, N, 10), torch.ones(B, N))
+
+    def test_embedding_variant(self):
+        from src.scripts.train import HyperScaleBaseline
+
+        model = HyperScaleBaseline(
+            input_dim=9,
+            output_dim=1,
+            embed_dim=64,
+            depth=2,
+            num_heads=4,
+            variant="embedding",
+            mlp_ratio=8 / 3,
+        )
+        model.eval()
+        X = torch.randn(B, N, 9)
+        X[:, :, 4] = torch.randint(0, 9, (B, N)).float()
+        with torch.no_grad():
+            out = model(X, torch.ones(B, N))
+        assert out.shape == (B, 1)
+
+    def test_pool_variant(self):
+        from src.scripts.train import HyperScaleBaseline
+
+        model = HyperScaleBaseline(
+            input_dim=10,
+            output_dim=3,
+            embed_dim=64,
+            depth=2,
+            num_heads=4,
+            variant="pool",
+            mlp_ratio=8 / 3,
+            global_cont_dim=16,
+        )
+        model.eval()
+        with torch.no_grad():
+            out = model(
+                torch.randn(B, N, 10),
+                torch.ones(B, N),
+                global_cont=torch.randn(B, 16),
+            )
+        assert out.shape == (B, 3)
+
+    def test_unknown_variant_rejected(self):
+        from src.scripts.train import HyperScaleBaseline
+
+        with pytest.raises(ValueError, match="Unknown HyperScale variant"):
+            HyperScaleBaseline(
+                input_dim=10,
+                output_dim=1,
+                embed_dim=64,
+                depth=2,
+                num_heads=4,
+                variant="bogus",
+                mlp_ratio=8 / 3,
+            )
+
+
 class TestBertBaseline:
 
     def test_forward(self):

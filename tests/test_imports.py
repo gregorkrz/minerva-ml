@@ -85,6 +85,17 @@ class TestInternalModules:
 
         assert PET2 is not None
 
+    def test_hyperscale(self):
+        from src.models.hyperscale import (
+            ParticleVIT,
+            ParticleVIT_Embedding,
+            ParticleVIT_Pool,
+        )
+
+        assert ParticleVIT is not None
+        assert ParticleVIT_Embedding is not None
+        assert ParticleVIT_Pool is not None
+
     def test_dataloader(self):
         from src.dataset.dataloader import load_data, Task
 
