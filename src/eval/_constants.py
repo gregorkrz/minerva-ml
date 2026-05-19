@@ -2,7 +2,93 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
+from typing import Any
+
+# Strip trailing data-cap suffix from grouped regression labels, e.g. ``BERT-tiny 6M`` → ``BERT-tiny``.
+_GROUPED_LABEL_CAP_SUFFIX = re.compile(r"\s+\d+(?:\.\d+)?[kKmM]$")
+
+
+def base_model_key_from_plot_label(label: str) -> str:
+    """Base wandb model key from a flat or grouped training label."""
+    return _GROUPED_LABEL_CAP_SUFFIX.sub("", label).strip()
+
+
+def model_key_excluded_from_metric_eval_plots(model_key: str) -> bool:
+    """Exclude Transformer2-DIS and BERT-tiny* (legend: BERT-small*) from standard eval figures."""
+    if model_key == "Transformer2-DIS":
+        return True
+    if model_key.startswith("BERT-tiny"):
+        return True
+    return False
+
+
+def grouped_label_excluded_from_metric_eval_plots(label: str) -> bool:
+    """Same as :func:`model_key_excluded_from_metric_eval_plots` for ``ModelName 6M``-style keys."""
+    return model_key_excluded_from_metric_eval_plots(base_model_key_from_plot_label(label))
+
+
+def model_key_excluded_from_training_curve_flops(model_key: str) -> bool:
+    """Omit DIS from log-FLOPs training curves; BERT-tiny* (legend BERT-small*) included."""
+    return model_key == "Transformer2-DIS"
+
+
+def model_key_excluded_from_training_curve_steps(model_key: str) -> bool:
+    """Only Transformer2-DIS is omitted from log-steps vs validation loss plots."""
+    return model_key == "Transformer2-DIS"
+
+
+def model_key_excluded_from_small_paper_ratio_histogram(model_key: str) -> bool:
+    """Small-paper *E* ratio histograms: no DIS, no BERT-tiny* (legend BERT-small*)."""
+    if model_key == "Transformer2-DIS":
+        return True
+    if model_key.startswith("BERT-tiny"):
+        return True
+    return False
+
+
+def model_key_excluded_from_small_paper_regression_with_bert(model_key: str) -> bool:
+    """Small-paper curves that should list BERT-small*: drop DIS only."""
+    return model_key == "Transformer2-DIS"
+
+
+def filter_classification_results_for_standard_plots(results: dict[str, Any]) -> dict[str, Any]:
+    """Drop models that should not appear on classification metric PDFs."""
+    return {
+        k: v
+        for k, v in results.items()
+        if not model_key_excluded_from_metric_eval_plots(k)
+    }
+
+
+def filter_regression_training_names(
+    training_names: dict[str, dict[str, Any]],
+    *,
+    small_paper: bool = False,
+    small_paper_include_bert: bool = False,
+) -> dict[str, dict[str, Any]]:
+    """Subset ``training_names`` for regression plots.
+
+    * ``small_paper=False`` — standard eval bundle (no DIS, no BERT-tiny*).
+    * ``small_paper=True``, ``small_paper_include_bert=False`` — ratio histograms
+      (no DIS, no BERT-tiny*).
+    * ``small_paper=True``, ``small_paper_include_bert=True`` — compact IQR/MPV
+      style curves (no DIS; BERT-tiny* kept).
+    """
+    if small_paper:
+        pred = (
+            model_key_excluded_from_small_paper_regression_with_bert
+            if small_paper_include_bert
+            else model_key_excluded_from_small_paper_ratio_histogram
+        )
+    else:
+        pred = model_key_excluded_from_metric_eval_plots
+    return {
+        loss: {k: v for k, v in models.items() if not pred(k)}
+        for loss, models in training_names.items()
+    }
+
 
 DEFAULT_CKPT_DIR = Path("/global/cfs/cdirs/m3246/gregork/checkpoints")
 DEFAULT_WANDB_TAG = "Run_2703"
@@ -61,6 +147,7 @@ def plot_model_label(name: str) -> str:
     If a series never appears in a plot, the pickle is missing that model: runs must
     be discoverable for the tag (``get_*_runs_by_model_and_cap``) with ``data_cap=-1``,
     and for training-curve PDFs, wandb history must include non-empty ``eval_loss``.
+    Log-FLOPs and log-steps combined figures include BERT-small*; DIS is omitted.
     """
     if name.startswith("BERT-tiny-rw"):
         return "BERT-small-rw" + name[len("BERT-tiny-rw") :]

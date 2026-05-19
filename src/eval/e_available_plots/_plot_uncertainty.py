@@ -15,11 +15,34 @@ from ._constants import DEFAULT_BASELINE_KEY
 from ._grouped import (
     _SEED_SEP,
     _resolve_color_map,
+    eval_row_key_for_predictions,
     flatten_grouped_training_names,
     load_eval_data_grouped,
 )
 from ._load import _build_event_mask
 from ._plot_rms import plot_rms_iqr
+
+
+def _fill_band_mask(x: np.ndarray, lo: np.ndarray, hi: np.ndarray) -> np.ndarray:
+    """Boolean mask for ``fill_between(..., where=…)``: finite band edges."""
+    return (
+        np.isfinite(x)
+        & np.isfinite(lo)
+        & np.isfinite(hi)
+        & np.isfinite(hi - lo)
+    )
+
+
+def _legend_sorted(ax: plt.Axes, **kwargs: Any) -> None:
+    """Replace axis legend with one alphabetized by label (case-insensitive)."""
+    handles, labels = ax.get_legend_handles_labels()
+    if not labels:
+        return
+    by_label: dict[str, Any] = {}
+    for hdl, lab in zip(handles, labels):
+        by_label[lab] = hdl
+    sorted_labs = sorted(by_label.keys(), key=str.casefold)
+    ax.legend([by_label[k] for k in sorted_labs], sorted_labs, **kwargs)
 
 
 def plot_rms_iqr_with_uncertainty(
@@ -44,6 +67,7 @@ def plot_rms_iqr_with_uncertainty(
     suppress_errors: bool = False,
     text: str = "",
     iqr_only: bool = True,
+    compact_figsize: tuple[float, float] | None = None,
 ) -> plt.Figure | tuple[plt.Figure, dict]:
     """RMS / IQR vs *q3* with ±1 std-dev uncertainty bands across seeds.
 
@@ -61,6 +85,8 @@ def plot_rms_iqr_with_uncertainty(
         bottom = MPV vs $q_3$ (no left RMS panel).  If *False*, use the full 2×2
         layout (RMS, IQR, and duplicated MPV row); the MPV row has no legend
         (paper-style).
+    compact_figsize : optional ``(width, height)`` inches when ``iqr_only`` is *True*;
+        defaults to ``(4.8, 6.2)``.
     Other parameters match :func:`plot_rms_iqr`.  Only a single
     ``dataset_to_plot`` is supported; ``dataset_to_linestyle``,
     ``show_q3_histograms`` and ``return_hist_fig`` are accepted for API
@@ -180,10 +206,11 @@ def plot_rms_iqr_with_uncertainty(
     ax_mpv_panel: plt.Axes | None = None
     if iqr_only:
         # One column: IQR/MPV (top), MPV (bottom); same height ratio as full 2×2 bottom row.
+        _fs = compact_figsize if compact_figsize is not None else (4.8, 6.2)
         fig, axes_col = plt.subplots(
             2,
             1,
-            figsize=(4.8, 6.2),
+            figsize=_fs,
             gridspec_kw={"height_ratios": [2, 1]},
         )
         ax_iqr = axes_col[0]
@@ -258,27 +285,41 @@ def plot_rms_iqr_with_uncertainty(
     print(
         f"E_pred_dict keys for '{dp}': { {l: list(m.keys()) for l, m in E_pred_dict.get(dp, {}).items()} }"
     )
+    # print the length of each key in E_pred_dict for each loss and model
+    for loss in E_pred_dict.get(dp, {}).keys():
+        for model in E_pred_dict.get(dp, {}).get(loss, {}).keys():
+            print(f"  {loss}/{model}: {len(E_pred_dict.get(dp, {}).get(loss, {}).get(model, {}))}")
     for loss in training_names_grouped:
         for config_label, runs in training_names_grouped[loss].items():
-            seed_rms = np.empty((len(runs), n_plot_bins))
-            seed_iqr = np.empty((len(runs), n_plot_bins))
-            seed_mpv = np.empty((len(runs), n_plot_bins))
+            # NaN so missing seeds (``continue`` when a flat_key is absent) never leave
+            # uninitialized ``np.empty`` rows that corrupt aggregates across seeds.
+            seed_rms = np.full((len(runs), n_plot_bins), np.nan, dtype=float)
+            seed_iqr = np.full((len(runs), n_plot_bins), np.nan, dtype=float)
+            seed_mpv = np.full((len(runs), n_plot_bins), np.nan, dtype=float)
+            models_sub = E_pred_dict.get(dp, {}).get(loss, {})
             for s in range(len(runs)):
                 flat_key = f"{config_label}{_SEED_SEP}{s}"
-                if flat_key not in E_pred_dict.get(dp, {}).get(loss, {}):
+                row_key = eval_row_key_for_predictions(models_sub, config_label, s)
+                if row_key is None:
                     print(
-                        f"  WARNING: '{flat_key}' not found in E_pred_dict['{dp}']['{loss}']"
+                        f"  WARNING: no E_pred row for '{flat_key}' or bare "
+                        f"{config_label!r} (seed {s}) in E_pred_dict['{dp}']['{loss}']; "
+                        f"run={runs[s]!r}"
                     )
+                    if verbose:
+                        print(
+                            f"    [debug] available keys: {sorted(models_sub.keys())!r}"
+                        )
                     continue
                 # Use per-run truth (same NPZ as predictions). Using global mc_E[dp] here
                 # caused IndexError when another run had a different #events than the first
                 # model used to build mc_E.
-                true_vec = E_true_dict[dp][loss][flat_key]
-                pred_vec = E_pred_dict[dp][loss][flat_key]
+                true_vec = E_true_dict[dp][loss][row_key]
+                pred_vec = E_pred_dict[dp][loss][row_key]
                 n_ref = len(bin_masks[0])
                 if len(true_vec) != n_ref or len(pred_vec) != n_ref:
                     raise ValueError(
-                        f"Event count mismatch for {dp}/{loss}/{flat_key}: "
+                        f"Event count mismatch for {dp}/{loss}/{row_key}: "
                         f"len(truth)={len(true_vec)}, len(pred)={len(pred_vec)}, "
                         f"but q3 / bin masks length is {n_ref} (from baseline split). "
                         f"Re-evaluate all models on the same playlist or use runs trained "
@@ -322,12 +363,21 @@ def plot_rms_iqr_with_uncertainty(
                         seed_rms[s, i] = float("nan")
                         seed_mpv[s, i] = float("nan")
 
-            mean_rms = seed_rms.mean(axis=0)
-            std_rms = seed_rms.std(axis=0)
-            mean_iqr = seed_iqr.mean(axis=0)
-            std_iqr = seed_iqr.std(axis=0)
-            mean_mpv = seed_mpv.mean(axis=0)
-            std_mpv = seed_mpv.std(axis=0)
+            mean_rms = np.nanmean(seed_rms, axis=0)
+            mean_iqr = np.nanmean(seed_iqr, axis=0)
+            mean_mpv = np.nanmean(seed_mpv, axis=0)
+            n_fin_rms = np.sum(np.isfinite(seed_rms), axis=0)
+            n_fin_iqr = np.sum(np.isfinite(seed_iqr), axis=0)
+            n_fin_mpv = np.sum(np.isfinite(seed_mpv), axis=0)
+            std_rms_0 = np.nanstd(seed_rms, axis=0, ddof=0)
+            std_rms_1 = np.nanstd(seed_rms, axis=0, ddof=1)
+            std_iqr_0 = np.nanstd(seed_iqr, axis=0, ddof=0)
+            std_iqr_1 = np.nanstd(seed_iqr, axis=0, ddof=1)
+            std_mpv_0 = np.nanstd(seed_mpv, axis=0, ddof=0)
+            std_mpv_1 = np.nanstd(seed_mpv, axis=0, ddof=1)
+            std_rms = np.where(n_fin_rms >= 2, std_rms_1, std_rms_0)
+            std_iqr = np.where(n_fin_iqr >= 2, std_iqr_1, std_iqr_0)
+            std_mpv = np.where(n_fin_mpv >= 2, std_mpv_1, std_mpv_0)
 
             print(f"  {config_label} ({loss}):")
             print(f"    RMS = {mean_rms.tolist()}")
@@ -349,53 +399,119 @@ def plot_rms_iqr_with_uncertainty(
             color = color_map[config_label]
             lbl = plot_model_label(config_label)
 
+            # Band limits for IQR/MPV and RMS/MPV must use the same errstate as the
+            # ratios: ``std / mean_mpv`` otherwise NaNs/Infs drop the whole fill in
+            # ``fill_between``.  ``where=`` + ``interpolate=True`` keeps segments where
+            # only some q3 bins are finite.
             with np.errstate(divide="ignore", invalid="ignore"):
-                rms_over_mpv = mean_rms / mean_mpv
-                iqr_over_mpv = mean_iqr / mean_mpv
+                inv_mpv = 1.0 / mean_mpv
+                rms_over_mpv = mean_rms * inv_mpv
+                iqr_over_mpv = mean_iqr * inv_mpv
+                rms_lo = rms_over_mpv - std_rms * inv_mpv
+                rms_hi = rms_over_mpv + std_rms * inv_mpv
+                iqr_lo = iqr_over_mpv - std_iqr * inv_mpv
+                iqr_hi = iqr_over_mpv + std_iqr * inv_mpv
+                mpv_lo = mean_mpv - std_mpv
+                mpv_hi = mean_mpv + std_mpv
 
             if not iqr_only:
-                ax_rms.plot(q3_bin_mids, rms_over_mpv, ".--", color=color, label=lbl)
+                ax_rms.plot(
+                    q3_bin_mids,
+                    rms_over_mpv,
+                    ".--",
+                    color=color,
+                    label=lbl,
+                    zorder=3,
+                )
                 ax_rms.fill_between(
                     q3_bin_mids,
-                    rms_over_mpv - (std_rms / mean_mpv),
-                    rms_over_mpv + (std_rms / mean_mpv),
+                    rms_lo,
+                    rms_hi,
+                    where=_fill_band_mask(q3_bin_mids, rms_lo, rms_hi),
+                    interpolate=True,
                     alpha=0.25,
                     color=color,
+                    linewidth=0,
+                    zorder=2,
                 )
-            ax_iqr.plot(q3_bin_mids, iqr_over_mpv, ".--", color=color, label=lbl)
+            ax_iqr.plot(
+                q3_bin_mids,
+                iqr_over_mpv,
+                ".--",
+                color=color,
+                label=lbl,
+                zorder=3,
+            )
             ax_iqr.fill_between(
                 q3_bin_mids,
-                iqr_over_mpv - (std_iqr / mean_mpv),
-                iqr_over_mpv + (std_iqr / mean_mpv),
+                iqr_lo,
+                iqr_hi,
+                where=_fill_band_mask(q3_bin_mids, iqr_lo, iqr_hi),
+                interpolate=True,
                 alpha=0.25,
                 color=color,
+                linewidth=0,
+                zorder=2,
             )
 
             if iqr_only:
-                ax_mpv_panel.plot(q3_bin_mids, mean_mpv, ".--", color=color, label=lbl)
+                ax_mpv_panel.plot(
+                    q3_bin_mids,
+                    mean_mpv,
+                    ".--",
+                    color=color,
+                    label=lbl,
+                    zorder=3,
+                )
                 ax_mpv_panel.fill_between(
                     q3_bin_mids,
-                    mean_mpv - std_mpv,
-                    mean_mpv + std_mpv,
+                    mpv_lo,
+                    mpv_hi,
+                    where=_fill_band_mask(q3_bin_mids, mpv_lo, mpv_hi),
+                    interpolate=True,
                     alpha=0.25,
                     color=color,
+                    linewidth=0,
+                    zorder=2,
                 )
             else:
-                ax_bottom[0].plot(q3_bin_mids, mean_mpv, ".--", color=color, label=lbl)
+                ax_bottom[0].plot(
+                    q3_bin_mids,
+                    mean_mpv,
+                    ".--",
+                    color=color,
+                    label=lbl,
+                    zorder=3,
+                )
                 ax_bottom[0].fill_between(
                     q3_bin_mids,
-                    mean_mpv - std_mpv,
-                    mean_mpv + std_mpv,
+                    mpv_lo,
+                    mpv_hi,
+                    where=_fill_band_mask(q3_bin_mids, mpv_lo, mpv_hi),
+                    interpolate=True,
                     alpha=0.25,
                     color=color,
+                    linewidth=0,
+                    zorder=2,
                 )
-                ax_bottom[1].plot(q3_bin_mids, mean_mpv, ".--", color=color, label=lbl)
+                ax_bottom[1].plot(
+                    q3_bin_mids,
+                    mean_mpv,
+                    ".--",
+                    color=color,
+                    label=lbl,
+                    zorder=3,
+                )
                 ax_bottom[1].fill_between(
                     q3_bin_mids,
-                    mean_mpv - std_mpv,
-                    mean_mpv + std_mpv,
+                    mpv_lo,
+                    mpv_hi,
+                    where=_fill_band_mask(q3_bin_mids, mpv_lo, mpv_hi),
+                    interpolate=True,
                     alpha=0.25,
                     color=color,
+                    linewidth=0,
+                    zorder=2,
                 )
 
     # Baseline curves for normalised metrics and MPV
@@ -433,10 +549,10 @@ def plot_rms_iqr_with_uncertainty(
         legend_kwargs["title_fontsize"] = 10
 
     if iqr_only:
-        ax_iqr.legend(**legend_kwargs)
+        _legend_sorted(ax_iqr, **legend_kwargs)
     else:
-        ax_rms.legend(**legend_kwargs)
-        ax_iqr.legend(**legend_kwargs)
+        _legend_sorted(ax_rms, **legend_kwargs)
+        _legend_sorted(ax_iqr, **legend_kwargs)
 
     ax_iqr.set(
         xlabel="MC truth $q_3$ [GeV]",

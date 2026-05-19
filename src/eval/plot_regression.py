@@ -34,6 +34,8 @@ from src.eval._constants import (
     DEFAULT_PLOTS_DIR,
     DEFAULT_WANDB_TAG,
     REGRESSION_PICKLE_STEM,
+    filter_regression_training_names,
+    model_key_excluded_from_metric_eval_plots,
     plot_model_label,
     repo_output_path,
 )
@@ -96,6 +98,15 @@ def main(argv: list[str] | None = None) -> None:
     suppress = bool(reg["suppress_errors"])
     training_names_full_no_rw = reg["training_names_full_no_rw"]
     training_names_full_first_only = reg["training_names_full_first_only"]
+    training_names_main = filter_regression_training_names(
+        training_names_full_no_rw, small_paper=False
+    )
+    training_names_first_main = filter_regression_training_names(
+        training_names_full_first_only, small_paper=False
+    )
+    training_names_small_paper_hist = filter_regression_training_names(
+        training_names_full_first_only, small_paper=True
+    )
     baseline_run = reg["baseline_run"]
     clrs = reg["clrs_dict_full"]
     runs_by_model_cap = reg["runs_by_model_cap"]
@@ -106,7 +117,7 @@ def main(argv: list[str] | None = None) -> None:
 
     fig_i = plot_rms_iqr_with_uncertainty(
         CKPT_DIR=CKPT_DIR,
-        training_names=training_names_full_no_rw,
+        training_names=training_names_main,
         playlists=["1A"],
         dataset_to_plot="1A",
         baseline_run=baseline_run,
@@ -130,7 +141,7 @@ def main(argv: list[str] | None = None) -> None:
     for pl in ratio_playlists:
         fig_q = plot_ratio_histogram_q3_two_panels(
             CKPT_DIR=CKPT_DIR,
-            training_names=training_names_full_first_only,
+            training_names=training_names_small_paper_hist,
             playlists=[pl],
             dataset_to_plot=pl,
             baseline_run=baseline_run,
@@ -146,7 +157,7 @@ def main(argv: list[str] | None = None) -> None:
 
     fig_i = plot_rms_iqr_with_uncertainty(
         CKPT_DIR=CKPT_DIR,
-        training_names=training_names_full_no_rw,
+        training_names=training_names_main,
         playlists=["1A"],
         dataset_to_plot="1A",
         baseline_run=baseline_run,
@@ -167,7 +178,7 @@ def main(argv: list[str] | None = None) -> None:
 
     fig_i = plot_rms_iqr_with_uncertainty(
         CKPT_DIR=CKPT_DIR,
-        training_names=training_names_full_no_rw,
+        training_names=training_names_main,
         playlists=["1B"],
         dataset_to_plot="1B",
         baseline_run=baseline_run,
@@ -184,7 +195,7 @@ def main(argv: list[str] | None = None) -> None:
 
     fig_dbg = plot_example_E_pred_true(
         CKPT_DIR=CKPT_DIR,
-        training_names=training_names_full_no_rw,
+        training_names=training_names_main,
         playlists=["1A"],
         dataset_to_plot="1A",
         baseline_run=baseline_run,
@@ -203,7 +214,7 @@ def main(argv: list[str] | None = None) -> None:
 
     fig_1A, vals_1A = plot_rms_iqr_with_uncertainty(
         CKPT_DIR=CKPT_DIR,
-        training_names=training_names_full_no_rw,
+        training_names=training_names_main,
         playlists=["1A"],
         dataset_to_plot="1A",
         baseline_run=baseline_run,
@@ -215,7 +226,7 @@ def main(argv: list[str] | None = None) -> None:
 
     fig_1B, vals_1B = plot_rms_iqr_with_uncertainty(
         CKPT_DIR=CKPT_DIR,
-        training_names=training_names_full_no_rw,
+        training_names=training_names_main,
         playlists=["1B"],
         dataset_to_plot="1B",
         baseline_run=baseline_run,
@@ -272,7 +283,7 @@ def main(argv: list[str] | None = None) -> None:
 
     fig_ii = plot_residuals_by_energy(
         CKPT_DIR=CKPT_DIR,
-        training_names=training_names_full_first_only,
+        training_names=training_names_first_main,
         playlists=["1A"],
         dataset_to_plot="1A",
         baseline_run=baseline_run,
@@ -285,7 +296,7 @@ def main(argv: list[str] | None = None) -> None:
 
     fig_ii_q3 = plot_residuals_by_q3(
         CKPT_DIR=CKPT_DIR,
-        training_names=training_names_full_first_only,
+        training_names=training_names_first_main,
         playlists=["1A"],
         dataset_to_plot="1A",
         baseline_run=baseline_run,
@@ -303,7 +314,7 @@ def main(argv: list[str] | None = None) -> None:
 
     fig_ii_q3 = plot_residuals_by_q3(
         CKPT_DIR=CKPT_DIR,
-        training_names=training_names_full_first_only,
+        training_names=training_names_first_main,
         playlists=["1A"],
         dataset_to_plot="1A",
         baseline_run=baseline_run,
@@ -321,6 +332,8 @@ def main(argv: list[str] | None = None) -> None:
 
     training_names_grouped = {"Log1p": {}}
     for model, caps in runs_by_model_cap.items():
+        if model_key_excluded_from_metric_eval_plots(model):
+            continue
         for cap, run_list in sorted(
             caps.items(), key=lambda x: (x[0] == -1, -x[0] if x[0] > 0 else 0)
         ):

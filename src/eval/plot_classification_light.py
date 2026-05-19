@@ -31,6 +31,7 @@ from src.eval._constants import (
     DEFAULT_OUT_DIR,
     DEFAULT_PLOTS_DIR,
     DEFAULT_WANDB_TAG,
+    filter_classification_results_for_standard_plots,
     repo_output_path,
 )
 from src.eval.classification_plots import (
@@ -90,7 +91,7 @@ def main(argv: list[str] | None = None) -> None:
     with open(pkl, "rb") as f:
         clf = pickle.load(f)
 
-    results = clf["results"]
+    results = filter_classification_results_for_standard_plots(clf["results"])
     data_by_playlist = clf["data_by_playlist"]
     data_w_by_playlist = clf.get("data_w_by_playlist")
     clrs = clf["clrs_dict_full"]

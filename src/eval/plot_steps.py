@@ -6,10 +6,14 @@ Pickles default to ``<repo>/<--out-dir>/``; PDFs default to
 
 By default writes **one row of two panels** (classification | regression) with a
 **single shared legend** under ``steps_combined/`` — suitable for side-by-side
-paper figures without duplicating the legend.
+paper figures without duplicating the legend. BERT-tiny* (legend BERT-small*)
+appears on both FLOPs and steps panels; Transformer2-DIS is omitted.
 
 Use ``--separate-panels`` to also emit the legacy per-task PDFs under
 ``classification/steps/`` and ``regression/steps/``.
+
+:func:`write_classification_val_loss_log_flops_steps_pdf` is used by
+``plot_small_paper.py`` for the classification-only small-paper PDF.
 """
 
 from __future__ import annotations
@@ -33,6 +37,8 @@ from src.eval._constants import (
     DEFAULT_PLOTS_DIR,
     DEFAULT_WANDB_TAG,
     REGRESSION_PICKLE_STEM,
+    model_key_excluded_from_training_curve_flops,
+    model_key_excluded_from_training_curve_steps,
     plot_model_label,
     repo_output_path,
 )
@@ -109,6 +115,8 @@ def _draw_flops_curves(
     panel_title: str,
 ) -> None:
     for model, series_list in _runs_per_model(loss_histories, flops_per_step).items():
+        if model_key_excluded_from_training_curve_flops(model):
+            continue
         color = colors.get(model, "tab:gray")
         flops = flops_per_step[model]
         all_steps, all_losses = [], []
@@ -192,6 +200,8 @@ def _draw_steps_curves(
     olm_step_cap: int | None,
 ) -> None:
     for model, series_list in _runs_per_model(loss_histories, flops_per_step).items():
+        if model_key_excluded_from_training_curve_steps(model):
+            continue
         color = colors.get(model, "tab:gray")
         all_steps, all_losses = [], []
         for st, lo in series_list:
@@ -274,6 +284,43 @@ def _shared_figure_legend(fig: plt.Figure, axes: tuple[plt.Axes, ...]) -> None:
             bbox_to_anchor=(0.5, -0.18),
             **legend_kw,
         )
+
+
+def write_classification_val_loss_log_flops_steps_pdf(
+    loss_histories: dict,
+    flops_per_step: dict,
+    colors: dict[str, str],
+    ylim: tuple[float, float],
+    out_pdf: Path,
+    *,
+    olm_step_cap: int = 25_000,
+) -> None:
+    """One row: log10(FLOPs) vs val loss | log10(steps) vs val loss (classification)."""
+    fig, (ax0, ax1) = plt.subplots(
+        1,
+        2,
+        figsize=(11.5, 4.6),
+        constrained_layout=True,
+        sharey=False,
+    )
+    _draw_flops_curves(ax0, loss_histories, flops_per_step, colors, ylim, "Classification")
+    _draw_steps_curves(
+        ax1,
+        loss_histories,
+        flops_per_step,
+        colors,
+        ylim,
+        "Classification",
+        olm_step_cap,
+    )
+    ax1.set_ylabel("")
+    for ax in (ax0, ax1):
+        ax.grid(True)
+    _shared_figure_legend(fig, (ax0, ax1))
+    out_pdf.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_pdf, bbox_inches="tight")
+    plt.close(fig)
+    print("Saved:", out_pdf)
 
 
 def _plot_combined_flops_row(
@@ -379,9 +426,7 @@ def main(argv: list[str] | None = None) -> None:
     colors_c = clf["clrs_dict_full"]
 
     with open(reg_p, "rb") as f:
-        print("- reading regression pickle from", reg_p)
         reg = pickle.load(f)
-        print("- keys in regression pickle:", reg["training_names_full"]["Log1p"].keys())
     lh_r = reg["loss_histories"]
     flops_r = reg["flops_per_step"]
     colors_r = reg["clrs_dict_full"]
