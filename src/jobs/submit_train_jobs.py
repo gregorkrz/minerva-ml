@@ -4,6 +4,70 @@ import os
 from datetime import datetime as dt
 
 
+# ---------------------------------------------------------------------------
+# HyperScale presets (PLACEHOLDERS — fill in before submitting).
+#
+# - HYPERSCALE_HYPERPARAMS: pick d_model / depth / n_heads / mlp_ratio per size.
+#   These map to --d_model / --depth / --n_heads / --hs-mlp-ratio in train.py.
+# - HYPERSCALE_PRETRAINED_PATHS: absolute paths to pretrained checkpoints used
+#   by the non-"rw" variants. The "-rw" variants ignore this dict and train
+#   from random init.
+#
+# NOTE: train.py does NOT yet ship a --hs-pretrained flag (the existing
+# --use-pretrained is OmniLearned-specific). The generated command below
+# emits --hs-pretrained <path> as a placeholder; either add an analogous flag
+# to train.py that loads weights only (no optimizer state) or swap it for
+# --resume <path> if loading optimizer state is acceptable.
+# ---------------------------------------------------------------------------
+HYPERSCALE_HYPERPARAMS = {
+    "small": {
+        "d_model": 256,   # TODO
+        "depth": 6,       # TODO
+        "n_heads": 8,     # TODO
+        "mlp_ratio": 8 / 3,  # TODO
+    },
+    "xsmall": {
+        "d_model": 128,   # TODO
+        "depth": 4,       # TODO
+        "n_heads": 4,     # TODO
+        "mlp_ratio": 8 / 3,  # TODO
+    },
+}
+
+HYPERSCALE_PRETRAINED_PATHS = {
+    "small": "PLACEHOLDER_HYPERSCALE_SMALL_CKPT",    # TODO
+    "xsmall": "PLACEHOLDER_HYPERSCALE_XSMALL_CKPT",  # TODO
+}
+
+HYPERSCALE_VARIANTS = ("basic", "embedding", "pool")
+
+
+def _parse_hyperscale_tag(model):
+    """Parse 'HyperScale-{size}[-rw]-{variant}' into (size, random_init, variant)."""
+    parts = model.split("-")
+    # parts[0] = "HyperScale", parts[1] = size, then optionally "rw", then variant.
+    if len(parts) < 3 or parts[0] != "HyperScale":
+        raise ValueError(f"Invalid HyperScale model tag: {model!r}")
+    size = parts[1]
+    if size not in HYPERSCALE_HYPERPARAMS:
+        raise ValueError(
+            f"Unknown HyperScale size {size!r}; "
+            f"expected one of {tuple(HYPERSCALE_HYPERPARAMS)}"
+        )
+    if parts[2] == "rw":
+        random_init = True
+        variant = "-".join(parts[3:])
+    else:
+        random_init = False
+        variant = "-".join(parts[2:])
+    if variant not in HYPERSCALE_VARIANTS:
+        raise ValueError(
+            f"Unknown HyperScale variant {variant!r}; "
+            f"expected one of {HYPERSCALE_VARIANTS}"
+        )
+    return size, random_init, variant
+
+
 def get_env_vars():
     """Build `export` lines from `.env` for SLURM, excluding WANDB_* (no API key in job files).
 
@@ -44,7 +108,10 @@ def generate_cmd(
         base = f"python -m src.scripts.train --resume {continue_from} -name {resume_run_name} --resume-run-id {resume_run_id} --max_steps 1000000"
         return base.format(continue_from=continue_from)
     base = "python -m src.scripts.train -bs {bs} --mode {task} {detailed_task} -name {name} --d_model {model_dim} --depth {model_depth} --n_heads {model_n_heads} --dropout {model_dropout} --attn_dropout {model_attn_dropout} {cap} --seed {seed} -seed-event-sampler {seed}  --max_steps {max_steps} --grad_accum_steps {grad_accum_steps} {extra} --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260326 "
-    # Model options: ... "OLS", "OLS_int", "OLS_RW", "OLM"/"OLM_FB", "BERT-tiny", "BERT-tiny-rw" (BERT tiny arch, random encoder weights)
+    # Model options: ... "OLS", "OLS_int", "OLS_RW", "OLM"/"OLM_FB",
+    # "BERT-tiny", "BERT-tiny-rw" (BERT tiny arch, random encoder weights),
+    # "HyperScale-{small|xsmall}[-rw]-{basic|embedding|pool}" (HyperScale ParticleViT;
+    # "-rw" trains from random init, otherwise loads HYPERSCALE_PRETRAINED_PATHS[size]).
     # Seed both the event sampler and the whole training with seed
     detailed_task = "-E-available-no-muon" if task == "regression" else "-npi2"
     model_dim = 128
@@ -74,6 +141,28 @@ def generate_cmd(
     elif model == "BERT-tiny-rw":
         name = f"Run_1703_BERT_tiny_rw_{task}_{data_cap}_seed{seed}"
         extra = " --use-bert tiny-rw --zero-cond-feature 2 "
+    elif model.startswith("HyperScale-"):
+        hs_size, hs_random_init, hs_variant = _parse_hyperscale_tag(model)
+        hp = HYPERSCALE_HYPERPARAMS[hs_size]
+        model_dim = hp["d_model"]
+        model_depth = hp["depth"]
+        model_n_heads = hp["n_heads"]
+        rw_tag = "_rw" if hs_random_init else ""
+        name = (
+            f"Run_1703_HyperScale_{hs_size}{rw_tag}_{hs_variant}"
+            f"_{task}_{data_cap}_seed{seed}"
+        )
+        extra = (
+            f" --use-hyperscale {hs_variant} "
+            f"--hs-mlp-ratio {hp['mlp_ratio']} "
+            "--zero-cond-feature 2 "
+        )
+        if not hs_random_init:
+            # PLACEHOLDER: --hs-pretrained is not implemented in train.py yet.
+            # Either add a flag analogous to --use-pretrained for OmniLearned
+            # (load weights only) or swap for --resume <ckpt> if loading
+            # optimizer state is fine.
+            extra += f" --hs-pretrained {HYPERSCALE_PRETRAINED_PATHS[hs_size]} "
     elif model in (
         "Transformer1",
         "Transformer1NR",
@@ -175,6 +264,44 @@ def get_cmds_and_slurm_times():
             )
             cmds.append(cmd)
             slurm_times.append(walltime_bert)
+    return cmds, slurm_times
+
+
+def get_cmds_and_slurm_times_hyperscale():
+    """HyperScale sweep: {small, xsmall} × {pretrained, rw} × {basic, embedding, pool}
+    × 4 seeds × {regression, classifier} = 96 jobs.
+
+    Hyperparameters and pretrained checkpoint paths come from the placeholder
+    tables at the top of this file (HYPERSCALE_HYPERPARAMS,
+    HYPERSCALE_PRETRAINED_PATHS) — fill those in before submitting.
+    """
+    cmds = []
+    slurm_times = []
+    seeds = [55, 56, 57, 58]
+    tasks = ["regression", "classifier"]
+    sizes = ["small", "xsmall"]
+    variants = list(HYPERSCALE_VARIANTS)
+    # TODO: tune per-config after the first job finishes (xsmall is cheaper than small;
+    # pretrained vs rw also typically have different convergence budgets).
+    walltime = "12:00:00"
+    for size in sizes:
+        for variant in variants:
+            for use_rw in (False, True):
+                rw_part = "rw-" if use_rw else ""
+                model_tag = f"HyperScale-{size}-{rw_part}{variant}"
+                for seed in seeds:
+                    for task in tasks:
+                        cmd = generate_cmd(
+                            data_cap=-1,
+                            seed=seed,
+                            task=task,
+                            model=model_tag,
+                            max_steps=500000,
+                            bs=2048,
+                            grad_accum_steps=1,
+                        )
+                        cmds.append(cmd)
+                        slurm_times.append(walltime)
     return cmds, slurm_times
 
 
@@ -378,6 +505,12 @@ def get_cmds_and_slurm_times_continue():
 CONTAINER_IMAGE = "docker.io/gkrz/minerva_ml:v1"
 
 if __name__ == "__main__":
+    # To submit the HyperScale sweep instead (96 jobs across small/xsmall ×
+    # pretrained/rw × basic/embedding/pool × 4 seeds × {regression, classifier}),
+    # swap the next line for:
+    #     cmds, slurm_times = get_cmds_and_slurm_times_hyperscale()
+    # and first fill in HYPERSCALE_HYPERPARAMS / HYPERSCALE_PRETRAINED_PATHS at
+    # the top of this file.
     cmds, slurm_times = get_cmds_and_slurm_times()
     for i, cmd in enumerate(cmds):
         job_name = f"run_{i}_{dt.now().strftime('%Y%m%d_%H%M%S')}"
