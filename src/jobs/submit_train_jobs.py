@@ -268,19 +268,20 @@ def get_cmds_and_slurm_times():
 
 
 def get_cmds_and_slurm_times_hyperscale():
-    """HyperScale sweep: small × {pretrained, rw} × {basic, embedding, pool}
-    × 4 seeds × {regression, classifier} = 48 jobs.
+    """HyperScale sweep: small × {pretrained, rw} × embedding × 4 seeds ×
+    {regression, classifier} = 16 jobs.
 
-    Hyperparameters and pretrained checkpoint paths come from the placeholder
-    tables at the top of this file (HYPERSCALE_HYPERPARAMS,
-    HYPERSCALE_PRETRAINED_PATHS) — fill those in before submitting.
+    Restricted to the ``embedding`` variant because the pretrained checkpoint
+    at HYPERSCALE_PRETRAINED_PATHS["small"] is a ParticleVIT_Embedding run —
+    the basic / pool variants would only partially transfer (token_embed shape
+    mismatch). Add them back to ``variants`` once matching checkpoints exist.
     """
     cmds = []
     slurm_times = []
     seeds = [55, 56, 57, 58]
     tasks = ["regression", "classifier"]
     sizes = ["small"]
-    variants = list(HYPERSCALE_VARIANTS)
+    variants = ["embedding"]
     # TODO: tune per-config after the first job finishes (pretrained vs rw
     # typically have different convergence budgets).
     walltime = "12:00:00"
@@ -505,12 +506,10 @@ def get_cmds_and_slurm_times_continue():
 CONTAINER_IMAGE = "docker.io/gkrz/minerva_ml:v1"
 
 if __name__ == "__main__":
-    # To submit the HyperScale sweep instead (48 jobs across small ×
-    # pretrained/rw × basic/embedding/pool × 4 seeds × {regression, classifier}),
+    # To submit the HyperScale sweep instead (16 jobs across small ×
+    # pretrained/rw × embedding × 4 seeds × {regression, classifier}),
     # swap the next line for:
     #     cmds, slurm_times = get_cmds_and_slurm_times_hyperscale()
-    # and first fill in HYPERSCALE_HYPERPARAMS / HYPERSCALE_PRETRAINED_PATHS at
-    # the top of this file.
     cmds, slurm_times = get_cmds_and_slurm_times()
     for i, cmd in enumerate(cmds):
         job_name = f"run_{i}_{dt.now().strftime('%Y%m%d_%H%M%S')}"
