@@ -115,7 +115,61 @@ from src.models.hyperscale import (
     init_olmo_weights as _hs_init_olmo_weights,
     _zero_masked_tokens as _hs_zero_masked_tokens,
     load_pretrained_hyperscale,
+    peek_hyperscale_checkpoint_args,
 )
+
+# Architecture knobs that --hs-pretrained will auto-fill from a saved checkpoint
+# when the user hasn't passed --use-hyperscale on the CLI. Keys are the argparse
+# attribute names on `args`.
+_HYPERSCALE_AUTOFILL_KEYS = (
+    "use_hyperscale",
+    "d_model",
+    "depth",
+    "n_heads",
+    "hs_mlp_ratio",
+)
+
+
+def _maybe_autofill_hyperscale_args(args):
+    """If --hs-pretrained is given without --use-hyperscale, restore the
+    architecture knobs (variant, d_model, depth, n_heads, hs_mlp_ratio) from
+    the checkpoint's saved ``args`` dict. CLI takes precedence: if the user
+    explicitly passed --use-hyperscale, we don't touch anything.
+
+    Returns True if any knob was overridden, False otherwise.
+    """
+    if not getattr(args, "hs_pretrained", None):
+        return False
+    if getattr(args, "use_hyperscale", None):
+        # User specified the variant on the CLI; trust their flags as-is.
+        return False
+    saved = peek_hyperscale_checkpoint_args(args.hs_pretrained)
+    if saved is None:
+        raise ValueError(
+            "--hs-pretrained was given without --use-hyperscale, but the "
+            f"checkpoint at {args.hs_pretrained!r} has no saved args to "
+            "auto-fill arch from. Pass --use-hyperscale {basic,embedding,pool} "
+            "(and --d_model/--depth/--n_heads/--hs-mlp-ratio to match) "
+            "explicitly."
+        )
+    if not saved.get("use_hyperscale"):
+        raise ValueError(
+            f"Checkpoint at {args.hs_pretrained!r} was not produced by a "
+            "HyperScale run (saved args have no 'use_hyperscale'). Either "
+            "pass --use-hyperscale explicitly, or point --hs-pretrained at a "
+            "HyperScale checkpoint."
+        )
+    overrides = {}
+    for key in _HYPERSCALE_AUTOFILL_KEYS:
+        if key in saved:
+            overrides[key] = saved[key]
+            setattr(args, key, saved[key])
+    print(
+        "Auto-filled HyperScale architecture from checkpoint "
+        f"({args.hs_pretrained}): "
+        + ", ".join(f"{k}={v}" for k, v in overrides.items())
+    )
+    return True
 
 HYPERSCALE_VARIANTS = ("basic", "embedding", "pool")
 
@@ -1232,6 +1286,7 @@ def run_calculate_flops(args):
     args.use_cond = not args.no_use_cond
     if args.cond_only:
         args.use_cond = True
+    _maybe_autofill_hyperscale_args(args)
     device = torch.device("cpu")
     task = create_task(args)
     if args.use_omnilearned:
@@ -1742,6 +1797,7 @@ def train(args):
     args.use_cond = not args.no_use_cond
     if args.cond_only:
         args.use_cond = True
+    _maybe_autofill_hyperscale_args(args)
     if getattr(args, "use_bert", None):
         if args.use_omnilearned:
             raise ValueError("Cannot use --use-bert together with --use-omnilearned")

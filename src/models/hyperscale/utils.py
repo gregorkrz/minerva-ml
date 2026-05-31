@@ -87,6 +87,82 @@ def _filter_compatible(checkpoint_state, model_state, skip_prefixes=("head.",), 
     return filtered
 
 
+# Upstream HyperScale ``train_config.yaml`` writes the model class under
+# ``model_type``. Map each to our ``--use-hyperscale`` variant tag.
+_HS_MODEL_TYPE_TO_VARIANT = {
+    "ParticleVIT": "basic",
+    "ParticleVIT_Embedding": "embedding",
+    "ParticleVIT_Pool": "pool",
+}
+
+
+def _parse_hyperscale_train_config_yaml(yaml_path):
+    """Parse upstream HyperScale's ``train_config.yaml`` into our args dict.
+
+    The upstream file (gregorkrz/HyperScale ``train.py`` dump) uses
+    ``model_params.{embed_dim, depth, num_heads, mlp_ratio}`` plus a
+    ``model_type`` selector. Returns a dict keyed by the argparse attr names
+    used in ``src.scripts.train`` so it can be consumed the same way as our
+    own ``ckpt["args"]``.
+    """
+    try:
+        import yaml
+    except ImportError as e:
+        raise ImportError(
+            "Parsing upstream HyperScale train_config.yaml requires pyyaml "
+            "(`pip install pyyaml`)."
+        ) from e
+    with open(yaml_path, "r") as f:
+        cfg = yaml.safe_load(f) or {}
+    model_type = cfg.get("model_type")
+    variant = _HS_MODEL_TYPE_TO_VARIANT.get(model_type)
+    if variant is None:
+        raise ValueError(
+            f"Unrecognized HyperScale model_type {model_type!r} in {yaml_path}; "
+            f"expected one of {tuple(_HS_MODEL_TYPE_TO_VARIANT)}"
+        )
+    mp = cfg.get("model_params") or {}
+    out = {"use_hyperscale": variant}
+    if "embed_dim" in mp:
+        out["d_model"] = int(mp["embed_dim"])
+    if "depth" in mp:
+        out["depth"] = int(mp["depth"])
+    if "num_heads" in mp:
+        out["n_heads"] = int(mp["num_heads"])
+    if "mlp_ratio" in mp:
+        out["hs_mlp_ratio"] = float(mp["mlp_ratio"])
+    return out
+
+
+def peek_hyperscale_checkpoint_args(ckpt_path):
+    """Return a dict of HyperScale arch knobs for ``ckpt_path``, or ``None``.
+
+    Looks in two places, in order:
+
+    1. The ``"args"`` field of the checkpoint itself
+       (``src.scripts.train.save_checkpoint`` stores ``vars(args)`` here).
+    2. A ``train_config.yaml`` in the same directory as the checkpoint
+       (this is what upstream gregorkrz/HyperScale writes alongside each run).
+
+    Returns ``None`` if neither is found, so the caller can fall back to CLI
+    flags.
+    """
+    if not os.path.exists(ckpt_path):
+        raise FileNotFoundError(f"HyperScale checkpoint not found: {ckpt_path}")
+
+    checkpoint = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+    if isinstance(checkpoint, dict):
+        saved = checkpoint.get("args")
+        if isinstance(saved, dict):
+            return saved
+
+    yaml_path = os.path.join(os.path.dirname(ckpt_path), "train_config.yaml")
+    if os.path.exists(yaml_path):
+        return _parse_hyperscale_train_config_yaml(yaml_path)
+
+    return None
+
+
 def load_pretrained_hyperscale(model, ckpt_path, verbose=True):
     """Load a HyperScale checkpoint into ``model`` (a ``HyperScaleBaseline``).
 

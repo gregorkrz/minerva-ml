@@ -443,6 +443,120 @@ class TestHyperScaleBaseline:
         assert torch.allclose(dst.global_proj.weight, gproj_before)
 
 
+class TestHyperScaleAutofill:
+    """--hs-pretrained alone should auto-fill arch from the checkpoint's saved args."""
+
+    def test_autofill_overrides_missing_arch(self, tmp_path):
+        import argparse
+        from src.scripts.train import _maybe_autofill_hyperscale_args
+
+        # Save a checkpoint that mimics src.scripts.train.save_checkpoint output:
+        # {"args": vars(args), "model_state_dict": ...}.
+        saved_args = {
+            "use_hyperscale": "pool",
+            "d_model": 128,
+            "depth": 3,
+            "n_heads": 4,
+            "hs_mlp_ratio": 2.0,
+        }
+        ckpt = tmp_path / "fake_hs.pt"
+        torch.save({"args": saved_args, "model_state_dict": {}}, ckpt)
+
+        # User passes only --hs-pretrained (no --use-hyperscale, no arch flags).
+        args = argparse.Namespace(
+            hs_pretrained=str(ckpt),
+            use_hyperscale=None,
+            d_model=999,
+            depth=999,
+            n_heads=999,
+            hs_mlp_ratio=999.0,
+        )
+        changed = _maybe_autofill_hyperscale_args(args)
+        assert changed is True
+        assert args.use_hyperscale == "pool"
+        assert args.d_model == 128
+        assert args.depth == 3
+        assert args.n_heads == 4
+        assert args.hs_mlp_ratio == 2.0
+
+    def test_cli_variant_blocks_autofill(self, tmp_path):
+        import argparse
+        from src.scripts.train import _maybe_autofill_hyperscale_args
+
+        saved_args = {"use_hyperscale": "pool", "d_model": 128}
+        ckpt = tmp_path / "fake_hs.pt"
+        torch.save({"args": saved_args}, ckpt)
+
+        # User explicitly passed --use-hyperscale, so we trust their CLI.
+        args = argparse.Namespace(
+            hs_pretrained=str(ckpt),
+            use_hyperscale="basic",
+            d_model=64,
+            depth=2,
+            n_heads=4,
+            hs_mlp_ratio=8 / 3,
+        )
+        changed = _maybe_autofill_hyperscale_args(args)
+        assert changed is False
+        assert args.use_hyperscale == "basic"
+        assert args.d_model == 64
+
+    def test_autofill_from_upstream_train_config_yaml(self, tmp_path):
+        """When ckpt has no saved args, fall back to train_config.yaml next to it."""
+        import argparse
+        from src.scripts.train import _maybe_autofill_hyperscale_args
+
+        # Upstream HyperScale dumps train_config.yaml alongside best_model.pt.
+        # Use the exact format from gregorkrz/HyperScale's train.py.
+        (tmp_path / "train_config.yaml").write_text(
+            "model_type: ParticleVIT_Embedding\n"
+            "model_params:\n"
+            "  num_features: 9\n"
+            "  num_classes: 210\n"
+            "  embed_dim: 448\n"
+            "  depth: 4\n"
+            "  num_heads: 7\n"
+            "  mlp_ratio: 2.6666666666666665\n"
+        )
+        ckpt = tmp_path / "best_model.pt"
+        torch.save({"some_weight": torch.zeros(1)}, ckpt)  # raw, no "args" key
+
+        args = argparse.Namespace(
+            hs_pretrained=str(ckpt),
+            use_hyperscale=None,
+            d_model=0,
+            depth=0,
+            n_heads=0,
+            hs_mlp_ratio=0.0,
+        )
+        changed = _maybe_autofill_hyperscale_args(args)
+        assert changed is True
+        assert args.use_hyperscale == "embedding"
+        assert args.d_model == 448
+        assert args.depth == 4
+        assert args.n_heads == 7
+        assert args.hs_mlp_ratio == pytest.approx(8 / 3)
+
+    def test_autofill_needs_saved_args(self, tmp_path):
+        import argparse
+        import pytest as _pytest
+        from src.scripts.train import _maybe_autofill_hyperscale_args
+
+        # Bare state-dict checkpoint with no "args" key.
+        ckpt = tmp_path / "raw_hs.pt"
+        torch.save({"some_weight": torch.zeros(1)}, ckpt)
+        args = argparse.Namespace(
+            hs_pretrained=str(ckpt),
+            use_hyperscale=None,
+            d_model=0,
+            depth=0,
+            n_heads=0,
+            hs_mlp_ratio=0.0,
+        )
+        with _pytest.raises(ValueError, match="no saved args"):
+            _maybe_autofill_hyperscale_args(args)
+
+
 class TestBertBaseline:
 
     def test_forward(self):
