@@ -1,41 +1,32 @@
 # Train the transformer locally
 from src.constants.slurm_template import SLURM_TEMPLATE_GPU
+from src.models.hyperscale import peek_hyperscale_checkpoint_args
+import functools
 import os
 from datetime import datetime as dt
 
 
 # ---------------------------------------------------------------------------
-# HyperScale presets (PLACEHOLDERS — fill in before submitting).
+# HyperScale presets.
 #
-# - HYPERSCALE_HYPERPARAMS: pick d_model / depth / n_heads / mlp_ratio per size.
-#   These map to --d_model / --depth / --n_heads / --hs-mlp-ratio in train.py.
-# - HYPERSCALE_PRETRAINED_PATHS: absolute paths to pretrained checkpoints used
-#   by the non-"rw" variants. The "-rw" variants ignore this dict and train
-#   from random init.
+# HYPERSCALE_PRETRAINED_PATHS maps a sweep size tag (e.g. "small") to a
+# pretrained run directory. The directory must contain both a checkpoint
+# (best_model.pt / final.pt / last.pt / any single *.pt) and the upstream
+# train_config.yaml — the latter is the single source of truth for the
+# architecture (variant, d_model, depth, n_heads, mlp_ratio), which we read
+# at submission time via peek_hyperscale_checkpoint_args.
 #
-#   The --hs-pretrained flag (added in train.py) loads encoder weights only —
-#   the task output head and any global-feature projection are left at random
-#   init, so the same checkpoint can be reused across regression / classifier
-#   runs with different output dims.
+# The --hs-pretrained flag (in train.py) loads encoder weights only — the
+# task output head and any global-feature projection are left at random
+# init, so the same checkpoint can be reused across regression / classifier
+# runs with different output dims.
+#
+# NOTE: the small ckpt below was trained as ParticleVIT_Embedding (split
+# kin/PID/vertex input embeddings). For --use-hyperscale embedding the full
+# encoder transfers; for basic/pool only the transformer blocks (and CLS/norm
+# where shapes match) load, because the token_embed module differs — expect
+# a "loaded X/Y model tensors" log line with X << Y in those runs.
 # ---------------------------------------------------------------------------
-# Architecture comes from the checkpoint dir's train_config.yaml:
-#   model_type: ParticleVIT_Embedding
-#   model_params: { embed_dim: 448, depth: 4, num_heads: 7, mlp_ratio: 8/3 }
-#
-# NOTE: the ckpt below was trained as ParticleVIT_Embedding (split kin/PID/vertex
-# input embeddings). For --use-hyperscale embedding the full encoder transfers;
-# for basic/pool only the transformer blocks (and CLS/norm where shapes match)
-# load, because their token_embed module differs — expect a "loaded X/Y model
-# tensors" line with X significantly less than Y in those runs.
-HYPERSCALE_HYPERPARAMS = {
-    "small": {
-        "d_model": 448,
-        "depth": 4,
-        "n_heads": 7,
-        "mlp_ratio": 8 / 3,
-    },
-}
-
 HYPERSCALE_PRETRAINED_PATHS = {
     "small": (
         "/global/cfs/cdirs/m3246/jaluus/Hyperscale_V5/Pretrain_Scaling/"
@@ -46,6 +37,32 @@ HYPERSCALE_PRETRAINED_PATHS = {
 HYPERSCALE_VARIANTS = ("basic", "embedding", "pool")
 
 
+@functools.lru_cache(maxsize=None)
+def _hyperscale_arch_for(size):
+    """Read the architecture for ``HYPERSCALE_PRETRAINED_PATHS[size]`` from
+    its run directory (train_config.yaml, with the ckpt as a fallback).
+
+    Returns a dict with the same keys ``train.py`` puts on its ``args``
+    namespace: ``use_hyperscale`` (variant), ``d_model``, ``depth``,
+    ``n_heads``, ``hs_mlp_ratio``. Cached so the yaml is parsed once per
+    ``submit_train_jobs.py`` invocation.
+    """
+    if size not in HYPERSCALE_PRETRAINED_PATHS:
+        raise KeyError(
+            f"No HyperScale pretrained path for size {size!r}; "
+            f"known sizes: {tuple(HYPERSCALE_PRETRAINED_PATHS)}"
+        )
+    arch = peek_hyperscale_checkpoint_args(HYPERSCALE_PRETRAINED_PATHS[size])
+    if arch is None:
+        raise ValueError(
+            "Could not read HyperScale arch from "
+            f"{HYPERSCALE_PRETRAINED_PATHS[size]!r} "
+            "(no 'args' field in the checkpoint and no train_config.yaml in "
+            "the directory)."
+        )
+    return arch
+
+
 def _parse_hyperscale_tag(model):
     """Parse 'HyperScale-{size}[-rw]-{variant}' into (size, random_init, variant)."""
     parts = model.split("-")
@@ -53,10 +70,10 @@ def _parse_hyperscale_tag(model):
     if len(parts) < 3 or parts[0] != "HyperScale":
         raise ValueError(f"Invalid HyperScale model tag: {model!r}")
     size = parts[1]
-    if size not in HYPERSCALE_HYPERPARAMS:
+    if size not in HYPERSCALE_PRETRAINED_PATHS:
         raise ValueError(
             f"Unknown HyperScale size {size!r}; "
-            f"expected one of {tuple(HYPERSCALE_HYPERPARAMS)}"
+            f"expected one of {tuple(HYPERSCALE_PRETRAINED_PATHS)}"
         )
     if parts[2] == "rw":
         random_init = True
@@ -147,10 +164,13 @@ def generate_cmd(
         extra = " --use-bert tiny-rw --zero-cond-feature 2 "
     elif model.startswith("HyperScale-"):
         hs_size, hs_random_init, hs_variant = _parse_hyperscale_tag(model)
-        hp = HYPERSCALE_HYPERPARAMS[hs_size]
-        model_dim = hp["d_model"]
-        model_depth = hp["depth"]
-        model_n_heads = hp["n_heads"]
+        # Arch comes from the pretrained run's train_config.yaml — single
+        # source of truth. Used for both pretrained and -rw runs so they
+        # share an architecture.
+        arch = _hyperscale_arch_for(hs_size)
+        model_dim = arch["d_model"]
+        model_depth = arch["depth"]
+        model_n_heads = arch["n_heads"]
         rw_tag = "_rw" if hs_random_init else ""
         name = (
             f"Run_1703_HyperScale_{hs_size}{rw_tag}_{hs_variant}"
@@ -158,7 +178,7 @@ def generate_cmd(
         )
         extra = (
             f" --use-hyperscale {hs_variant} "
-            f"--hs-mlp-ratio {hp['mlp_ratio']} "
+            f"--hs-mlp-ratio {arch['hs_mlp_ratio']} "
             "--zero-cond-feature 2 "
         )
         if not hs_random_init:
