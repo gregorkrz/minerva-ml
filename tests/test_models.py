@@ -503,7 +503,7 @@ class TestHyperScaleAutofill:
 
     def test_autofill_from_directory_path(self, tmp_path):
         """--hs-pretrained can point at the run directory; the loader finds
-        best_model.pt and the sibling train_config.yaml."""
+        the upstream pvit_final.pth and the sibling train_config.yaml."""
         import argparse
         from src.scripts.train import _maybe_autofill_hyperscale_args
 
@@ -517,7 +517,8 @@ class TestHyperScaleAutofill:
             "  num_heads: 7\n"
             "  mlp_ratio: 2.6666666666666665\n"
         )
-        torch.save({"w": torch.zeros(1)}, run_dir / "best_model.pt")
+        # Upstream HyperScale ships pvit_final.pth (not best_model.pt).
+        torch.save({"w": torch.zeros(1)}, run_dir / "pvit_final.pth")
 
         args = argparse.Namespace(
             hs_pretrained=str(run_dir),  # NOTE: directory, not file
