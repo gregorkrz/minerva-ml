@@ -295,6 +295,11 @@ def get_cmds_and_slurm_times_hyperscale():
     at HYPERSCALE_PRETRAINED_PATHS["small"] is a ParticleVIT_Embedding run —
     the basic / pool variants would only partially transfer (token_embed shape
     mismatch). Add them back to ``variants`` once matching checkpoints exist.
+
+    Walltime is sized for ``max_steps`` at the locally observed throughput of
+    ~2 iterations/sec, plus 10% buffer for setup, evaluation, and checkpoint
+    I/O. Bump ``ITERATIONS_PER_SECOND`` (or the buffer) if the cluster is
+    slower than measured locally.
     """
     cmds = []
     slurm_times = []
@@ -302,9 +307,16 @@ def get_cmds_and_slurm_times_hyperscale():
     tasks = ["regression", "classifier"]
     sizes = ["small"]
     variants = ["embedding"]
-    # TODO: tune per-config after the first job finishes (pretrained vs rw
-    # typically have different convergence budgets).
-    walltime = "12:00:00"
+
+    max_steps = 200000
+    ITERATIONS_PER_SECOND = 2.0  # observed locally
+    BUFFER = 1.10  # 10% slack for setup / eval / checkpointing
+    walltime_seconds = int(max_steps / ITERATIONS_PER_SECOND * BUFFER)
+    h, rem = divmod(walltime_seconds, 3600)
+    m, s = divmod(rem, 60)
+    walltime = f"{h:02d}:{m:02d}:{s:02d}"
+    print(f"HyperScale sweep walltime: {walltime} for {max_steps} steps at "
+          f"{ITERATIONS_PER_SECOND} it/s (+{int((BUFFER - 1) * 100)}% buffer)")
     for size in sizes:
         for variant in variants:
             for use_rw in (False, True):
@@ -317,7 +329,7 @@ def get_cmds_and_slurm_times_hyperscale():
                             seed=seed,
                             task=task,
                             model=model_tag,
-                            max_steps=500000,
+                            max_steps=max_steps,
                             bs=2048,
                             grad_accum_steps=1,
                         )
