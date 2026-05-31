@@ -392,6 +392,56 @@ class TestHyperScaleBaseline:
                 mlp_ratio=8 / 3,
             )
 
+    def test_load_pretrained_transfers_encoder_skips_head(self, tmp_path):
+        """Pretrained loader copies token_embed/blocks/cls_token weights but
+        leaves the task-specific head and the wrapper-only global_proj at init."""
+        from src.scripts.train import HyperScaleBaseline
+        from src.models.hyperscale import load_pretrained_hyperscale
+
+        # Source: trained on 1-class regression head, no global token.
+        src = HyperScaleBaseline(
+            input_dim=10,
+            output_dim=1,
+            embed_dim=64,
+            depth=2,
+            num_heads=4,
+            variant="basic",
+            mlp_ratio=8 / 3,
+        )
+        ckpt_path = tmp_path / "hs_source.pt"
+        torch.save({"model_state_dict": src.state_dict()}, ckpt_path)
+
+        # Target: same encoder shape but a 5-way classifier head and a new
+        # global token projection.
+        dst = HyperScaleBaseline(
+            input_dim=10,
+            output_dim=5,
+            embed_dim=64,
+            depth=2,
+            num_heads=4,
+            variant="basic",
+            mlp_ratio=8 / 3,
+            global_cont_dim=16,
+        )
+
+        head_before = dst.head.weight.detach().clone()
+        gproj_before = dst.global_proj.weight.detach().clone()
+        embed_before = dst.token_embed.weight.detach().clone()
+
+        load_pretrained_hyperscale(dst, str(ckpt_path), verbose=False)
+
+        # Encoder transferred.
+        assert torch.allclose(dst.token_embed.weight, src.token_embed.weight)
+        assert torch.allclose(dst.cls_token, src.cls_token)
+        assert torch.allclose(
+            dst.blocks[0].pre_attn_norm.weight, src.blocks[0].pre_attn_norm.weight
+        )
+        # token_embed actually moved away from its init.
+        assert not torch.allclose(dst.token_embed.weight, embed_before)
+        # Task head and global_proj are left at init (shape mismatch / not in ckpt).
+        assert torch.allclose(dst.head.weight, head_before)
+        assert torch.allclose(dst.global_proj.weight, gproj_before)
+
 
 class TestBertBaseline:
 

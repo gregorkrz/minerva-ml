@@ -114,6 +114,7 @@ from src.models.hyperscale import (
     ParticleVIT_Pool as _HSParticleVIT_Pool,
     init_olmo_weights as _hs_init_olmo_weights,
     _zero_masked_tokens as _hs_zero_masked_tokens,
+    load_pretrained_hyperscale,
 )
 
 HYPERSCALE_VARIANTS = ("basic", "embedding", "pool")
@@ -670,6 +671,15 @@ def parse_args():
         type=float,
         default=8 / 3,
         help="MLP ratio for HyperScale SwiGLU FFN (default 8/3, matches upstream HyperScale).",
+    )
+    parser.add_argument(
+        "--hs-pretrained",
+        type=str,
+        default=None,
+        help="Path to a HyperScale checkpoint to initialize the encoder from. "
+        "Loads weights only (no optimizer state); shape-mismatched tensors and "
+        "the task output head are skipped so the model can be fine-tuned on a "
+        "new task. Requires --use-hyperscale.",
     )
     parser.add_argument(
         "--use-pretrained",
@@ -1835,6 +1845,12 @@ def train(args):
             raise ValueError("--use-pretrained requires --use-omnilearned")
         print(f"Loading pretrained weights: {args.use_pretrained}")
         load_pretrained_omnilearned(model, args.use_pretrained, args.output_dir)
+
+    # Load pretrained HyperScale weights (before optimizer setup)
+    if getattr(args, "hs_pretrained", None):
+        if not getattr(args, "use_hyperscale", None):
+            raise ValueError("--hs-pretrained requires --use-hyperscale")
+        load_pretrained_hyperscale(model, args.hs_pretrained)
 
     _apply_omnilearned_medium_backbone_freeze(model, args)
 

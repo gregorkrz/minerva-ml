@@ -20,6 +20,7 @@ from src.models.hyperscale.particle_vit_embedding import (
     ParticleVIT_Embedding,
 )
 from src.models.hyperscale.particle_vit_pool import AttentionPool, ParticleVIT_Pool
+from src.models.hyperscale.utils import load_pretrained_hyperscale
 
 __all__ = [
     "ParticleVIT",
@@ -32,4 +33,5 @@ __all__ = [
     "PackedSwiGLU",
     "init_olmo_weights",
     "_zero_masked_tokens",
+    "load_pretrained_hyperscale",
 ]

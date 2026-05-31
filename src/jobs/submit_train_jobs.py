@@ -13,11 +13,10 @@ from datetime import datetime as dt
 #   by the non-"rw" variants. The "-rw" variants ignore this dict and train
 #   from random init.
 #
-# NOTE: train.py does NOT yet ship a --hs-pretrained flag (the existing
-# --use-pretrained is OmniLearned-specific). The generated command below
-# emits --hs-pretrained <path> as a placeholder; either add an analogous flag
-# to train.py that loads weights only (no optimizer state) or swap it for
-# --resume <path> if loading optimizer state is acceptable.
+#   The --hs-pretrained flag (added in train.py) loads encoder weights only —
+#   the task output head and any global-feature projection are left at random
+#   init, so the same checkpoint can be reused across regression / classifier
+#   runs with different output dims.
 # ---------------------------------------------------------------------------
 HYPERSCALE_HYPERPARAMS = {
     "small": {
@@ -26,17 +25,10 @@ HYPERSCALE_HYPERPARAMS = {
         "n_heads": 8,     # TODO
         "mlp_ratio": 8 / 3,  # TODO
     },
-    "xsmall": {
-        "d_model": 128,   # TODO
-        "depth": 4,       # TODO
-        "n_heads": 4,     # TODO
-        "mlp_ratio": 8 / 3,  # TODO
-    },
 }
 
 HYPERSCALE_PRETRAINED_PATHS = {
-    "small": "PLACEHOLDER_HYPERSCALE_SMALL_CKPT",    # TODO
-    "xsmall": "PLACEHOLDER_HYPERSCALE_XSMALL_CKPT",  # TODO
+    "small": "PLACEHOLDER_HYPERSCALE_SMALL_CKPT",  # TODO (absolute path)
 }
 
 HYPERSCALE_VARIANTS = ("basic", "embedding", "pool")
@@ -110,7 +102,7 @@ def generate_cmd(
     base = "python -m src.scripts.train -bs {bs} --mode {task} {detailed_task} -name {name} --d_model {model_dim} --depth {model_depth} --n_heads {model_n_heads} --dropout {model_dropout} --attn_dropout {model_attn_dropout} {cap} --seed {seed} -seed-event-sampler {seed}  --max_steps {max_steps} --grad_accum_steps {grad_accum_steps} {extra} --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260326 "
     # Model options: ... "OLS", "OLS_int", "OLS_RW", "OLM"/"OLM_FB",
     # "BERT-tiny", "BERT-tiny-rw" (BERT tiny arch, random encoder weights),
-    # "HyperScale-{small|xsmall}[-rw]-{basic|embedding|pool}" (HyperScale ParticleViT;
+    # "HyperScale-small[-rw]-{basic|embedding|pool}" (HyperScale ParticleViT;
     # "-rw" trains from random init, otherwise loads HYPERSCALE_PRETRAINED_PATHS[size]).
     # Seed both the event sampler and the whole training with seed
     detailed_task = "-E-available-no-muon" if task == "regression" else "-npi2"
@@ -158,10 +150,6 @@ def generate_cmd(
             "--zero-cond-feature 2 "
         )
         if not hs_random_init:
-            # PLACEHOLDER: --hs-pretrained is not implemented in train.py yet.
-            # Either add a flag analogous to --use-pretrained for OmniLearned
-            # (load weights only) or swap for --resume <ckpt> if loading
-            # optimizer state is fine.
             extra += f" --hs-pretrained {HYPERSCALE_PRETRAINED_PATHS[hs_size]} "
     elif model in (
         "Transformer1",
@@ -268,8 +256,8 @@ def get_cmds_and_slurm_times():
 
 
 def get_cmds_and_slurm_times_hyperscale():
-    """HyperScale sweep: {small, xsmall} × {pretrained, rw} × {basic, embedding, pool}
-    × 4 seeds × {regression, classifier} = 96 jobs.
+    """HyperScale sweep: small × {pretrained, rw} × {basic, embedding, pool}
+    × 4 seeds × {regression, classifier} = 48 jobs.
 
     Hyperparameters and pretrained checkpoint paths come from the placeholder
     tables at the top of this file (HYPERSCALE_HYPERPARAMS,
@@ -279,10 +267,10 @@ def get_cmds_and_slurm_times_hyperscale():
     slurm_times = []
     seeds = [55, 56, 57, 58]
     tasks = ["regression", "classifier"]
-    sizes = ["small", "xsmall"]
+    sizes = ["small"]
     variants = list(HYPERSCALE_VARIANTS)
-    # TODO: tune per-config after the first job finishes (xsmall is cheaper than small;
-    # pretrained vs rw also typically have different convergence budgets).
+    # TODO: tune per-config after the first job finishes (pretrained vs rw
+    # typically have different convergence budgets).
     walltime = "12:00:00"
     for size in sizes:
         for variant in variants:
@@ -505,7 +493,7 @@ def get_cmds_and_slurm_times_continue():
 CONTAINER_IMAGE = "docker.io/gkrz/minerva_ml:v1"
 
 if __name__ == "__main__":
-    # To submit the HyperScale sweep instead (96 jobs across small/xsmall ×
+    # To submit the HyperScale sweep instead (48 jobs across small ×
     # pretrained/rw × basic/embedding/pool × 4 seeds × {regression, classifier}),
     # swap the next line for:
     #     cmds, slurm_times = get_cmds_and_slurm_times_hyperscale()
