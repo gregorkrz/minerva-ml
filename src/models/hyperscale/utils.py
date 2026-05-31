@@ -134,10 +134,44 @@ def _parse_hyperscale_train_config_yaml(yaml_path):
     return out
 
 
+def _resolve_hyperscale_ckpt_path(path):
+    """Accept either a ``.pt`` file path or a directory containing one.
+
+    Upstream HyperScale's convention is to ship a run directory containing
+    ``best_model.pt`` plus a ``train_config.yaml`` describing the run. If
+    ``path`` is a directory, look for ``best_model.pt`` first, then ``final.pt``
+    / ``last.pt``, then any single ``*.pt``.
+    """
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"HyperScale checkpoint not found: {path}")
+    if os.path.isfile(path):
+        return path
+    if os.path.isdir(path):
+        for name in ("best_model.pt", "final.pt", "last.pt"):
+            cand = os.path.join(path, name)
+            if os.path.exists(cand):
+                return cand
+        pts = sorted(
+            n for n in os.listdir(path)
+            if n.endswith(".pt") and os.path.isfile(os.path.join(path, n))
+        )
+        if len(pts) == 1:
+            return os.path.join(path, pts[0])
+        if len(pts) > 1:
+            raise ValueError(
+                f"Multiple .pt files in {path!r}; pass an explicit file path. "
+                f"Found: {pts}"
+            )
+        raise FileNotFoundError(f"No .pt files found in directory: {path}")
+    raise FileNotFoundError(f"HyperScale checkpoint path is neither file nor dir: {path}")
+
+
 def peek_hyperscale_checkpoint_args(ckpt_path):
     """Return a dict of HyperScale arch knobs for ``ckpt_path``, or ``None``.
 
-    Looks in two places, in order:
+    Accepts either a ``.pt`` file or a directory containing one (see
+    ``_resolve_hyperscale_ckpt_path``). Looks for arch metadata in two places,
+    in order:
 
     1. The ``"args"`` field of the checkpoint itself
        (``src.scripts.train.save_checkpoint`` stores ``vars(args)`` here).
@@ -147,8 +181,7 @@ def peek_hyperscale_checkpoint_args(ckpt_path):
     Returns ``None`` if neither is found, so the caller can fall back to CLI
     flags.
     """
-    if not os.path.exists(ckpt_path):
-        raise FileNotFoundError(f"HyperScale checkpoint not found: {ckpt_path}")
+    ckpt_path = _resolve_hyperscale_ckpt_path(ckpt_path)
 
     checkpoint = torch.load(ckpt_path, map_location="cpu", weights_only=False)
     if isinstance(checkpoint, dict):
@@ -166,14 +199,15 @@ def peek_hyperscale_checkpoint_args(ckpt_path):
 def load_pretrained_hyperscale(model, ckpt_path, verbose=True):
     """Load a HyperScale checkpoint into ``model`` (a ``HyperScaleBaseline``).
 
-    Loads weights only — no optimizer/scheduler state. The task-specific output
-    ``head`` and any minerva-wrapper-only modules (``global_proj``) are kept
-    at their random init so the model can be fine-tuned on a new task without
-    output-dim conflicts. Missing or shape-mismatched keys are skipped with a
-    diagnostic print.
+    Accepts either a ``.pt`` file or a directory containing one (see
+    ``_resolve_hyperscale_ckpt_path``). Loads weights only — no optimizer or
+    scheduler state. The task-specific output ``head`` and any
+    minerva-wrapper-only modules (``global_proj``) are kept at their random
+    init so the model can be fine-tuned on a new task without output-dim
+    conflicts. Missing or shape-mismatched keys are skipped with a diagnostic
+    print.
     """
-    if not os.path.exists(ckpt_path):
-        raise FileNotFoundError(f"HyperScale checkpoint not found: {ckpt_path}")
+    ckpt_path = _resolve_hyperscale_ckpt_path(ckpt_path)
 
     print(f"Loading HyperScale pretrained checkpoint: {ckpt_path}")
     checkpoint = torch.load(ckpt_path, map_location="cpu", weights_only=False)

@@ -18,17 +18,29 @@ from datetime import datetime as dt
 #   init, so the same checkpoint can be reused across regression / classifier
 #   runs with different output dims.
 # ---------------------------------------------------------------------------
+# Architecture comes from the checkpoint dir's train_config.yaml:
+#   model_type: ParticleVIT_Embedding
+#   model_params: { embed_dim: 448, depth: 4, num_heads: 7, mlp_ratio: 8/3 }
+#
+# NOTE: the ckpt below was trained as ParticleVIT_Embedding (split kin/PID/vertex
+# input embeddings). For --use-hyperscale embedding the full encoder transfers;
+# for basic/pool only the transformer blocks (and CLS/norm where shapes match)
+# load, because their token_embed module differs — expect a "loaded X/Y model
+# tensors" line with X significantly less than Y in those runs.
 HYPERSCALE_HYPERPARAMS = {
     "small": {
-        "d_model": 256,   # TODO
-        "depth": 6,       # TODO
-        "n_heads": 8,     # TODO
-        "mlp_ratio": 8 / 3,  # TODO
+        "d_model": 448,
+        "depth": 4,
+        "n_heads": 7,
+        "mlp_ratio": 8 / 3,
     },
 }
 
 HYPERSCALE_PRETRAINED_PATHS = {
-    "small": "PLACEHOLDER_HYPERSCALE_SMALL_CKPT",  # TODO (absolute path)
+    "small": (
+        "/global/cfs/cdirs/m3246/jaluus/Hyperscale_V5/Pretrain_Scaling/"
+        "emb_6e17_d4_e448_bs512_lr5e-4_run3_normalized"
+    ),
 }
 
 HYPERSCALE_VARIANTS = ("basic", "embedding", "pool")

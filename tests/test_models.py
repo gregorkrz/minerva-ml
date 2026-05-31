@@ -501,6 +501,38 @@ class TestHyperScaleAutofill:
         assert args.use_hyperscale == "basic"
         assert args.d_model == 64
 
+    def test_autofill_from_directory_path(self, tmp_path):
+        """--hs-pretrained can point at the run directory; the loader finds
+        best_model.pt and the sibling train_config.yaml."""
+        import argparse
+        from src.scripts.train import _maybe_autofill_hyperscale_args
+
+        run_dir = tmp_path / "emb_6e17_d4_e448"
+        run_dir.mkdir()
+        (run_dir / "train_config.yaml").write_text(
+            "model_type: ParticleVIT_Embedding\n"
+            "model_params:\n"
+            "  embed_dim: 448\n"
+            "  depth: 4\n"
+            "  num_heads: 7\n"
+            "  mlp_ratio: 2.6666666666666665\n"
+        )
+        torch.save({"w": torch.zeros(1)}, run_dir / "best_model.pt")
+
+        args = argparse.Namespace(
+            hs_pretrained=str(run_dir),  # NOTE: directory, not file
+            use_hyperscale=None,
+            d_model=0,
+            depth=0,
+            n_heads=0,
+            hs_mlp_ratio=0.0,
+        )
+        _maybe_autofill_hyperscale_args(args)
+        assert args.use_hyperscale == "embedding"
+        assert args.d_model == 448
+        assert args.depth == 4
+        assert args.n_heads == 7
+
     def test_autofill_from_upstream_train_config_yaml(self, tmp_path):
         """When ckpt has no saved args, fall back to train_config.yaml next to it."""
         import argparse
