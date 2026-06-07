@@ -30,12 +30,15 @@ from src.eval.classification_plots import (
 )
 from src.eval._bootstrap import silence_classification_empty_bin_warnings
 from src.eval._constants import (
+    CANONICAL_CLASSIFICATION_PICKLE,
     CLASSIFICATION_PICKLE_STEM,
+    DEFAULT_CACHE_DIR,
     DEFAULT_OUT_DIR,
     DEFAULT_PLOTS_DIR,
     DEFAULT_WANDB_TAG,
     repo_output_path,
 )
+from src.eval._plot_config import PlotConfig
 
 
 def _pickle_path(out_dir: Path, flag: str) -> Path:
@@ -411,14 +414,33 @@ def main(argv: list[str] | None = None) -> None:
         help="Root for PDF output (default: plots/ under repo)",
     )
     ap.add_argument("--classification-pickle", type=Path, default=None)
+    ap.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        metavar="JSON",
+        help="Plot config JSON (models, colors, optional display_name). "
+        "When given, only listed models are drawn.",
+    )
+    ap.add_argument(
+        "--plots-only",
+        action="store_true",
+        help="Read classification data from the canonical plots cache "
+        "(plots/tmp_results/classification.pkl) instead of constructing the "
+        "path from --flag/--out-dir.",
+    )
     args = ap.parse_args(argv)
 
+    cache_root = repo_output_path(_REPO_ROOT, DEFAULT_CACHE_DIR)
     data_root = repo_output_path(_REPO_ROOT, Path(args.out_dir or DEFAULT_OUT_DIR))
     plots_root = repo_output_path(_REPO_ROOT, args.plots_dir)
     out_dir = plots_root / "classification" / "w_bins"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    pkl = args.classification_pickle or _pickle_path(data_root, args.flag)
+    if args.plots_only:
+        pkl = args.classification_pickle or (cache_root / CANONICAL_CLASSIFICATION_PICKLE)
+    else:
+        pkl = args.classification_pickle or _pickle_path(data_root, args.flag)
     with open(pkl, "rb") as f:
         clf = pickle.load(f)
 
@@ -427,6 +449,12 @@ def main(argv: list[str] | None = None) -> None:
     clrs = clf["clrs_dict_full"]
     use_global_fpr = clf.get("use_global_fpr_W", True)
     playlists = ["1A"]  # match Eval_Classification_W notebook default
+
+    cfg: PlotConfig | None = PlotConfig.load(args.config) if args.config else None
+    if cfg is not None:
+        results = cfg.filter_dict(results)
+        clrs = {**clrs, **cfg.colors()}
+        clrs = cfg.filter_dict(clrs)
 
     _run_w_notebook_style(
         results,

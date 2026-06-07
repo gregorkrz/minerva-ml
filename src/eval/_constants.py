@@ -11,6 +11,10 @@ DEFAULT_OUT_DIR = Path("out")
 DEFAULT_PLOTS_DIR = Path("plots")
 CLASSIFICATION_PICKLE_STEM = "classification"
 REGRESSION_PICKLE_STEM = "regression"
+# Canonical cache paths used by --plots-only (no flag suffix, no wandb needed).
+DEFAULT_CACHE_DIR = Path("plots/tmp_results")
+CANONICAL_CLASSIFICATION_PICKLE = "classification.pkl"
+CANONICAL_REGRESSION_PICKLE = "regression.pkl"
 
 # FLOPs per training step (batch size 2048) — same tables as notebooks.
 # OmniLearned-medium: scalar used for log-FLOPs plots (full-model training proxy). Frozen-backbone

@@ -8,13 +8,21 @@ CCNπ (multi-pion) emits vs *q₃* and vs *W* only (two PDFs when *W* data exist
 
 ``plot_classification_q3`` passes ``components=("q3",)`` (CCNπ only);
 ``plot_classification_Pions`` passes ``components=("pion",)`` (CC1π± and CCπ⁰).
+
+Two-stage API (preferred for caching)
+--------------------------------------
+1. :func:`compute_light_classification_data` — expensive metric computation, returns
+   a list of *draw specs* (picklable dicts).
+2. :func:`draw_light_classification_from_cache` — fast figure drawing from specs.
+
+:func:`save_light_classification_pdfs` is the legacy single-call wrapper (compute+draw).
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -35,6 +43,9 @@ from src.eval.classification_plots._constants import (
     _baseline_legend_with_global_fpr,
     _tpr_line_legend_label,
 )
+
+if TYPE_CHECKING:
+    from src.eval._plot_config import PlotConfig
 
 LightComponent = Literal["pion", "q3"]
 
@@ -209,18 +220,213 @@ def _figure_metrics_2x3_pion(
     return fig
 
 
-def save_light_classification_pdfs(
-    out_dir: Path,
+# ---------------------------------------------------------------------------
+# Compute helpers (private)
+# ---------------------------------------------------------------------------
+
+
+def _compute_pion_bundle_specs(
+    *,
+    results: dict,
+    data: dict,
+    data_w: dict | None,
+    pid: np.ndarray,
+    signal_classes: list[int],
+    y_pred: np.ndarray,
+    baseline_fpr: float,
+    tag: str,
+    playlist: str,
+) -> list[dict[str, Any]]:
+    """Compute metrics for one pion task; return draw specs (no matplotlib calls)."""
+    if not np.isfinite(baseline_fpr):
+        return []
+    fpr = [baseline_fpr]
+    data_sp = data_with_signal_pion_bins(
+        data,
+        pid,
+        signal_classes,
+        pion_quantile_require_has_pion=False,
+        pion_bin_edge_method="equal_frequency",
+    )
+    metrics_q3 = compute_all_metrics_q3(
+        results, data, signal_classes=signal_classes, fixed_fpr=fpr, playlist=playlist,
+    )
+    bl_q3 = compute_signal_baseline(
+        results, data, signal_classes=signal_classes, playlist=playlist,
+        pion_bins_require_has_pion=False,
+    )["q3"]
+    y_true = np.isin(pid, signal_classes).astype(int)
+    is_signal = y_true == 1
+    reco_q3 = compute_reco_baseline_recall_per_bin(
+        y_pred, is_signal, data["q3_GeV"], data["q3_bin_edges"],
+    )
+    specs: list[dict[str, Any]] = [
+        {
+            "type": "1x3",
+            "all_metrics": metrics_q3,
+            "x": data["q3_bin_mids"],
+            "xlabel": r"True $q_3$ [GeV]",
+            "baseline_auprc": bl_q3,
+            "fixed_fpr": fpr,
+            "reco_baseline_tpr": reco_q3,
+            "reco_label": "Baseline",
+            "log_x": False,
+            "reco_baseline_global_fpr": baseline_fpr,
+            "filename": f"eval_classification_light_{tag}_q3_{playlist}.pdf",
+        }
+    ]
+    if data_w is not None:
+        metrics_W = compute_all_metrics_W(
+            results, data_w, signal_classes=signal_classes, fixed_fpr=fpr,
+            playlist=playlist, use_global_fpr=True,
+        )
+        bl_W = compute_signal_baseline_W(
+            results, data_w, signal_classes=signal_classes, playlist=playlist,
+        )
+        reco_W = compute_reco_baseline_recall_per_bin(
+            y_pred, is_signal, data_w["W_GeV"], data_w["W_bin_edges"],
+        )
+        specs.append({
+            "type": "1x3",
+            "all_metrics": metrics_W,
+            "x": data_w["W_bin_mids"],
+            "xlabel": r"True hadronic $W$ [GeV]",
+            "baseline_auprc": bl_W,
+            "fixed_fpr": fpr,
+            "reco_baseline_tpr": reco_W,
+            "reco_label": "Baseline",
+            "log_x": False,
+            "reco_baseline_global_fpr": baseline_fpr,
+            "filename": f"eval_classification_light_{tag}_W_{playlist}.pdf",
+        })
+    metrics_pion = compute_all_metrics(
+        results, data_sp, signal_classes=signal_classes, fixed_fpr=fpr,
+        playlist=playlist, pion_bins_require_has_pion=False,
+    )
+    bl = compute_signal_baseline(
+        results, data_sp, signal_classes=signal_classes, playlist=playlist,
+        pion_bins_require_has_pion=False,
+    )
+    reco_E = compute_reco_baseline_recall_per_bin(
+        y_pred, is_signal, data_sp["pion_E_MC"], data_sp["pion_E_MC_bins"], has_pion=None,
+    )
+    reco_th = compute_reco_baseline_recall_per_bin(
+        y_pred, is_signal, data_sp["pion_theta_MC"], data_sp["pion_theta_MC_bins"],
+        has_pion=None, finite_bin_var=True,
+    )
+    specs.append({
+        "type": "2x3_pion",
+        "all_metrics": metrics_pion,
+        "x_E": data_sp["pion_E_MC_bins_mid"],
+        "x_theta": data_sp["pion_theta_MC_bins_mid"],
+        "baseline_E": bl["E"],
+        "baseline_theta": bl["theta"],
+        "fixed_fpr": fpr,
+        "reco_tpr_E": reco_E,
+        "reco_tpr_theta": reco_th,
+        "reco_label": "Baseline",
+        "reco_baseline_global_fpr": baseline_fpr,
+        "filename": f"eval_classification_light_{tag}_pion_kinematics_{playlist}.pdf",
+    })
+    return specs
+
+
+def _compute_q3_bundle_specs(
+    *,
+    results: dict,
+    data: dict,
+    data_w: dict | None,
+    pid: np.ndarray,
+    multi_pi_classes: list[int],
+    n_muons: np.ndarray,
+    n_charged_prongs: np.ndarray,
+    improved_nmichel: np.ndarray,
+    playlist: str,
+) -> list[dict[str, Any]]:
+    """Compute CCNπ vs q₃ (and W) metrics; return draw specs."""
+    y_true_ccnpi = np.isin(pid, multi_pi_classes).astype(int)
+    y_pred_ccnpi = (
+        (n_muons == 1) & (n_charged_prongs >= 1) & (improved_nmichel >= 1)
+    ).astype(int)
+    fpn = int(np.sum((y_pred_ccnpi == 1) & (y_true_ccnpi == 0)))
+    tnn = int(np.sum((y_pred_ccnpi == 0) & (y_true_ccnpi == 0)))
+    baseline_fpr_ccnpi = fpn / (fpn + tnn) if (fpn + tnn) > 0 else float("nan")
+    if not np.isfinite(baseline_fpr_ccnpi):
+        return []
+    fpr_n = [baseline_fpr_ccnpi]
+    metrics_q3 = compute_all_metrics_q3(
+        results, data, signal_classes=multi_pi_classes, fixed_fpr=fpr_n, playlist=playlist,
+    )
+    bl_q3 = compute_signal_baseline(
+        results, data, signal_classes=multi_pi_classes, playlist=playlist,
+        pion_bins_require_has_pion=False,
+    )["q3"]
+    is_signal_ccnpi = y_true_ccnpi == 1
+    reco_q3 = compute_reco_baseline_recall_per_bin(
+        y_pred_ccnpi, is_signal_ccnpi, data["q3_GeV"], data["q3_bin_edges"],
+    )
+    specs: list[dict[str, Any]] = [
+        {
+            "type": "1x3",
+            "all_metrics": metrics_q3,
+            "x": data["q3_bin_mids"],
+            "xlabel": r"True $q_3$ [GeV]",
+            "baseline_auprc": bl_q3,
+            "fixed_fpr": fpr_n,
+            "reco_baseline_tpr": reco_q3,
+            "reco_label": "Baseline",
+            "log_x": False,
+            "reco_baseline_global_fpr": baseline_fpr_ccnpi,
+            "filename": f"eval_classification_light_ccnpi_q3_{playlist}.pdf",
+        }
+    ]
+    if data_w is not None:
+        metrics_W = compute_all_metrics_W(
+            results, data_w, signal_classes=multi_pi_classes, fixed_fpr=fpr_n,
+            playlist=playlist, use_global_fpr=True,
+        )
+        bl_W = compute_signal_baseline_W(
+            results, data_w, signal_classes=multi_pi_classes, playlist=playlist,
+        )
+        reco_W = compute_reco_baseline_recall_per_bin(
+            y_pred_ccnpi, is_signal_ccnpi, data_w["W_GeV"], data_w["W_bin_edges"],
+        )
+        specs.append({
+            "type": "1x3",
+            "all_metrics": metrics_W,
+            "x": data_w["W_bin_mids"],
+            "xlabel": r"True hadronic $W$ [GeV]",
+            "baseline_auprc": bl_W,
+            "fixed_fpr": fpr_n,
+            "reco_baseline_tpr": reco_W,
+            "reco_label": "Baseline",
+            "log_x": False,
+            "reco_baseline_global_fpr": baseline_fpr_ccnpi,
+            "filename": f"eval_classification_light_ccnpi_W_{playlist}.pdf",
+        })
+    return specs
+
+
+# ---------------------------------------------------------------------------
+# Public two-stage API
+# ---------------------------------------------------------------------------
+
+
+def compute_light_classification_data(
     results: dict,
     data_by_playlist: dict,
-    clrs_dict_full: dict[str, str],
     playlists: list[str],
     components: tuple[LightComponent, ...] = ("pion", "q3"),
     *,
     data_w_by_playlist: dict | None = None,
-) -> None:
-    """Write light PDFs under *out_dir* (typically ``.../classification/light/``)."""
-    out_dir.mkdir(parents=True, exist_ok=True)
+) -> list[dict[str, Any]]:
+    """Compute all metrics for light classification figures (expensive).
+
+    Returns a list of *draw specs* — picklable dicts that can be passed directly
+    to :func:`draw_light_classification_from_cache` without re-running any
+    sklearn metric calls.
+    """
+    specs: list[dict[str, Any]] = []
     do_pion = "pion" in components
     do_q3 = "q3" in components
 
@@ -244,167 +450,26 @@ def save_light_classification_pdfs(
         improved_nmichel = baselines_pl["improved_nmichel"][test_idx]
 
         if do_pion:
-
-            def _single_pion_bundle(
-                *,
-                signal_classes: list[int],
-                y_pred: np.ndarray,
-                baseline_fpr: float,
-                tag: str,
-            ) -> None:
-                if not np.isfinite(baseline_fpr):
-                    return
-                fpr = [baseline_fpr]
-                data_sp = data_with_signal_pion_bins(
-                    data,
-                    pid,
-                    signal_classes,
-                    pion_quantile_require_has_pion=False,
-                    pion_bin_edge_method="equal_frequency",
-                )
-
-                metrics_q3 = compute_all_metrics_q3(
-                    results,
-                    data,
-                    signal_classes=signal_classes,
-                    fixed_fpr=fpr,
-                    playlist=playlist,
-                )
-                bl_q3 = compute_signal_baseline(
-                    results,
-                    data,
-                    signal_classes=signal_classes,
-                    playlist=playlist,
-                    pion_bins_require_has_pion=False,
-                )["q3"]
-                y_true = np.isin(pid, signal_classes).astype(int)
-                is_signal = y_true == 1
-                reco_q3 = compute_reco_baseline_recall_per_bin(
-                    y_pred,
-                    is_signal,
-                    data["q3_GeV"],
-                    data["q3_bin_edges"],
-                )
-                x_q3 = data["q3_bin_mids"]
-                fig = _figure_metrics_1x3(
-                    metrics_q3,
-                    x_q3,
-                    r"True $q_3$ [GeV]",
-                    bl_q3,
-                    fpr,
-                    reco_q3,
-                    "Baseline",
-                    clrs_dict_full,
-                    log_x=False,
-                    reco_baseline_global_fpr=baseline_fpr,
-                )
-                _save_single_fig(
-                    fig, out_dir / f"eval_classification_light_{tag}_q3_{playlist}.pdf"
-                )
-
-                if data_w is not None:
-                    metrics_W = compute_all_metrics_W(
-                        results,
-                        data_w,
-                        signal_classes=signal_classes,
-                        fixed_fpr=fpr,
-                        playlist=playlist,
-                        use_global_fpr=True,
-                    )
-                    bl_W = compute_signal_baseline_W(
-                        results,
-                        data_w,
-                        signal_classes=signal_classes,
-                        playlist=playlist,
-                    )
-                    reco_W = compute_reco_baseline_recall_per_bin(
-                        y_pred,
-                        is_signal,
-                        data_w["W_GeV"],
-                        data_w["W_bin_edges"],
-                    )
-                    x_W = data_w["W_bin_mids"]
-                    fig_w = _figure_metrics_1x3(
-                        metrics_W,
-                        x_W,
-                        r"True hadronic $W$ [GeV]",
-                        bl_W,
-                        fpr,
-                        reco_W,
-                        "Baseline",
-                        clrs_dict_full,
-                        log_x=False,
-                        reco_baseline_global_fpr=baseline_fpr,
-                    )
-                    _save_single_fig(
-                        fig_w,
-                        out_dir / f"eval_classification_light_{tag}_W_{playlist}.pdf",
-                    )
-                metrics_pion = compute_all_metrics(
-                    results,
-                    data_sp,
-                    signal_classes=signal_classes,
-                    fixed_fpr=fpr,
-                    playlist=playlist,
-                    pion_bins_require_has_pion=False,
-                )
-                bl = compute_signal_baseline(
-                    results,
-                    data_sp,
-                    signal_classes=signal_classes,
-                    playlist=playlist,
-                    pion_bins_require_has_pion=False,
-                )
-                reco_E = compute_reco_baseline_recall_per_bin(
-                    y_pred,
-                    is_signal,
-                    data_sp["pion_E_MC"],
-                    data_sp["pion_E_MC_bins"],
-                    has_pion=None,
-                )
-                reco_th = compute_reco_baseline_recall_per_bin(
-                    y_pred,
-                    is_signal,
-                    data_sp["pion_theta_MC"],
-                    data_sp["pion_theta_MC_bins"],
-                    has_pion=None,
-                    finite_bin_var=True,
-                )
-                x_E = data_sp["pion_E_MC_bins_mid"]
-                x_th = data_sp["pion_theta_MC_bins_mid"]
-                fig_p = _figure_metrics_2x3_pion(
-                    metrics_pion,
-                    x_E,
-                    x_th,
-                    bl["E"],
-                    bl["theta"],
-                    fpr,
-                    reco_E,
-                    reco_th,
-                    "Baseline",
-                    baseline_fpr,
-                    clrs_dict_full,
-                )
-                _save_single_fig(
-                    fig_p,
-                    out_dir
-                    / f"eval_classification_light_{tag}_pion_kinematics_{playlist}.pdf",
-                )
-
             # --- CC1π± ---
             y_true_cc1pi = np.isin(pid, cc1pi_classes).astype(int)
             y_pred_cc1pi = (
                 (n_muons == 1) & (n_charged_prongs == 1) & (improved_nmichel == 1)
             ).astype(int)
-            tp = int(np.sum((y_pred_cc1pi == 1) & (y_true_cc1pi == 1)))
             fp = int(np.sum((y_pred_cc1pi == 1) & (y_true_cc1pi == 0)))
             tn = int(np.sum((y_pred_cc1pi == 0) & (y_true_cc1pi == 0)))
             baseline_fpr_cc1pi = fp / (fp + tn) if (fp + tn) > 0 else float("nan")
-            _single_pion_bundle(
-                signal_classes=cc1pi_classes,
-                y_pred=y_pred_cc1pi,
-                baseline_fpr=baseline_fpr_cc1pi,
-                tag="cc1pi",
+            specs.extend(
+                _compute_pion_bundle_specs(
+                    results=results,
+                    data=data,
+                    data_w=data_w,
+                    pid=pid,
+                    signal_classes=cc1pi_classes,
+                    y_pred=y_pred_cc1pi,
+                    baseline_fpr=baseline_fpr_cc1pi,
+                    tag="cc1pi",
+                    playlist=playlist,
+                )
             )
 
             # --- CCπ⁰ ---
@@ -421,99 +486,118 @@ def save_light_classification_pdfs(
             fp0 = int(np.sum((y_pred_pi0 == 1) & (y_true_pi0 == 0)))
             tn0 = int(np.sum((y_pred_pi0 == 0) & (y_true_pi0 == 0)))
             baseline_fpr_pi0 = fp0 / (fp0 + tn0) if (fp0 + tn0) > 0 else float("nan")
-            _single_pion_bundle(
-                signal_classes=cc1pi0_classes,
-                y_pred=y_pred_pi0,
-                baseline_fpr=baseline_fpr_pi0,
-                tag="cc1pi0",
+            specs.extend(
+                _compute_pion_bundle_specs(
+                    results=results,
+                    data=data,
+                    data_w=data_w,
+                    pid=pid,
+                    signal_classes=cc1pi0_classes,
+                    y_pred=y_pred_pi0,
+                    baseline_fpr=baseline_fpr_pi0,
+                    tag="cc1pi0",
+                    playlist=playlist,
+                )
             )
 
         if do_q3:
-            y_true_ccnpi = np.isin(pid, multi_pi_classes).astype(int)
-            y_pred_ccnpi = (
-                (n_muons == 1) & (n_charged_prongs >= 1) & (improved_nmichel >= 1)
-            ).astype(int)
-            fpn = int(np.sum((y_pred_ccnpi == 1) & (y_true_ccnpi == 0)))
-            tnn = int(np.sum((y_pred_ccnpi == 0) & (y_true_ccnpi == 0)))
-            baseline_fpr_ccnpi = fpn / (fpn + tnn) if (fpn + tnn) > 0 else float("nan")
-            if np.isfinite(baseline_fpr_ccnpi):
-                fpr_n = [baseline_fpr_ccnpi]
-
-                metrics_q3 = compute_all_metrics_q3(
-                    results,
-                    data,
-                    signal_classes=multi_pi_classes,
-                    fixed_fpr=fpr_n,
+            specs.extend(
+                _compute_q3_bundle_specs(
+                    results=results,
+                    data=data,
+                    data_w=data_w,
+                    pid=pid,
+                    multi_pi_classes=multi_pi_classes,
+                    n_muons=n_muons,
+                    n_charged_prongs=n_charged_prongs,
+                    improved_nmichel=improved_nmichel,
                     playlist=playlist,
                 )
-                bl_q3 = compute_signal_baseline(
-                    results,
-                    data,
-                    signal_classes=multi_pi_classes,
-                    playlist=playlist,
-                    pion_bins_require_has_pion=False,
-                )["q3"]
-                is_signal_ccnpi = y_true_ccnpi == 1
-                reco_q3 = compute_reco_baseline_recall_per_bin(
-                    y_pred_ccnpi,
-                    is_signal_ccnpi,
-                    data["q3_GeV"],
-                    data["q3_bin_edges"],
-                )
-                fig_n = _figure_metrics_1x3(
-                    metrics_q3,
-                    data["q3_bin_mids"],
-                    r"True $q_3$ [GeV]",
-                    bl_q3,
-                    fpr_n,
-                    reco_q3,
-                    "Baseline",
-                    clrs_dict_full,
-                    log_x=False,
-                    reco_baseline_global_fpr=baseline_fpr_ccnpi,
-                )
-                _save_single_fig(
-                    fig_n,
-                    out_dir / f"eval_classification_light_ccnpi_q3_{playlist}.pdf",
-                )
+            )
 
-                if data_w is not None:
-                    metrics_W = compute_all_metrics_W(
-                        results,
-                        data_w,
-                        signal_classes=multi_pi_classes,
-                        fixed_fpr=fpr_n,
-                        playlist=playlist,
-                        use_global_fpr=True,
-                    )
-                    bl_W = compute_signal_baseline_W(
-                        results,
-                        data_w,
-                        signal_classes=multi_pi_classes,
-                        playlist=playlist,
-                    )
-                    reco_W = compute_reco_baseline_recall_per_bin(
-                        y_pred_ccnpi,
-                        is_signal_ccnpi,
-                        data_w["W_GeV"],
-                        data_w["W_bin_edges"],
-                    )
-                    fig_w = _figure_metrics_1x3(
-                        metrics_W,
-                        data_w["W_bin_mids"],
-                        r"True hadronic $W$ [GeV]",
-                        bl_W,
-                        fpr_n,
-                        reco_W,
-                        "Baseline",
-                        clrs_dict_full,
-                        log_x=False,
-                        reco_baseline_global_fpr=baseline_fpr_ccnpi,
-                    )
-                    _save_single_fig(
-                        fig_w,
-                        out_dir / f"eval_classification_light_ccnpi_W_{playlist}.pdf",
-                    )
+    return specs
+
+
+def draw_light_classification_from_cache(
+    specs: list[dict[str, Any]],
+    clrs_dict_full: dict[str, str],
+    out_dir: Path,
+    *,
+    cfg: PlotConfig | None = None,
+) -> None:
+    """Draw light classification PDFs from pre-computed draw specs (fast).
+
+    *cfg* optionally filters metrics to the config model subset and applies
+    config colors before drawing.
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    clrs = clrs_dict_full
+    if cfg is not None:
+        clrs = {**clrs, **cfg.colors()}
+
+    for spec in specs:
+        all_metrics: dict = spec["all_metrics"]
+        if cfg is not None:
+            all_metrics = cfg.filter_dict(all_metrics)
+
+        out_path = out_dir / spec["filename"]
+
+        if spec["type"] == "1x3":
+            fig = _figure_metrics_1x3(
+                all_metrics,
+                spec["x"],
+                spec["xlabel"],
+                spec["baseline_auprc"],
+                spec["fixed_fpr"],
+                spec["reco_baseline_tpr"],
+                spec["reco_label"],
+                clrs,
+                log_x=spec.get("log_x", False),
+                reco_baseline_global_fpr=spec.get("reco_baseline_global_fpr"),
+            )
+        elif spec["type"] == "2x3_pion":
+            fig = _figure_metrics_2x3_pion(
+                all_metrics,
+                spec["x_E"],
+                spec["x_theta"],
+                spec["baseline_E"],
+                spec["baseline_theta"],
+                spec["fixed_fpr"],
+                spec["reco_tpr_E"],
+                spec["reco_tpr_theta"],
+                spec["reco_label"],
+                spec["reco_baseline_global_fpr"],
+                clrs,
+            )
+        else:
+            raise ValueError(f"Unknown draw spec type: {spec['type']!r}")
+
+        _save_single_fig(fig, out_path)
+
+
+def save_light_classification_pdfs(
+    out_dir: Path,
+    results: dict,
+    data_by_playlist: dict,
+    clrs_dict_full: dict[str, str],
+    playlists: list[str],
+    components: tuple[LightComponent, ...] = ("pion", "q3"),
+    *,
+    data_w_by_playlist: dict | None = None,
+) -> None:
+    """Write light PDFs under *out_dir* (compute + draw in one shot).
+
+    For caching, prefer calling :func:`compute_light_classification_data` once,
+    saving the result, then calling :func:`draw_light_classification_from_cache`.
+    """
+    specs = compute_light_classification_data(
+        results,
+        data_by_playlist,
+        playlists,
+        components,
+        data_w_by_playlist=data_w_by_playlist,
+    )
+    draw_light_classification_from_cache(specs, clrs_dict_full, out_dir)
 
 
 # --- Legacy notebook helpers (multi-panel counts / TPR); not used by ``save_light_classification_pdfs``. ---

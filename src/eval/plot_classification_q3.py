@@ -4,6 +4,13 @@
 Pickles default under ``<repo>/<--out-dir>/``; PDFs under
 ``<repo>/<--plots-dir>/classification/q3/`` and ``.../classification/light/``
 (``eval_classification_light_ccnpi_q3_<pl>.pdf`` and ``..._W_<pl>.pdf`` when *W* is in the pickle).
+
+Use ``--plots-only`` to read from the canonical classification pickle
+(``plots/tmp_results/classification.pkl``) and skip recomputing the light
+figures by reading from the light-classification draw-spec cache
+(``plots/tmp_results/classification_light.pkl``). Requires both caches to
+have been written by a previous non-``--plots-only`` run of this script and
+``plot_classification_light.py``.
 """
 
 from __future__ import annotations
@@ -34,15 +41,23 @@ from src.eval.classification_plots import (
     save_figures_to_pdf,
 )
 from src.eval._bootstrap import silence_classification_empty_bin_warnings
-from src.eval._classification_light import save_light_classification_pdfs
+from src.eval._classification_light import (
+    draw_light_classification_from_cache,
+    save_light_classification_pdfs,
+)
 from src.eval._constants import (
+    CANONICAL_CLASSIFICATION_PICKLE,
     CLASSIFICATION_PICKLE_STEM,
-    plot_model_label,
+    DEFAULT_CACHE_DIR,
     DEFAULT_OUT_DIR,
     DEFAULT_PLOTS_DIR,
     DEFAULT_WANDB_TAG,
+    plot_model_label,
     repo_output_path,
 )
+from src.eval._plot_config import PlotConfig
+
+_LIGHT_CACHE_NAME = "classification_light.pkl"
 
 
 def _pickle_path(out_dir: Path, flag: str) -> Path:
@@ -67,8 +82,32 @@ def main(argv: list[str] | None = None) -> None:
         help="Root for PDF output (default: plots/ under repo)",
     )
     ap.add_argument("--classification-pickle", type=Path, default=None)
+    ap.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        metavar="JSON",
+        help="Plot config JSON (models, colors, optional display_name). "
+        "When given, only listed models are drawn.",
+    )
+    ap.add_argument(
+        "--plots-only",
+        action="store_true",
+        help="Read classification data from the canonical plots cache "
+        "(plots/tmp_results/classification.pkl) and skip recomputing light "
+        "figures by reading from classification_light.pkl instead.",
+    )
+    ap.add_argument(
+        "--plots-cache",
+        type=Path,
+        default=None,
+        metavar="PKL",
+        help="Override the light-classification plots cache path used by "
+        "--plots-only (default: plots/tmp_results/classification_light.pkl).",
+    )
     args = ap.parse_args(argv)
 
+    cache_root = repo_output_path(_REPO_ROOT, DEFAULT_CACHE_DIR)
     data_root = repo_output_path(_REPO_ROOT, Path(args.out_dir or DEFAULT_OUT_DIR))
     plots_root = repo_output_path(_REPO_ROOT, args.plots_dir)
     out_dir = plots_root / "classification" / "q3"
@@ -76,7 +115,10 @@ def main(argv: list[str] | None = None) -> None:
     light_dir = plots_root / "classification" / "light"
     light_dir.mkdir(parents=True, exist_ok=True)
 
-    pkl = args.classification_pickle or _pickle_path(data_root, args.flag)
+    if args.plots_only:
+        pkl = args.classification_pickle or (cache_root / CANONICAL_CLASSIFICATION_PICKLE)
+    else:
+        pkl = args.classification_pickle or _pickle_path(data_root, args.flag)
     with open(pkl, "rb") as f:
         clf = pickle.load(f)
 
@@ -85,6 +127,14 @@ def main(argv: list[str] | None = None) -> None:
     data_w_by_playlist = clf.get("data_w_by_playlist")
     clrs = clf["clrs_dict_full"]
     playlists = clf["playlists"]
+
+    cfg: PlotConfig | None = PlotConfig.load(args.config) if args.config else None
+    if cfg is not None:
+        results = cfg.filter_dict(results)
+        clrs = {**clrs, **cfg.colors()}
+        clrs = cfg.filter_dict(clrs)
+
+    label_fn = cfg.label_for if cfg is not None else plot_model_label
 
     class_names = ["CC1π±", "CCNπ", "CC1π0", "Other-CC", "Other-NC"]
     model_names = sorted(results.keys())
@@ -112,7 +162,7 @@ def main(argv: list[str] | None = None) -> None:
             )
             ax.set_xlabel(r"Predicted class")
             ax.set_ylabel(r"True class")
-            ax.set_title(plot_model_label(model_name))
+            ax.set_title(label_fn(model_name))
         fig.suptitle(
             f"Confusion matrices (first run per model) — {playlist}", fontsize=14
         )
@@ -295,15 +345,21 @@ def main(argv: list[str] | None = None) -> None:
         plt.close(fig_comp)
         print("Saved:", fp)
 
-    save_light_classification_pdfs(
-        light_dir,
-        results,
-        data_by_playlist,
-        clrs,
-        playlists,
-        components=("q3",),
-        data_w_by_playlist=data_w_by_playlist,
-    )
+    if args.plots_only:
+        light_cache_path = args.plots_cache or (cache_root / _LIGHT_CACHE_NAME)
+        with open(light_cache_path, "rb") as f:
+            cached = pickle.load(f)
+        draw_light_classification_from_cache(cached["specs"], clrs, light_dir, cfg=cfg)
+    else:
+        save_light_classification_pdfs(
+            light_dir,
+            results,
+            data_by_playlist,
+            clrs,
+            playlists,
+            components=("q3",),
+            data_w_by_playlist=data_w_by_playlist,
+        )
 
 
 if __name__ == "__main__":
