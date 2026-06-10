@@ -4,7 +4,8 @@
 Pickles default to ``<repo>/<--out-dir>/``; PDFs default to
 ``<repo>/<--plots-dir>/``.
 
-Writes **four** combined 1×2 panels (classification | regression, shared legend):
+Writes **four** combined 1×2 panels (classification | regression, shared legend)
+plus single-task PDFs (no title; y-axis ``Validation loss (classification|regression)``):
 
 - ``steps_combined/`` — base models only (no BERT, no HyperScale)
 - ``steps_combined_BERT/`` — base + BERT
@@ -48,7 +49,6 @@ from src.eval._constants import (
     CLASSIFICATION_PICKLE_STEM,
     DEFAULT_CACHE_DIR,
     DEFAULT_OUT_DIR,
-    DEFAULT_PLOTS_DIR,
     DEFAULT_WANDB_TAG,
     REGRESSION_PICKLE_STEM,
     STEPS_SMALL_MODEL_COLORS,
@@ -66,6 +66,10 @@ _LABEL_FS = 12
 _LEGEND_FS = 10
 _TICK_FS = 11
 _TITLE_FS = 13
+
+# Single-task steps_combined panels: square, 10% shorter than the legacy (8, 5) height.
+_SINGLE_PANEL_HEIGHT = 5 * 0.9
+_SINGLE_PANEL_FIGSIZE = (_SINGLE_PANEL_HEIGHT, _SINGLE_PANEL_HEIGHT)
 
 _STEPS_CACHE_NAME = "steps.pkl"
 
@@ -150,9 +154,13 @@ def _plot_flops_vs_loss(
     out_pdf: Path,
     *,
     legend_outside: bool = False,
+    ylabel: str = "Validation loss",
+    figsize: tuple[float, float] = (8, 5),
 ) -> None:
-    fig, ax = plt.subplots(figsize=(8, 5), constrained_layout=True)
-    _draw_flops_curves(ax, loss_histories, flops_per_step, colors, ylim, panel_title)
+    fig, ax = plt.subplots(figsize=figsize, constrained_layout=True)
+    _draw_flops_curves(
+        ax, loss_histories, flops_per_step, colors, ylim, panel_title, ylabel=ylabel,
+    )
     if legend_outside:
         ax.legend(
             fontsize=_LEGEND_FS,
@@ -178,6 +186,8 @@ def _draw_flops_curves(
     ylim: tuple[float, float] | None,
     panel_title: str,
     label_fn: Callable[[str], str] | None = None,
+    *,
+    ylabel: str = "Validation loss",
 ) -> None:
     if label_fn is None:
         label_fn = plot_model_label
@@ -215,9 +225,10 @@ def _draw_flops_curves(
                 color=color,
             )
 
-    ax.set_title(panel_title, fontsize=_TITLE_FS, pad=10)
+    if panel_title:
+        ax.set_title(panel_title, fontsize=_TITLE_FS, pad=10)
     ax.set_xlabel(r"$log_{10}$(Training FLOPs)", fontsize=_LABEL_FS)
-    ax.set_ylabel("Validation loss", fontsize=_LABEL_FS)
+    ax.set_ylabel(ylabel, fontsize=_LABEL_FS)
     ax.tick_params(axis="both", labelsize=_TICK_FS)
     if ylim:
         ax.set_ylim(ylim)
@@ -234,11 +245,13 @@ def _plot_steps_vs_loss(
     *,
     legend_outside: bool = False,
     label_fn: Callable[[str], str] | None = None,
+    ylabel: str = "Validation loss",
+    figsize: tuple[float, float] = (8, 5),
 ) -> None:
-    fig, ax = plt.subplots(figsize=(8, 5), constrained_layout=True)
+    fig, ax = plt.subplots(figsize=figsize, constrained_layout=True)
     _draw_steps_curves(
         ax, loss_histories, flops_per_step, colors, ylim, panel_title, step_cutoff,
-        label_fn=label_fn,
+        label_fn=label_fn, ylabel=ylabel,
     )
     if legend_outside:
         ax.legend(
@@ -267,6 +280,7 @@ def _draw_steps_curves(
     step_cutoff: int | None = None,
     *,
     label_fn: Callable[[str], str] | None = None,
+    ylabel: str = "Validation loss",
 ) -> None:
     if label_fn is None:
         label_fn = plot_model_label
@@ -309,9 +323,10 @@ def _draw_steps_curves(
                 color=color,
             )
 
-    ax.set_title(panel_title, fontsize=_TITLE_FS, pad=10)
+    if panel_title:
+        ax.set_title(panel_title, fontsize=_TITLE_FS, pad=10)
     ax.set_xlabel(r"$log_{10}$(Training steps)", fontsize=_LABEL_FS)
-    ax.set_ylabel("Validation loss", fontsize=_LABEL_FS)
+    ax.set_ylabel(ylabel, fontsize=_LABEL_FS)
     ax.tick_params(axis="both", labelsize=_TICK_FS)
     if ylim:
         ax.set_ylim(ylim)
@@ -462,6 +477,35 @@ def _plot_variant_bundle(
         label_fn,
     )
 
+    if lh_c_v:
+        _plot_flops_vs_loss(
+            lh_c_v, flops_c_v, colors_c_v, "", ylim_c,
+            combined_out / "log_flops_vs_val_loss_classification.pdf",
+            ylabel="Validation loss (classification)",
+            figsize=_SINGLE_PANEL_FIGSIZE,
+        )
+        _plot_steps_vs_loss(
+            lh_c_v, flops_c_v, colors_c_v, "", ylim_c, step_cutoff,
+            combined_out / "log_steps_vs_val_loss_classification.pdf",
+            label_fn=label_fn,
+            ylabel="Validation loss (classification)",
+            figsize=_SINGLE_PANEL_FIGSIZE,
+        )
+    if lh_r_v:
+        _plot_flops_vs_loss(
+            lh_r_v, flops_r_v, colors_r_v, "", ylim_r,
+            combined_out / "log_flops_vs_val_loss_regression.pdf",
+            ylabel="Validation loss (regression)",
+            figsize=_SINGLE_PANEL_FIGSIZE,
+        )
+        _plot_steps_vs_loss(
+            lh_r_v, flops_r_v, colors_r_v, "", ylim_r, None,
+            combined_out / "log_steps_vs_val_loss_regression.pdf",
+            label_fn=label_fn,
+            ylabel="Validation loss (regression)",
+            figsize=_SINGLE_PANEL_FIGSIZE,
+        )
+
     if not separate_panels:
         return
 
@@ -498,8 +542,8 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument(
         "--plots-dir",
         type=Path,
-        default=DEFAULT_PLOTS_DIR,
-        help="Root for PDF output (default: plots/ under repo)",
+        default=None,
+        help="Root for PDF output (default: <out-dir>/plots)",
     )
     ap.add_argument(
         "--separate-panels",
@@ -531,6 +575,8 @@ def main(argv: list[str] | None = None) -> None:
         help="Override the steps plots cache path (default: plots/tmp_results/steps.pkl).",
     )
     args = ap.parse_args(argv)
+    if args.plots_dir is None:
+        args.plots_dir = Path(args.out_dir or DEFAULT_OUT_DIR) / "plots"
 
     plots_root = repo_output_path(_REPO_ROOT, args.plots_dir)
     cache_root = repo_output_path(_REPO_ROOT, DEFAULT_CACHE_DIR)

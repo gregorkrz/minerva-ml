@@ -49,6 +49,100 @@ def mc_value_in_bin(
     return ok & in_bin
 
 
+def _resolve_test_idx(data: dict, playlist: str) -> np.ndarray:
+    """Return test-split indices for *playlist* from a classification data dict.
+
+    ``load_truth_and_baselines(..., playlists=[pl])`` stores only that playlist's
+    indices under ``data["test_idx"]``.  Fall back to the sole entry when the
+    requested key is missing but the dict has exactly one playlist.
+    """
+    test_idx = data.get("test_idx")
+    if test_idx is None:
+        raise KeyError("classification data dict has no 'test_idx'")
+    if isinstance(test_idx, dict):
+        if playlist in test_idx:
+            return np.asarray(test_idx[playlist])
+        if len(test_idx) == 1:
+            return np.asarray(next(iter(test_idx.values())))
+        raise KeyError(
+            f"test_idx keys {list(test_idx.keys())!r} do not include playlist {playlist!r}"
+        )
+    return np.asarray(test_idx)
+
+
+def _rebuild_per_event_array(
+    data: dict,
+    playlist: str,
+    n_pred: int,
+    key: str,
+) -> np.ndarray | None:
+    """Rebuild a test-sized per-event array from baselines (same as ``_io.load``)."""
+    baselines = data.get("baselines", {})
+    bl_pl = baselines.get(playlist)
+    if bl_pl is None:
+        return None
+    try:
+        test_idx = _resolve_test_idx(data, playlist)
+    except KeyError:
+        return None
+
+    if key == "q3_GeV" and "q3" in bl_pl:
+        return bl_pl["q3"][test_idx] / 1000.0
+
+    if key == "W_GeV" and "mc_true_hadronic_W_GeV" in bl_pl:
+        from ._hadronic_w import mc_true_hadronic_W_gev_from_baselines
+
+        return mc_true_hadronic_W_gev_from_baselines(bl_pl, test_idx)
+
+    if key in ("pion_E_MC", "pion_theta_MC", "has_pion") and "pion_four_vectors" in bl_pl:
+        pion_fv = bl_pl["pion_four_vectors"][test_idx] / 1000.0
+        if key == "pion_E_MC":
+            return pion_fv[:, -1]
+        if key == "has_pion":
+            return pion_fv[:, -1] > 0
+        pion_p_MC = np.linalg.norm(pion_fv[:, 1:4], axis=1)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            return np.arccos(pion_fv[:, 2] / pion_p_MC)
+
+    if key == "int_type_arr":
+        truth_labels = data.get("truth_labels", {})
+        tl = truth_labels.get(playlist)
+        if tl is None and len(truth_labels) == 1:
+            tl = next(iter(truth_labels.values()))
+        if tl is not None:
+            col = tl[:, 1]
+            return col.numpy() if hasattr(col, "numpy") else np.asarray(col)
+
+    return None
+
+
+def _align_per_event_array(
+    arr: np.ndarray,
+    data: dict,
+    playlist: str,
+    n_pred: int,
+    *,
+    key: str | None = None,
+) -> np.ndarray:
+    """Index *arr* onto the test split so its length matches model predictions."""
+    arr = np.asarray(arr)
+    if len(arr) == n_pred:
+        return arr
+
+    if key is not None:
+        rebuilt = _rebuild_per_event_array(data, playlist, n_pred, key)
+        if rebuilt is not None:
+            return rebuilt
+
+    test_idx = _resolve_test_idx(data, playlist)
+    if len(arr) > n_pred and len(test_idx) == n_pred:
+        return arr[test_idx]
+    raise ValueError(
+        f"Per-event array length {len(arr)} does not match prediction count "
+        f"{n_pred} (test_idx length {len(test_idx)})."
+    )
+
+
 def _pion_kinematic_bin_mask(
     data: dict,
     *,
@@ -56,6 +150,8 @@ def _pion_kinematic_bin_mask(
     bin_index: int,
     edges: np.ndarray,
     require_has_pion: bool,
+    playlist: str = "1A",
+    n_pred: int | None = None,
 ) -> np.ndarray:
     """MC pion E or θ in histogram bin *bin_index*, optionally ``has_pion``."""
     if kind == "E":
@@ -66,9 +162,16 @@ def _pion_kinematic_bin_mask(
         req_fin = True
     else:
         raise ValueError(f"kind must be 'E' or 'theta', got {kind!r}")
+    if n_pred is not None:
+        x = _align_per_event_array(
+            x, data, playlist, n_pred, key="pion_E_MC" if kind == "E" else "pion_theta_MC"
+        )
     bm = mc_value_in_bin(x, edges, bin_index, require_finite=req_fin)
     if require_has_pion:
-        bm = bm & data["has_pion"]
+        has_pion = data["has_pion"]
+        if n_pred is not None:
+            has_pion = _align_per_event_array(has_pion, data, playlist, n_pred, key="has_pion")
+        bm = bm & has_pion
     return bm
 
 
@@ -195,10 +298,12 @@ def compute_binned_metrics_single(
 
     sig = get_signal_probabilities(result, signal_classes, playlist)
     y_true, probs = sig["ytrue"], sig["ypred"]
+    n_pred = len(y_true)
     is_signal = y_true == 1
     is_background = y_true == 0
 
     if event_mask is not None:
+        event_mask = _align_per_event_array(event_mask, data, playlist, n_pred)
         is_signal = is_signal & event_mask
         is_background = is_background & event_mask
 
@@ -227,6 +332,8 @@ def compute_binned_metrics_single(
             bin_index=i,
             edges=E_bins,
             require_has_pion=pion_bins_require_has_pion,
+            playlist=playlist,
+            n_pred=n_pred,
         )
         metrics_E.append(
             bin_separation_metrics(
@@ -249,6 +356,8 @@ def compute_binned_metrics_single(
             bin_index=i,
             edges=theta_bins,
             require_has_pion=pion_bins_require_has_pion,
+            playlist=playlist,
+            n_pred=n_pred,
         )
         metrics_theta.append(
             bin_separation_metrics(
@@ -288,8 +397,10 @@ def compute_binned_metrics_q3(
 
     sig = get_signal_probabilities(result, signal_classes, playlist)
     y_true, probs = sig["ytrue"], sig["ypred"]
+    n_pred = len(y_true)
 
     if event_mask is not None:
+        event_mask = _align_per_event_array(event_mask, data, playlist, n_pred)
         y_glob, p_glob = y_true[event_mask], probs[event_mask]
     else:
         y_glob, p_glob = y_true, probs
@@ -301,7 +412,7 @@ def compute_binned_metrics_q3(
         else None
     )
 
-    q3 = data["q3_GeV"]
+    q3 = _align_per_event_array(data["q3_GeV"], data, playlist, n_pred, key="q3_GeV")
     edges = data["q3_bin_edges"]
 
     metrics = []
@@ -374,8 +485,10 @@ def compute_binned_metrics_W(
 
     sig = get_signal_probabilities(result, signal_classes, playlist)
     y_true, probs = sig["ytrue"], sig["ypred"]
+    n_pred = len(y_true)
 
     if event_mask is not None:
+        event_mask = _align_per_event_array(event_mask, data, playlist, n_pred)
         y_glob, p_glob = y_true[event_mask], probs[event_mask]
     else:
         y_glob, p_glob = y_true, probs
@@ -387,7 +500,7 @@ def compute_binned_metrics_W(
         else None
     )
 
-    w = data["W_GeV"]
+    w = _align_per_event_array(data["W_GeV"], data, playlist, n_pred, key="W_GeV")
     edges = data["W_bin_edges"]
 
     metrics = []

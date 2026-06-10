@@ -147,38 +147,124 @@ python -m src.scripts.print_eval_commands --wandb-flag <TAG>
 
 ### Evaluation plots (`src.eval`)
 
-Offline plotting reads cached pickles under `out/` (by default) and writes PDFs under `plots/` (by default). Run from the repository root with `PYTHONPATH` set to the repo (or install the package in editable mode) so imports resolve.
+Offline plotting reads cached pickles and writes PDFs under `plots/`. Run from the repository root (on Perlmutter, use the `omni` env: `/global/homes/g/gregork/.conda/envs/omni/bin/python`).
 
-**1. Cache eval inputs** (loads checkpoints / W&B histories; paths are configurable in `src/eval/_constants.py`):
+W&B runs are selected by the **wandb tag** passed as `--flag` (see `fetch_runs_from_wandb` in `src/utils/utils.py`). Model keys in plot configs must match the grouped model names in those pickles (e.g. `OmniLearned-small`, `BERT-tiny`).
 
-```bash
-export PYTHONPATH="$PWD"
-python -m src.eval.collect_eval_data --flag Run_2703 --out-dir /global/cfs/cdirs/m3246/gregork/Minerva/runs/
-
-```
-
-This writes `out/classification_<TAG>.pkl` and `out/regression_<TAG>.pkl`. Use `--out-dir` optionally.
-
-W&B runs are selected by the **wandb tag** passed as `--flag` (see `fetch_runs_from_wandb` in `src/utils/utils.py`). BERT baselines from `submit_train_jobs.py` use names like `Run_1703_BERT_tiny_{regression|classifier}_<cap>_seed…`; tag those runs in W&B (e.g. `Run_1703`) and pass the same tag to `collect_eval_data` / `plot_*` so they are grouped as **BERT-tiny** and **BERT-tiny-rw**. Training-curve x-positions use FLOPs per step from `src/eval/_constants.py` (`FLOPS_PER_STEP`); BERT-tiny entries match `train.py --calculate-flops` (training heuristic 3× inference per batch). Re-measure if you change batch size, depth, or architecture.
-
-**Optional:** Download latest cached model outputs
-
-* Instead of using `python -m src.eval.collect_eval_data`, you can use download the latest files with evaluation data (https://huggingface.co/datasets/gregorkrzmanc/minerva-ml-eval), and set $OUT to the path where you download this data.
-**2. Generate PDFs** (each script accepts `--flag`, `--out-dir`, and `--plots-dir`; defaults match the layout below). Plotting code lives under ``src.eval.classification_plots`` and ``src.eval.e_available_plots`` (several modules each); notebooks may still use ``from eval_*_plots import …`` via thin shims in ``notebooks/``.
+#### 1. Cache eval inputs (once per W&B tag)
 
 ```bash
+cd ~/minerva-ml-hyperscale
 export FLAG=Run_2703
-export OUT=/global/cfs/cdirs/m3246/gregork/Minerva/runs/
-python -m src.eval.plot_steps                 --flag $FLAG --out-dir $OUT     # training curves → plots/steps_combined/ (1×2 clf|reg, one legend); add --separate-panels for plots/{classification,regression}/steps/
-python -m src.eval.plot_regression            --flag $FLAG --out-dir $OUT     # energy / q₃ / scaling → plots/regression/
-python -m src.eval.plot_classification_W      --flag $FLAG --out-dir $OUT     # vs hadronic W → plots/classification/w_bins/
-python -m src.eval.plot_classification_q3     --flag $FLAG --out-dir $OUT     # vs q₃, CCNπ, light appendix → plots/classification/q3/ and .../light/
-python -m src.eval.plot_classification_Pions  --flag $FLAG --out-dir $OUT     # pion kinematics, CC1π⁰, light appendix → plots/classification/pions/ and .../light/
-python -m src.eval.plot_classification_light  --flag $FLAG --out-dir $OUT     # light PDFs only → plots/classification/light/ (see --components)
+export OUT=/global/cfs/cdirs/m3246/gregork/Minerva/runs
+
+/global/homes/g/gregork/.conda/envs/omni/bin/python -m src.eval.collect_eval_data \
+    --flag $FLAG --out-dir $OUT
 ```
 
+Writes `classification_<TAG>.pkl` and `regression_<TAG>.pkl` under `$OUT`. Alternatively, download pre-built pickles from [gregorkrzmanc/minerva-ml-eval](https://huggingface.co/datasets/gregorkrzmanc/minerva-ml-eval) and point `$OUT` at that directory.
 
-**3. Figures for a LaTeX paper** (copies or single-page extracts into `figures_latex/`):
+#### 2. Build plot caches (once; expensive step)
+
+These caches live under `plots/tmp_results/` and let later runs use `--plots-only` without reloading the 16 GB classification pickle or recomputing metrics.
+
+```bash
+# Classification metrics (q3, W, pion kinematics, per-inttype baselines, …)
+/global/homes/g/gregork/.conda/envs/omni/bin/python -m src.eval.build_classification_cache \
+    --flag $FLAG --out-dir $OUT --force
+
+# Other caches (run once each; also built automatically on a normal non--plots-only run)
+/global/homes/g/gregork/.conda/envs/omni/bin/python -m src.eval.plot_steps              --flag $FLAG --out-dir $OUT
+/global/homes/g/gregork/.conda/envs/omni/bin/python -m src.eval.plot_classification_light --flag $FLAG --out-dir $OUT
+/global/homes/g/gregork/.conda/envs/omni/bin/python -m src.eval.plot_regression         --flag $FLAG --out-dir $OUT
+```
+
+| Cache file | Built by | Used for |
+|---|---|---|
+| `classification_metrics.pkl` | `build_classification_cache` | q3, W, pions (`--plots-only`) |
+| `classification_light.pkl` | `plot_classification_light` | light appendix + q3 light panels |
+| `steps.pkl` | `plot_steps` | training-curve plots |
+| `regression.pkl` | `plot_regression` / `collect_eval_data` | energy-regression plots |
+
+#### 3. Generate PDFs from cache (fast; config-driven)
+
+**Recommended:** `scripts/generate_comparison_plots.sh` loops over every JSON in `plot_configs/` and writes one output tree per config under `plots/<config_name>/`.
+
+```bash
+bash scripts/generate_comparison_plots.sh
+```
+
+The script builds `classification_metrics.pkl` automatically if it is missing, then runs all `plot_*` modules with `--plots-only` and `--config`. Edit `FLAG`, `OUT_DIR`, and `METRICS_CACHE` at the top of the script if your paths differ.
+
+**Single config** (example: BERT vs OmniLearned):
+
+```bash
+CONFIG=plot_configs/bert_vs_ol.json
+PLOTS=plots/bert_vs_ol
+CACHE=plots/tmp_results/classification_metrics.pkl
+
+/global/homes/g/gregork/.conda/envs/omni/bin/python -m src.eval.plot_classification_q3 \
+    --plots-only --config $CONFIG --plots-dir $PLOTS --metrics-cache $CACHE
+/global/homes/g/gregork/.conda/envs/omni/bin/python -m src.eval.plot_classification_W \
+    --plots-only --config $CONFIG --plots-dir $PLOTS --metrics-cache $CACHE
+/global/homes/g/gregork/.conda/envs/omni/bin/python -m src.eval.plot_classification_Pions \
+    --plots-only --config $CONFIG --plots-dir $PLOTS --metrics-cache $CACHE
+# … likewise for plot_steps, plot_classification_light, plot_regression
+```
+
+#### Plot configs (`plot_configs/`)
+
+Each `*.json` file selects which models appear on the figures and their colors. Schema (see `src/eval/_plot_config.py`):
+
+```json
+{
+  "models": [
+    {"name": "OmniLearned-small", "color": "#ff7f0e", "display_name": "OL-small"},
+    {"name": "BERT-tiny", "color": "#0d9488", "display_name": "BERT-small"}
+  ],
+  "step_cutoff": null
+}
+```
+
+- **`name`** — must match a model key in the eval pickles (from W&B grouping).
+- **`color`** — matplotlib color for that model.
+- **`display_name`** — optional legend label override.
+- **`step_cutoff`** — optional int; clips the x-axis on log-steps plots only.
+
+**Existing configs:** `default.json` (full model lineup), `bert_vs_ol.json`, `hyperscale.json`, `V1Paper.json`, `20260606_Comparison.json`.
+
+**Add a new configuration:**
+
+1. Copy an existing file, e.g. `cp plot_configs/bert_vs_ol.json plot_configs/my_paper.json`.
+2. Edit the `models` list — keep only the models you want on the figures; reuse colors from `default.json` or `src/eval/_constants.py` (`CLRS_CLASSIFICATION` / `CLRS_REGRESSION`) for consistency.
+3. Run plots into a matching output folder:
+   ```bash
+   /global/homes/g/gregork/.conda/envs/omni/bin/python -m src.eval.plot_classification_q3 \
+       --plots-only --config plot_configs/my_paper.json --plots-dir plots/my_paper \
+       --metrics-cache plots/tmp_results/classification_metrics.pkl
+   ```
+   Or add `my_paper.json` to the loop in `scripts/generate_comparison_plots.sh` (it already picks up every `plot_configs/*.json`).
+
+Output layout per config: `plots/<config>/classification/{q3,w_bins,pions,light}/`, `plots/<config>/regression/`, `plots/<config>/steps_combined/`, etc.
+
+#### Full recompute (no cache)
+
+If caches are missing or eval data changed, run the individual `plot_*` scripts **without** `--plots-only` (slower; recomputes and refreshes caches):
+
+```bash
+/global/homes/g/gregork/.conda/envs/omni/bin/python -m src.eval.plot_steps              --flag $FLAG --out-dir $OUT
+/global/homes/g/gregork/.conda/envs/omni/bin/python -m src.eval.plot_regression             --flag $FLAG --out-dir $OUT
+/global/homes/g/gregork/.conda/envs/omni/bin/python -m src.eval.plot_classification_W      --flag $FLAG --out-dir $OUT
+/global/homes/g/gregork/.conda/envs/omni/bin/python -m src.eval.plot_classification_q3     --flag $FLAG --out-dir $OUT
+/global/homes/g/gregork/.conda/envs/omni/bin/python -m src.eval.plot_classification_Pions  --flag $FLAG --out-dir $OUT
+/global/homes/g/gregork/.conda/envs/omni/bin/python -m src.eval.plot_classification_light  --flag $FLAG --out-dir $OUT
+```
+
+Plotting code lives under `src.eval.classification_plots` and `src.eval.e_available_plots`; notebooks may use thin shims in `notebooks/`.
+
+#### Figures for a LaTeX paper
+
+Copies or single-page extracts into `figures_latex/`:
 
 ```bash
 python -m src.scripts.copy_figures_for_paper

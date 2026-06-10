@@ -1,0 +1,11 @@
+{
+  "_comment": "Dated snapshot for plots/20260606_Comparison — same models as bert_vs_ol.json.",
+  "models": [
+    {"name": "BERT-tiny",           "color": "#0d9488", "display_name": "BERT-small"},
+    {"name": "BERT-tiny-rw",        "color": "#7c3aed", "display_name": "BERT-small-rw"},
+    {"name": "OmniLearned-small",   "color": "#ff7f0e"},
+    {"name": "OmniLearned-small-rw","color": "#e377c2"},
+    {"name": "OmniLearned-medium",  "color": "#9467bd"}
+  ],
+  "step_cutoff": null
+}

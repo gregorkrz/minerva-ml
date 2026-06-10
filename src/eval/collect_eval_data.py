@@ -252,6 +252,11 @@ def main(argv: list[str] | None = None) -> None:
         action="store_true",
         help="Only collect regression eval data and write the regression pickle; skip classification.",
     )
+    p.add_argument(
+        "--classification-only",
+        action="store_true",
+        help="Only collect classification eval data and write the classification pickle; skip regression.",
+    )
     args = p.parse_args(argv)
 
     out_dir = _REPO_ROOT / (args.out_dir or DEFAULT_OUT_DIR)
@@ -268,11 +273,14 @@ def main(argv: list[str] | None = None) -> None:
     else:
         print("Skipping classification (--regression-only).")
 
-    print("Collecting regression…")
-    reg = collect_regression(args.ckpt_dir, args.flag, args.suppress_errors)
-    with open(reg_path, "wb") as f:
-        pickle.dump(reg, f, protocol=pickle.HIGHEST_PROTOCOL)
-    print("Wrote", reg_path)
+    if not args.classification_only:
+        print("Collecting regression…")
+        reg = collect_regression(args.ckpt_dir, args.flag, args.suppress_errors)
+        with open(reg_path, "wb") as f:
+            pickle.dump(reg, f, protocol=pickle.HIGHEST_PROTOCOL)
+        print("Wrote", reg_path)
+    else:
+        print("Skipping regression (--classification-only).")
 
 
 if __name__ == "__main__":

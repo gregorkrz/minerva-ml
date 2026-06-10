@@ -43,7 +43,6 @@ from src.eval._constants import (
     CLASSIFICATION_PICKLE_STEM,
     DEFAULT_CACHE_DIR,
     DEFAULT_OUT_DIR,
-    DEFAULT_PLOTS_DIR,
     DEFAULT_WANDB_TAG,
     repo_output_path,
 )
@@ -76,8 +75,8 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument(
         "--plots-dir",
         type=Path,
-        default=DEFAULT_PLOTS_DIR,
-        help="Root for PDF output (default: plots/ under repo)",
+        default=None,
+        help="Root for PDF output (default: <out-dir>/plots)",
     )
     ap.add_argument(
         "--components",
@@ -110,6 +109,8 @@ def main(argv: list[str] | None = None) -> None:
         "a normal run (default: plots/tmp_results/classification_light.pkl).",
     )
     args = ap.parse_args(argv)
+    if args.plots_dir is None:
+        args.plots_dir = Path(args.out_dir or DEFAULT_OUT_DIR) / "plots"
 
     print(
         "Random baseline TPR/FPR: for scores independent of truth (same notion as "

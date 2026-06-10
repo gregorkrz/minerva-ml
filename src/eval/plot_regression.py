@@ -37,7 +37,6 @@ from src.eval.e_available_plots import (
 from src.eval._constants import (
     DEFAULT_CACHE_DIR,
     DEFAULT_OUT_DIR,
-    DEFAULT_PLOTS_DIR,
     DEFAULT_WANDB_TAG,
     REGRESSION_PICKLE_STEM,
     plot_model_label,
@@ -82,8 +81,8 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument(
         "--plots-dir",
         type=Path,
-        default=DEFAULT_PLOTS_DIR,
-        help="Root for PDF output (default: plots/ under repo)",
+        default=None,
+        help="Root for PDF output (default: <out-dir>/plots)",
     )
     ap.add_argument("--regression-pickle", type=Path, default=None)
     ap.add_argument(
@@ -109,6 +108,8 @@ def main(argv: list[str] | None = None) -> None:
         "(default: plots/tmp_results/regression.pkl).",
     )
     args = ap.parse_args(argv)
+    if args.plots_dir is None:
+        args.plots_dir = Path(args.out_dir or DEFAULT_OUT_DIR) / "plots"
 
     _maybe_register_arial()
 

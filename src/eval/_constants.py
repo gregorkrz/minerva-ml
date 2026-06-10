@@ -8,13 +8,31 @@ DEFAULT_CKPT_DIR = Path("/global/cfs/cdirs/m3246/gregork/checkpoints")
 DEFAULT_WANDB_TAG = "Run_2703"
 DEFAULT_OUT_DIR = Path("out")
 # Default directory for plot PDFs (under repo unless path is absolute).
-DEFAULT_PLOTS_DIR = Path("plots")
 CLASSIFICATION_PICKLE_STEM = "classification"
 REGRESSION_PICKLE_STEM = "regression"
 # Canonical cache paths used by --plots-only (no flag suffix, no wandb needed).
 DEFAULT_CACHE_DIR = Path("plots/tmp_results")
+DEFAULT_CFS_PLOTS_DIR = Path("/global/cfs/cdirs/m3246/gregork/Minerva/runs/plots")
+DEFAULT_CFS_CACHE_DIR = DEFAULT_CFS_PLOTS_DIR / "tmp_results"
 CANONICAL_CLASSIFICATION_PICKLE = "classification.pkl"
 CANONICAL_REGRESSION_PICKLE = "regression.pkl"
+
+
+def canonical_classification_pickle_paths(
+    repo_root: Path,
+    flag: str = DEFAULT_WANDB_TAG,
+    data_root: Path | None = None,
+) -> list[Path]:
+    """Candidate paths for the classification pickle (largest existing file wins)."""
+    runs_root = DEFAULT_CFS_PLOTS_DIR.parent
+    paths = [
+        runs_root / f"{CLASSIFICATION_PICKLE_STEM}_{flag}.pkl",
+        DEFAULT_CFS_CACHE_DIR / CANONICAL_CLASSIFICATION_PICKLE,
+        repo_output_path(repo_root, DEFAULT_CACHE_DIR) / CANONICAL_CLASSIFICATION_PICKLE,
+    ]
+    if data_root is not None:
+        paths.insert(1, data_root / f"{CLASSIFICATION_PICKLE_STEM}_{flag}.pkl")
+    return paths
 
 # FLOPs per training step (batch size 2048) — same tables as notebooks.
 # OmniLearned-medium: scalar used for log-FLOPs plots (full-model training proxy). Frozen-backbone
@@ -52,6 +70,33 @@ CLRS_CLASSIFICATION: dict[str, str] = {
     "OmniLearned-small-rw": "#e377c2",
     "Transformer2": "#d62728",
     "Transformer2-DIS": "#f59e0b",  # amber — distinct from full-data Transformer2 (red)
+}
+
+
+def is_bert_model(name: str) -> bool:
+    return name.startswith("BERT-")
+
+
+def is_hyperscale_model(name: str) -> bool:
+    return name.startswith("HyperScale-")
+
+
+def is_base_steps_model(name: str) -> bool:
+    """Default steps-plot filter: excludes BERT and HyperScale models."""
+    return not is_bert_model(name) and not is_hyperscale_model(name)
+
+
+# Small-model subset for the _small steps variant (V1Paper set).
+STEPS_SMALL_MODELS: frozenset[str] = frozenset({
+    "OmniLearned-small",
+    "OmniLearned-small-rw",
+    "OmniLearned-medium",
+    "Transformer-xsmall",
+    "Transformer-small",
+})
+
+STEPS_SMALL_MODEL_COLORS: dict[str, str] = {
+    m: CLRS_CLASSIFICATION[m] for m in STEPS_SMALL_MODELS if m in CLRS_CLASSIFICATION
 }
 
 
