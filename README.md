@@ -2,6 +2,9 @@
 
 This repository contains the data processing and model training code used for ML studies on MINERvA events.
 
+> **Evaluation plots** — browse the latest model-comparison figures (classification, regression, training curves) by configuration:
+> **[minerva-ml plots](https://d1to0n5578l1po.cloudfront.net/index.html)**
+
 ## Dataset
 
 The processed dataset used by this project is available on Hugging Face:
@@ -195,6 +198,16 @@ bash scripts/generate_comparison_plots.sh
 ```
 
 The script builds `classification_metrics.pkl` automatically if it is missing, then runs all `plot_*` modules with `--plots-only` and `--config`. Edit `FLAG`, `OUT_DIR`, and `METRICS_CACHE` at the top of the script if your paths differ.
+
+#### 4. Publish plots (S3 / CloudFront)
+
+Plot PDFs are not tracked in git. After generating locally, publish the HTML index and figures:
+
+```bash
+bash scripts/publish_plots.sh
+```
+
+Public browse URL: **[https://d1to0n5578l1po.cloudfront.net/index.html](https://d1to0n5578l1po.cloudfront.net/index.html)**
 
 **Single config** (example: BERT vs OmniLearned):
 
