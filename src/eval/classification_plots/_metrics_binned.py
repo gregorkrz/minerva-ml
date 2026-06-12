@@ -185,7 +185,10 @@ def get_signal_probabilities(
     signal_set = set(signal_classes)
     y_true = np.array([1 if x in signal_set else 0 for x in pid])
     probs = result[playlist]["prediction"]
-    y_pred = sum(probs[:, c] for c in signal_classes)
+    if probs.shape[1] == 2:
+        y_pred = probs[:, 1]
+    else:
+        y_pred = sum(probs[:, c] for c in signal_classes)
     # convert nans in y_pred to 0
     y_pred = np.nan_to_num(y_pred, 0.0)
     return {"ytrue": y_true, "ypred": y_pred}

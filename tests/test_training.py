@@ -24,7 +24,7 @@ class TestDataLoading:
             class_label_idx=9,
             regress_log=False,
         )
-        loader, class_weights = load_data(
+        loader, class_weights, _ = load_data(
             dataset_name="minerva_1A",
             path=synthetic_data_dir,
             batch=8,
@@ -55,7 +55,7 @@ class TestDataLoading:
             class_idx_map={1: 0, 2: 1, 3: 2, 4: 3, 8: 4},
             class_label_idx=1,
         )
-        loader, class_weights = load_data(
+        loader, class_weights, _ = load_data(
             dataset_name="minerva_1A",
             path=synthetic_data_dir,
             batch=8,

@@ -1,6 +1,5 @@
 # Train the transformer locally
 from src.constants.slurm_template import SLURM_TEMPLATE_GPU
-from src.models.hyperscale import peek_hyperscale_checkpoint_args
 import functools
 import os
 from datetime import datetime as dt
@@ -52,6 +51,8 @@ def _hyperscale_arch_for(size):
             f"No HyperScale pretrained path for size {size!r}; "
             f"known sizes: {tuple(HYPERSCALE_PRETRAINED_PATHS)}"
         )
+    from src.models.hyperscale import peek_hyperscale_checkpoint_args
+
     arch = peek_hyperscale_checkpoint_args(HYPERSCALE_PRETRAINED_PATHS[size])
     if arch is None:
         raise ValueError(
@@ -124,6 +125,9 @@ def generate_cmd(
     resume_run_name="",
     model_n_layers=4,
     event_types=None,
+    binned_loss_var=None,
+    binned_loss_signal=None,
+    binary_classifier=False,
 ):
     if continue_from:
         base = f"python -m src.scripts.train --resume {continue_from} -name {resume_run_name} --resume-run-id {resume_run_id} --max_steps 1000000"
@@ -162,6 +166,9 @@ def generate_cmd(
     elif model == "BERT-tiny-rw":
         name = f"Run_1703_BERT_tiny_rw_{task}_{data_cap}_seed{seed}"
         extra = " --use-bert tiny-rw --zero-cond-feature 2 "
+    elif model == "BERT-tiny-energy-order":
+        name = f"Run_1703_BERT_tiny_energy_order_{task}_{data_cap}_seed{seed}"
+        extra = " --use-bert tiny --bert-energy-order --zero-cond-feature 2 "
     elif model.startswith("HyperScale-"):
         hs_size, hs_random_init, hs_variant = _parse_hyperscale_tag(model)
         # Arch comes from the pretrained run's train_config.yaml — single
@@ -218,6 +225,23 @@ def generate_cmd(
         # Tag the run name so it doesn't collide with unfiltered runs.
         suffix = "_" + "".join(str(t).upper() for t in event_types) + "_only"
         name = name + suffix
+    if binned_loss_var and binned_loss_signal:
+        if task != "classifier":
+            raise ValueError("Binned loss weighting requires task='classifier'.")
+        binned_tag = binned_loss_signal
+        if binary_classifier:
+            binned_tag = f"{binned_loss_signal}Bin"
+            extra += " --binary-classifier "
+            extra += f" --binary-signal {binned_loss_signal} "
+        extra += (
+            f" --binned-loss-var {binned_loss_var} "
+            f"--binned-loss-signal {binned_loss_signal} "
+        )
+        name += f"_binned{binned_loss_var}_{binned_tag}"
+    elif binned_loss_var or binned_loss_signal:
+        raise ValueError(
+            "Both binned_loss_var and binned_loss_signal must be set together."
+        )
     return base.format(
         bs=bs,
         task=task,

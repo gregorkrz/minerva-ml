@@ -640,3 +640,48 @@ class TestBertBaseline:
         with pytest.raises(ValueError, match="global_cont is missing"):
             with torch.no_grad():
                 _ = model(torch.randn(B, N, 4), torch.ones(B, N))
+
+
+class TestSortParticlesByEnergy:
+    def test_sorts_valid_particles_descending(self):
+        from src.scripts.train import sort_particles_by_energy
+
+        # log(E) is feature index 3
+        X = torch.tensor(
+            [
+                [
+                    [0.0, 0.0, 0.0, 1.0],
+                    [0.0, 0.0, 0.0, 3.0],
+                    [0.0, 0.0, 0.0, 2.0],
+                    [0.0, 0.0, 0.0, 0.0],
+                ]
+            ],
+            dtype=torch.float32,
+        )
+        mask = torch.tensor([[1.0, 1.0, 1.0, 0.0]], dtype=torch.float32)
+        X_out, mask_out = sort_particles_by_energy(X, mask)
+        assert X_out[0, :3, 3].tolist() == [3.0, 2.0, 1.0]
+        assert mask_out[0].tolist() == [1.0, 1.0, 1.0, 0.0]
+
+    def test_prepare_batch_bert_energy_order(self):
+        from src.scripts.train import prepare_batch_bert
+
+        batch = {
+            "X": torch.tensor(
+                [
+                    [
+                        [0.0, 0.0, 0.0, 1.0, 0.0],
+                        [0.0, 0.0, 0.0, 3.0, 0.0],
+                        [0.0, 0.0, 0.0, 2.0, 0.0],
+                    ]
+                ],
+                dtype=torch.float32,
+            ),
+            "y": torch.tensor([0.0], dtype=torch.float32),
+            "attention_mask": torch.tensor([[1.0, 1.0, 1.0]], dtype=torch.float32),
+        }
+        out = prepare_batch_bert(
+            batch, torch.device("cpu"), use_pid=True, pid_idx=4, energy_order=True
+        )
+        assert out["X"].shape == (1, 3, 4)
+        assert out["X"][0, :, 3].tolist() == [3.0, 2.0, 1.0]

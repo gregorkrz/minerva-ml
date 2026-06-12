@@ -32,6 +32,8 @@ python -m src.scripts.train -bs 10 --mode regression -E-available-no-muon -name 
 ## BERT-tiny architecture with random encoder weights (hub config only; equivalent to `--use-bert tiny --bert-random-init`):
 python -m src.scripts.train -bs 10 --mode regression -E-available-no-muon -name DEBUG --max_steps 250000 --use-bert tiny-rw [-cap {data_cap} -seed-event-sampler {seed} --seed {seed}]
 
+## BERT with particles sorted by descending log(E) before the encoder:
+python -m src.scripts.train -bs 10 --mode regression -E-available-no-muon -name DEBUG --max_steps 250000 --use-bert tiny --bert-energy-order [-cap {data_cap} -seed-event-sampler {seed} --seed {seed}]
 
 ## HyperScale ParticleViT (basic / embedding / pool variant; same particle features as OmniLearned):
 python -m src.scripts.train -bs 10 --mode regression -E-available-no-muon -name DEBUG --d_model 256 --depth 3 --n_heads 8 --max_steps 250000 --use-hyperscale basic [-cap {data_cap} -seed-event-sampler {seed} --seed {seed}]
@@ -563,6 +565,39 @@ def parse_args():
         help="Use weighted regression loss",
     )
     parser.add_argument(
+        "--binned-loss-var",
+        choices=["W", "q3"],
+        default=None,
+        help="Kinematic variable for per-bin class loss weights (classifier + CC1orNPi)",
+    )
+    parser.add_argument(
+        "--binned-loss-signal",
+        default=None,
+        help=(
+            "Signal definition for binned loss fallback "
+            "(CC1pipm, CC1pi0, CCN1pipm, CCNpipm; case-insensitive)"
+        ),
+    )
+    parser.add_argument(
+        "--binary-classifier",
+        action="store_true",
+        default=False,
+        help=(
+            "With -npi2: train a 2-class signal/background classifier. Pi_labels_v2 "
+            "classes in --binary-signal (default CCN1pipm -> pid 0,1) map to label 1; "
+            "all other pid classes map to label 0. Eval npz still stores the original "
+            "pid class for plotting."
+        ),
+    )
+    parser.add_argument(
+        "--binary-signal",
+        default="CCN1pipm",
+        help=(
+            "Pi_labels_v2 pid classes treated as signal when --binary-classifier is set "
+            "(default CCN1pipm: CC with >=1 charged pion, pid 0 and 1)."
+        ),
+    )
+    parser.add_argument(
         "--log_MSE_loss", "-log-mse", action="store_true", help="Use log MSE loss"
     )
     # Training arguments
@@ -705,6 +740,13 @@ def parse_args():
         help="With --use-bert: use hub config for architecture but randomly initialize BERT weights "
         "(no pretrained checkpoint).",
     )
+    parser.add_argument(
+        "--bert-energy-order",
+        action="store_true",
+        default=False,
+        help="With --use-bert: sort each event's particles by descending log(E) before the encoder "
+        "(stable sort; padding stays at the end).",
+    )
     # HyperScale ParticleViT arguments
     parser.add_argument(
         "--use-hyperscale",
@@ -841,6 +883,7 @@ def create_task(args):
     elif args.mode == "classifier":
         if "classification_n_pions" not in args.__dict__:
             args.classification_n_pions = False
+        binary_signal_pid: list[int] = []
         if args.classification_event_type:
             class_label_idx = 1
             class_idx = [1, 2, 3, 4, 8]
@@ -859,8 +902,17 @@ def create_task(args):
             class_idx_map = {0: 0, 1: 1}
         elif args.classification_CC1orNPi:
             class_label_idx = -1
-            class_idx = [0, 1, 2, 3, 4]
-            class_idx_map = {0: 0, 1: 1, 2: 2, 3: 3, 4: 4}
+            if getattr(args, "binary_classifier", False):
+                from src.eval.classification_plots._signal_definitions import (
+                    resolve_signal_classes,
+                )
+
+                binary_signal_pid = resolve_signal_classes(args.binary_signal)
+                class_idx = [0, 1]
+                class_idx_map = {0: 0, 1: 1}
+            else:
+                class_idx = [0, 1, 2, 3, 4]
+                class_idx_map = {0: 0, 1: 1, 2: 2, 3: 3, 4: 4}
         return Task(
             type="classifier",
             classification_event_type=args.classification_event_type,
@@ -871,6 +923,11 @@ def create_task(args):
             class_idx_map=class_idx_map,
             class_label_idx=class_label_idx,
             classification_CC1orNPi=args.classification_CC1orNPi,
+            classification_binary=(
+                getattr(args, "binary_classifier", False)
+                and args.classification_CC1orNPi
+            ),
+            binary_signal_pid_classes=binary_signal_pid,
         )
     else:
         raise ValueError("Invalid mode")
@@ -1109,6 +1166,18 @@ def prepare_batch_hyperscale(
     return {"X": X, "y": y, "attention_mask": mask, "global_cont": global_cont}
 
 
+BERT_ENERGY_FEATURE_IDX = 3  # log(E) in [Δη, Δφ, log pT, log E]
+
+
+def sort_particles_by_energy(X, mask, energy_idx=BERT_ENERGY_FEATURE_IDX):
+    """Sort valid particles by descending energy; padded slots stay at the end."""
+    energy = X[:, :, energy_idx].masked_fill(mask == 0, float("-inf"))
+    order = torch.argsort(energy, dim=1, descending=True, stable=True)
+    X = torch.gather(X, 1, order.unsqueeze(-1).expand_as(X))
+    mask = torch.gather(mask, 1, order)
+    return X, mask
+
+
 def prepare_batch_bert(
     batch,
     device,
@@ -1117,6 +1186,7 @@ def prepare_batch_bert(
     use_cond=False,
     include_E_sum=False,
     zero_cond_feature=None,
+    energy_order=False,
 ):
     """Prepare batch for BertBaseline (particle tokens + optional global token + padding mask)."""
     X = batch["X"].to(device, dtype=torch.float32)
@@ -1124,6 +1194,9 @@ def prepare_batch_bert(
     mask = batch["attention_mask"].to(device, dtype=torch.float32)
     if use_pid and batch.get("pid") is not None:
         X = torch.cat([X[:, :, :pid_idx], X[:, :, pid_idx + 1 :]], dim=2)
+
+    if energy_order:
+        X, mask = sort_particles_by_energy(X, mask)
 
     global_cont = None
     if use_cond and batch.get("cond") is not None:
@@ -1322,6 +1395,7 @@ def run_calculate_flops(args):
             use_cond=args.use_cond,
             include_E_sum=args.include_E_sum,
             zero_cond_feature=args.zero_cond_feature,
+            energy_order=args.bert_energy_order,
         )
     elif getattr(args, "use_hyperscale", None):
         inputs = prepare_batch_hyperscale(
@@ -1568,8 +1642,31 @@ def compute_weighted_regression_loss(preds, targets, max_weight=10.0, min_weight
     return (per_sample_loss * weights).mean()
 
 
+def compute_weighted_classification_loss(logits, targets, sample_weights):
+    """Per-sample weighted cross-entropy (kinematic-binned class weights)."""
+    per_sample_loss = F.cross_entropy(logits, targets, reduction="none")
+    return (per_sample_loss * sample_weights.to(per_sample_loss.dtype)).mean()
+
+
+def _attach_loss_weight(inputs, batch, device):
+    """Copy per-sample loss weights from the collated batch into *inputs*."""
+    lw = batch.get("loss_weight")
+    if lw is not None:
+        inputs["loss_weight"] = lw.to(device, dtype=torch.float32)
+    return inputs
+
+
 @torch.no_grad()
-def evaluate(model, dataloader, device, args, class_weights, use_amp=False, step=0):
+def evaluate(
+    model,
+    dataloader,
+    device,
+    args,
+    class_weights,
+    use_amp=False,
+    step=0,
+    use_binned_loss=False,
+):
     """Run evaluation on validation set."""
     model.eval()
 
@@ -1584,6 +1681,8 @@ def evaluate(model, dataloader, device, args, class_weights, use_amp=False, step
             criterion = make_log1p_loss(nn.HuberLoss(reduction="none"))
         else:
             criterion = nn.HuberLoss()
+    elif use_binned_loss:
+        criterion = None
     else:
         criterion = nn.CrossEntropyLoss(weight=class_weights)
     for batch in tqdm(dataloader, desc="Evaluating", leave=False):
@@ -1605,6 +1704,7 @@ def evaluate(model, dataloader, device, args, class_weights, use_amp=False, step
                 use_cond=args.use_cond,
                 include_E_sum=args.include_E_sum,
                 zero_cond_feature=args.zero_cond_feature,
+                energy_order=args.bert_energy_order,
             )
         elif getattr(args, "use_hyperscale", None):
             inputs = prepare_batch_hyperscale(
@@ -1628,6 +1728,8 @@ def evaluate(model, dataloader, device, args, class_weights, use_amp=False, step
                 include_E_sum=args.include_E_sum,
                 zero_cond_feature=args.zero_cond_feature,
             )
+        if use_binned_loss:
+            _attach_loss_weight(inputs, batch, device)
         with autocast(enabled=use_amp):
             logits = forward_model(model, inputs, args)
             if args.mode == "regression":
@@ -1637,6 +1739,10 @@ def evaluate(model, dataloader, device, args, class_weights, use_amp=False, step
                     )
                 else:
                     loss = criterion(logits.squeeze(-1), inputs["y"])
+            elif use_binned_loss:
+                loss = compute_weighted_classification_loss(
+                    logits, inputs["y"], inputs["loss_weight"]
+                )
             else:
                 loss = criterion(logits, inputs["y"])
 
@@ -1816,6 +1922,13 @@ def train(args):
         raise ValueError("--use-cls-token requires --use-bert")
     elif getattr(args, "bert_random_init", False):
         raise ValueError("--bert-random-init requires --use-bert")
+    elif getattr(args, "bert_energy_order", False):
+        raise ValueError("--bert-energy-order requires --use-bert")
+    if getattr(args, "binary_classifier", False):
+        if args.mode != "classifier":
+            raise ValueError("--binary-classifier requires --mode classifier")
+        if not args.classification_CC1orNPi:
+            raise ValueError("--binary-classifier requires -npi2 (--classification_CC1orNPi)")
     # Set seed
     if args.seed is not None:
         set_seed(args.seed)
@@ -1823,6 +1936,22 @@ def train(args):
     # Setup device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
+
+    binned_var = getattr(args, "binned_loss_var", None)
+    binned_signal = getattr(args, "binned_loss_signal", None)
+    if (binned_var is None) ^ (binned_signal is None):
+        raise ValueError(
+            "Both --binned-loss-var and --binned-loss-signal must be set together, "
+            "or neither."
+        )
+    if binned_var is not None and args.mode != "classifier":
+        raise ValueError("Binned loss weighting requires --mode classifier.")
+    if binned_signal is not None:
+        from src.eval.classification_plots._signal_definitions import (
+            resolve_signal_classes,
+        )
+
+        resolve_signal_classes(binned_signal)
 
     # Create dataloaders
     print("Creating dataloaders...")
@@ -1838,7 +1967,7 @@ def train(args):
             f"Restricting train+val to GENIE interaction types "
             f"{args.event_types} -> codes {event_type_codes}"
         )
-    train_loader, class_weights = load_data(
+    train_loader, class_weights, use_binned_loss = load_data(
         dataset_name=args.dataset_name,
         path=args.data_path,
         batch=args.batch_size,
@@ -1858,9 +1987,11 @@ def train(args):
         nevts=args.event_cap,
         use_energy_sums=args.include_E_sum,
         event_types=event_type_codes,
+        binned_loss_var=binned_var,
+        binned_loss_signal=binned_signal,
     )
 
-    val_loader, _ = load_data(
+    val_loader, _, _ = load_data(
         dataset_name=args.dataset_name,
         path=args.data_path,
         batch=args.batch_size,
@@ -1878,6 +2009,8 @@ def train(args):
         concat_additional_info=concat_additional_info,
         use_energy_sums=args.include_E_sum,
         event_types=event_type_codes,
+        binned_loss_var=binned_var,
+        binned_loss_signal=binned_signal,
     )
 
     print(f"Train samples: {len(train_loader.dataset)}")
@@ -1936,6 +2069,8 @@ def train(args):
             criterion = make_log1p_loss(nn.HuberLoss(reduction="none"))
         else:
             criterion = nn.HuberLoss()
+    elif use_binned_loss:
+        criterion = None
     else:
         criterion = nn.CrossEntropyLoss(
             weight=torch.tensor(task.class_weights, device=device, dtype=torch.float32)
@@ -2140,6 +2275,7 @@ def train(args):
                     use_cond=args.use_cond,
                     include_E_sum=args.include_E_sum,
                     zero_cond_feature=args.zero_cond_feature,
+                    energy_order=args.bert_energy_order,
                 )
             elif getattr(args, "use_hyperscale", None):
                 inputs = prepare_batch_hyperscale(
@@ -2164,6 +2300,9 @@ def train(args):
                     zero_cond_feature=args.zero_cond_feature,
                 )
 
+            if use_binned_loss:
+                _attach_loss_weight(inputs, batch, device)
+
             # Forward pass
             with autocast(enabled=args.use_amp):
                 logits = forward_model(model, inputs, args)
@@ -2175,6 +2314,10 @@ def train(args):
                         )
                     else:
                         loss = criterion(logits.squeeze(-1), inputs["y"])
+                elif use_binned_loss:
+                    loss = compute_weighted_classification_loss(
+                        logits, inputs["y"], inputs["loss_weight"]
+                    )
                 else:
                     loss = criterion(logits, inputs["y"])
 
@@ -2296,6 +2439,7 @@ def train(args):
                     ),
                     args.use_amp,
                     step,
+                    use_binned_loss=use_binned_loss,
                 )
 
                 epoch_pbar.write(f"Eval loss: {eval_metrics['eval_loss']:.4f}")
@@ -2338,6 +2482,7 @@ def train(args):
         ),
         args.use_amp,
         step,
+        use_binned_loss=use_binned_loss,
     )
     print(f"Final eval loss: {eval_metrics['eval_loss']:.4f}")
 

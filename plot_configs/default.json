@@ -4,6 +4,8 @@
     {"name": "BERT-tiny-rw",        "color": "#7c3aed", "display_name": "BERT-small-rw"},
     {"name": "Transformer",         "color": "#1f77b4"},
     {"name": "Transformer-xsmall",  "color": "#1f77b4"},
+    {"name": "Transformer-xsmall-Weigh1", "color": "#2563eb", "display_name": "Transformer-xsmall-Weigh1"},
+    {"name": "Transformer-xsmall-Weigh2", "color": "#1d4ed8", "display_name": "Transformer-xsmall-Weigh2"},
     {"name": "Transformer-small",   "color": "#17becf"},
     {"name": "Transformer2",        "color": "#d62728"},
     {"name": "Transformer2-DIS",    "color": "#f59e0b"},

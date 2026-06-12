@@ -37,22 +37,24 @@ from src.eval.classification_plots._metrics_binned import (
     _resolve_test_idx,
 )
 from src.eval.classification_plots._plotting import _compute_prc_curves
+from src.eval.classification_plots._signal_definitions import (
+    CC1PI0_CLASSES,
+    CC1PI_CLASSES,
+    CCNPI_GE1_CLASSES,
+    CCNPI_GT1_CLASSES,
+    SIGNAL_TAG_TO_CLASSES,
+)
 
 CLF_METRICS_CACHE_NAME = "classification_metrics.pkl"
 
-_CC1PI_CLASSES = [0]
-_CC1PI0_CLASSES = [2]
-_CCNPI_GE1_CLASSES = [0, 1]
-_CCNPI_GT1_CLASSES = [1]
+_CC1PI_CLASSES = CC1PI_CLASSES
+_CC1PI0_CLASSES = CC1PI0_CLASSES
+_CCNPI_GE1_CLASSES = CCNPI_GE1_CLASSES
+_CCNPI_GT1_CLASSES = CCNPI_GT1_CLASSES
 _N_CLASSES = 5
 
 # Keys used in the cache for each signal definition.
-_SIG_TAGS = {
-    "cc1pi": _CC1PI_CLASSES,
-    "cc1pi0": _CC1PI0_CLASSES,
-    "ccnpi_ge1": _CCNPI_GE1_CLASSES,
-    "ccnpi_gt1": _CCNPI_GT1_CLASSES,
-}
+_SIG_TAGS = SIGNAL_TAG_TO_CLASSES
 
 
 def _load_test_idx_from_clf(clf: dict, playlist: str) -> np.ndarray:

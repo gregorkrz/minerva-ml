@@ -1044,9 +1044,10 @@ def plot_composition_vs_kinematic(
     x_var: str,
     playlist: str = "1A",
 ) -> plt.Figure:
-    """3-row × 3-col event-composition figure for CC1π±, CC1π⁰, CCNπ±.
+    """4-row × 3-col event-composition figure for CC1π±, CC1π⁰, CCNπ±.
 
-    Rows: CC1π± (class 0), CC1π⁰ (class 2), CCNπ± (classes [0, 1]).
+    Rows: CC1π± (class 0), CC1π⁰ (class 2), CCNπ± N≥1 (classes [0, 1]),
+    CCNπ± N>1 (class 1).
     Columns:
       0. N_signal events per *x* bin, stacked by {DIS, RES, Other}.
       1. N_background events per *x* bin, stacked by {DIS, RES, Other}.
@@ -1071,11 +1072,15 @@ def plot_composition_vs_kinematic(
         (r"$CC1\pi^\pm$", [0]),
         (r"$CC1\pi^0$", [2]),
         (r"$CCN\pi^\pm$ ($N \geq 1$)", [0, 1]),
+        (r"$CCN\pi^\pm$ ($N > 1$)", [1]),
     ]
     merged_int = merge_int_type_arr(data["int_type_arr"])
     all_mask = np.ones(len(hist_var), dtype=bool)
 
-    fig, axes = plt.subplots(3, 3, figsize=(14.5, 11.0), constrained_layout=True)
+    n_rows = len(signals)
+    fig, axes = plt.subplots(
+        n_rows, 3, figsize=(14.5, 3.2 * n_rows + 1.5), constrained_layout=True
+    )
 
     for row_idx, (row_label, classes) in enumerate(signals):
         sig_mask = np.isin(pid, classes)

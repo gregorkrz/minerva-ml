@@ -30,7 +30,7 @@ WORKSPACE="$HOME"
 CONTAINER_CMD=$(cat << 'EOF'
 set -euo pipefail
 export CUDA_VISIBLE_DEVICES=0
-cd /workspace/minerva-data-processing
+cd /workspace/minerva-ml-hyperscale
 
 # Verify GPU is available inside the container
 nvidia-smi

@@ -2,6 +2,69 @@ import os
 import re
 from collections import defaultdict
 
+# Kinematic-binned classifier runs (see submit_binned_loss_ccn1pipm.py).
+_BINNED_CLASSIFIER_RE = re.compile(
+    r"_classifier_(Transformer[^_]+)_data_cap_(-?\d+)_seed_(\d+)_binned(W|q3)_([A-Za-z0-9]+)",
+    re.IGNORECASE,
+)
+_TRANSFORMER_RAW_TO_PLOT_KEY = {
+    "Transformer1": "Transformer-xsmall",
+    "Transformer1NR": "Transformer-xsmall",
+    "Transformer3NR": "Transformer-small",
+    "Transformer2": "Transformer2",
+    "Transformer3": "Transformer3",
+}
+_BINNED_SIGNAL_TO_PLOT_SUFFIX = {
+    "ccn1pipm": "Weigh1",
+    "ccn1pipmbin": "Weigh2",
+    "cc1pipm": "WeighCC1pipm",
+    "cc1pi0": "WeighCC1pi0",
+    "ccnpipm": "WeighCCNpipm",
+}
+
+
+_HYPERSCALE_RUN_RE = re.compile(
+    r"_HyperScale_(small|medium)_(?:(rw)_)?(\w+?)_(regression|classifier)_(-?\d+)_",
+    re.IGNORECASE,
+)
+
+
+def parse_hyperscale_model_cap(
+    name: str, *, task: str
+) -> tuple[str, int] | None:
+    """Map a HyperScale run name to ``(plot_model_key, data_cap)`` for *task*."""
+    m = _HYPERSCALE_RUN_RE.search(name)
+    if m is None:
+        return None
+    size, rw, _variant, run_task, cap_s = m.groups()
+    if run_task != task:
+        return None
+    key = f"HyperScale-{size.lower()}"
+    if rw:
+        key += "-rw"
+    return key, int(cap_s)
+
+
+def parse_binned_classifier_model_cap(name: str) -> tuple[str, int] | None:
+    """Map a binned-loss classifier run name to ``(plot_model_key, data_cap)``.
+
+    Example::
+
+        Run_1703_classifier_Transformer1_data_cap_-1_seed_55_binnedW_CCN1pipm_...
+        -> ("Transformer-xsmall-Weigh1", -1)
+
+        Run_..._binnedW_CCN1pipmBin_... -> ("Transformer-xsmall-Weigh2", -1)
+    """
+    m = _BINNED_CLASSIFIER_RE.search(name)
+    if m is None:
+        return None
+    raw, cap_s, _seed, _var, signal = m.groups()
+    base = _TRANSFORMER_RAW_TO_PLOT_KEY.get(raw, raw)
+    suffix = _BINNED_SIGNAL_TO_PLOT_SUFFIX.get(
+        signal.lower(), f"binned-{signal}"
+    )
+    return f"{base}-{suffix}", int(cap_s)
+
 
 def fetch_runs_from_wandb(tag: str, project: str = "minerva-models") -> set[str]:
     # Helper function to fetch wandb run names from a project with a given tag
@@ -50,8 +113,12 @@ def get_runs_by_model_and_cap(
           are excluded here so regression eval only sees regression MLP runs.
       - BERT-tiny / BERT-tiny-rw: Run_*_BERT_tiny_rw_regression_<cap>_seed... and
           Run_*_BERT_tiny_regression_<cap>_seed... (``tiny_rw`` before ``tiny`` so names match correctly).
+      - BERT-tiny-energy-order: Run_*_BERT_tiny_energy_order_regression_<cap>_seed...
+          (pretrained + --bert-energy-order).
       - Transformer2 DIS-only: names containing ..._regression_Transformer2_data_cap_<cap>_..._DIS_only_...
           map to model key ``Transformer2-DIS`` (all-events Transformer2 stays ``Transformer2``).
+      - HyperScale: Run_*_HyperScale_{small|medium}[_rw]_{basic|embedding|pool}_regression_<cap>_...
+          -> ``HyperScale-small``, ``HyperScale-small-rw``, etc. (match ``_rw`` before pretrained).
     dataset_cap is -1 for full 6M dataset, or a positive int for smaller caps.
     """
     run_names = fetch_runs_from_wandb(tag, project)
@@ -89,6 +156,10 @@ def get_runs_by_model_and_cap(
                 else:
                     model = raw
         if model is None:
+            m = re.search(r"_BERT_tiny_energy_order_regression_(-?\d+)_", name)
+            if m:
+                model, cap = "BERT-tiny-energy-order", int(m.group(1))
+        if model is None:
             m = re.search(r"_BERT_tiny_rw_regression_(-?\d+)_", name)
             if m:
                 model, cap = "BERT-tiny-rw", int(m.group(1))
@@ -96,6 +167,10 @@ def get_runs_by_model_and_cap(
             m = re.search(r"_BERT_tiny_regression_(-?\d+)_", name)
             if m:
                 model, cap = "BERT-tiny", int(m.group(1))
+        if model is None:
+            parsed = parse_hyperscale_model_cap(name, task="regression")
+            if parsed is not None:
+                model, cap = parsed
         if model is None:
             # Regression NR-full only; do not match _cond_only_lowLR_classifier_NR_full_ (classification).
             m = re.search(r"_cond_only_lowLR_(?!classifier_)NR_full_seed(-?\d+)_", name)
@@ -141,7 +216,12 @@ def get_classification_runs_by_model_and_cap(
           Transformer1NR; see generate_cond_only_jobs.py). cap is always -1.
       - BERT-tiny / BERT-tiny-rw: Run_*_BERT_tiny_rw_classifier_<cap>_seed... and
           Run_*_BERT_tiny_classifier_<cap>_seed... (match ``tiny_rw`` before ``tiny``).
+      - BERT-tiny-energy-order: Run_*_BERT_tiny_energy_order_classifier_<cap>_seed...
       - Transformer2 DIS-only: ..._classifier_Transformer2_data_cap_<cap>_..._DIS_only_... → ``Transformer2-DIS``.
+      - Binned loss: ``..._classifier_Transformer1_data_cap_<cap>_seed_<N>_binnedW_CCN1pipm_...``
+        → ``Transformer-xsmall-Weigh1`` (5-class head; see :func:`parse_binned_classifier_model_cap`).
+      - Binned binary CCN1pipm: ``..._binnedW_CCN1pipmBin_...`` → ``Transformer-xsmall-Weigh2``.
+      - HyperScale: Run_*_HyperScale_{small|medium}[_rw]_..._classifier_<cap>_... (same keys as regression).
     dataset_cap is -1 for full 6M dataset, or a positive int for smaller caps.
     """
     run_names = fetch_runs_from_wandb(tag, project)
@@ -150,6 +230,11 @@ def get_classification_runs_by_model_and_cap(
 
     for name in run_names:
         model, cap = None, None
+        binned = parse_binned_classifier_model_cap(name)
+        if binned is not None:
+            model, cap = binned
+            result[model][cap].append(name)
+            continue
         # Match OLS_RW before OLS
         m = re.search(r"_OLS_RW_classifier_(-?\d+)_", name)
         if m:
@@ -179,6 +264,10 @@ def get_classification_runs_by_model_and_cap(
                 else:
                     model = raw
         if model is None:
+            m = re.search(r"_BERT_tiny_energy_order_classifier_(-?\d+)_", name)
+            if m:
+                model, cap = "BERT-tiny-energy-order", int(m.group(1))
+        if model is None:
             m = re.search(r"_BERT_tiny_rw_classifier_(-?\d+)_", name)
             if m:
                 model, cap = "BERT-tiny-rw", int(m.group(1))
@@ -186,6 +275,10 @@ def get_classification_runs_by_model_and_cap(
             m = re.search(r"_BERT_tiny_classifier_(-?\d+)_", name)
             if m:
                 model, cap = "BERT-tiny", int(m.group(1))
+        if model is None:
+            parsed = parse_hyperscale_model_cap(name, task="classifier")
+            if parsed is not None:
+                model, cap = parsed
         if model is None:
             m = re.search(r"_cond_only_lowLR_classifier_NR_full_seed(-?\d+)_", name)
             if m:

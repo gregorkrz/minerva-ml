@@ -60,6 +60,7 @@ from src.eval._constants import (
     repo_output_path,
 )
 from src.eval._plot_config import PlotConfig
+from src.eval._steps_cache import build_steps_cache_from_pickles, save_steps_cache
 
 # Paper-style typography: axis labels 12; legend slightly smaller; ticks 11.
 _LABEL_FS = 12
@@ -599,39 +600,14 @@ def main(argv: list[str] | None = None) -> None:
         clf_p = args.classification_pickle or _pickle_paths(data_root, args.flag)[0]
         reg_p = args.regression_pickle or _pickle_paths(data_root, args.flag)[1]
 
-        with open(clf_p, "rb") as f:
-            clf = pickle.load(f)
-        lh_c = clf["loss_histories"]
-        flops_c = clf["flops_per_step"]
-        colors_c = clf["clrs_dict_full"]
-
-        with open(reg_p, "rb") as f:
-            print("- reading regression pickle from", reg_p)
-            reg = pickle.load(f)
-            print(
-                "- keys in regression pickle:",
-                reg["training_names_full"]["Log1p"].keys(),
-            )
-        lh_r = reg["loss_histories"]
-        flops_r = reg["flops_per_step"]
-        colors_r = reg["clrs_dict_full"]
-
-        # Save plots cache for --plots-only reuse.
-        plots_cache_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(plots_cache_path, "wb") as f:
-            pickle.dump(
-                {
-                    "lh_c": lh_c,
-                    "flops_c": flops_c,
-                    "colors_c": colors_c,
-                    "lh_r": lh_r,
-                    "flops_r": flops_r,
-                    "colors_r": colors_r,
-                },
-                f,
-                protocol=pickle.HIGHEST_PROTOCOL,
-            )
-        print(f"Saved steps cache → {plots_cache_path}")
+        payload = build_steps_cache_from_pickles(clf_p, reg_p)
+        lh_c = payload["lh_c"]
+        flops_c = payload["flops_c"]
+        colors_c = payload["colors_c"]
+        lh_r = payload["lh_r"]
+        flops_r = payload["flops_r"]
+        colors_r = payload["colors_r"]
+        save_steps_cache(payload, plots_cache_path)
 
     ylim_c = (1.075, 1.25)
     ylim_r = (0.03, 0.06)

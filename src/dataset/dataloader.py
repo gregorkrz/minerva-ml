@@ -12,6 +12,16 @@ import torch._dynamo
 from dataclasses import dataclass, field
 from typing import Iterable
 
+from src.dataset.binned_loss_weights import (
+    assign_bin_indices,
+    bin_edges_for_var,
+    compute_binned_class_weights,
+    load_kinematic_values,
+    log_binned_weight_summary,
+    per_event_loss_weights,
+)
+from src.eval.classification_plots._signal_definitions import resolve_signal_classes
+
 
 # GENIE interaction-type codes stored in truth_labels[:, 1] (see DATASET.md).
 INT_TYPE_NAME_TO_CODE: dict[str, int] = {
@@ -84,6 +94,12 @@ class Task:
     classification_CC1orNPi: bool = field(
         default=False
     )  # If True, it will classify CC 1pi or n pions, according to signal definition in Eberly et al. 2015
+    classification_binary: bool = field(
+        default=False
+    )  # If True, map Pi_labels_v2 pid classes to binary signal/background for training
+    binary_signal_pid_classes: list[int] = field(
+        default_factory=list
+    )  # Pi_labels_v2 indices treated as signal (e.g. [0, 1] for CCN1pipm)
     class_idx: list[int] = field(
         default=None
     )  # List of class indices for the classification task # e.g. [1, 2, 3] means 3 classes: 1, 2, 3
@@ -141,6 +157,8 @@ def collate_point_cloud(batch, max_particles=33):
         "data_pid",
         "vertex_pid",
         "energy_sums",
+        "loss_weight",
+        "pid_label",
     ]
     for field in optional_fields:
         if not all(field in item and item[field] is not None for item in batch):
@@ -215,6 +233,25 @@ def get_Pi_labels_v2(file_truth_labels):
     return labels
 
 
+def pid_to_binary_label(pid_class: int, signal_pid_classes: list[int]) -> int:
+    """Map a Pi_labels_v2 class (0–4) to binary training label (1=signal, 0=background)."""
+    return 1 if int(pid_class) in signal_pid_classes else 0
+
+
+def binary_class_counts_from_pid_column(
+    pid_labels: np.ndarray,
+    event_idx_map: np.ndarray,
+    signal_pid_classes: list[int],
+) -> np.ndarray:
+    """Class counts for binary training labels on the active event subset."""
+    signal_set = set(signal_pid_classes)
+    binary = np.array(
+        [1 if int(p) in signal_set else 0 for p in pid_labels[event_idx_map]],
+        dtype=np.int64,
+    )
+    return np.bincount(binary, minlength=2).astype(np.float64)
+
+
 class HEPTorchDataset(Dataset):
     def __init__(
         self,
@@ -230,6 +267,11 @@ class HEPTorchDataset(Dataset):
         concat_additional_info=True,
         use_energy_sums=False,
         event_types: list[int] | None = None,
+        binned_loss_var: str | None = None,
+        binned_loss_signal: str | None = None,
+        data_path: str | Path | None = None,
+        dataset_playlist: str | None = None,
+        dataset_split: str | None = None,
     ):
         """
         Args:
@@ -330,15 +372,23 @@ class HEPTorchDataset(Dataset):
         if self.nevts <= 0:
             print("Number of events per file", self.files_n_events)
         if self.task.type == "classifier":
-            if self.event_types:
+            pid_labels_flat = self._truth_flat[:, self.task.class_label_idx].astype(
+                np.int64
+            )
+            if self.task.classification_binary:
+                self.class_counts = binary_class_counts_from_pid_column(
+                    pid_labels_flat,
+                    self._event_idx_map,
+                    self.task.binary_signal_pid_classes,
+                )
+            elif self.event_types:
                 # Compute class counts on the filtered subset so class weights reflect training data.
-                labels_flat = self._truth_flat[
-                    self._event_idx_map, self.task.class_label_idx
-                ].astype(np.int64)
+                labels_flat = pid_labels_flat
                 mapped = np.asarray(
                     [self.task.class_idx_map[int(l)] for l in labels_flat],
                     dtype=np.int64,
                 )
+                mapped = mapped[self._event_idx_map]
                 self.class_counts = np.bincount(
                     mapped, minlength=len(self.task.class_idx)
                 ).astype(np.float64)
@@ -351,6 +401,77 @@ class HEPTorchDataset(Dataset):
                 )
             self.class_weights = 1 / (self.class_counts / np.sum(self.class_counts))
             print("Class weights", self.class_weights)
+            self.use_binned_loss = (
+                binned_loss_var is not None and binned_loss_signal is not None
+            )
+            self._loss_weight_per_phys: np.ndarray | None = None
+            if self.use_binned_loss:
+                if not task.classification_CC1orNPi:
+                    raise ValueError(
+                        "Binned loss weighting requires --classification_CC1orNPi "
+                        "(signal tags map to pid classes 0-4)."
+                    )
+                if data_path is None or dataset_playlist is None or dataset_split is None:
+                    raise ValueError(
+                        "Binned loss weighting requires data_path, playlist, and split."
+                    )
+                n_phys = self._truth_flat.shape[0]
+                raw_labels = self._truth_flat[:, self.task.class_label_idx].astype(
+                    np.int64
+                )
+                if self.task.classification_binary:
+                    signal_pid = set(self.task.binary_signal_pid_classes)
+                    mapped_labels = np.array(
+                        [1 if int(l) in signal_pid else 0 for l in raw_labels],
+                        dtype=np.int64,
+                    )
+                    binned_signal_classes = [1]
+                else:
+                    mapped_labels = np.asarray(
+                        [self.task.class_idx_map[int(l)] for l in raw_labels],
+                        dtype=np.int64,
+                    )
+                    binned_signal_classes = resolve_signal_classes(binned_loss_signal)
+                kin = load_kinematic_values(
+                    data_path, dataset_playlist, dataset_split, binned_loss_var
+                )
+                if kin.shape[0] != n_phys:
+                    raise ValueError(
+                        f"Kinematic values length {kin.shape[0]} does not match "
+                        f"split size {n_phys} in {self.folder}."
+                    )
+                edges = bin_edges_for_var(binned_loss_var)
+                bin_indices = assign_bin_indices(kin, edges)
+                labels_sub = mapped_labels[self._event_idx_map]
+                bin_sub = bin_indices[self._event_idx_map]
+                n_classes = len(self.task.class_idx)
+                weight_table = compute_binned_class_weights(
+                    labels_sub,
+                    bin_sub,
+                    n_classes,
+                    self.class_weights,
+                    binned_signal_classes,
+                )
+                weights_sub = per_event_loss_weights(
+                    labels_sub,
+                    bin_sub,
+                    weight_table,
+                    self.class_weights,
+                )
+                self._loss_weight_per_phys = np.ones(n_phys, dtype=np.float32)
+                self._loss_weight_per_phys[self._event_idx_map] = weights_sub.astype(
+                    np.float32
+                )
+                log_binned_weight_summary(
+                    labels_sub,
+                    bin_sub,
+                    weight_table,
+                    self.class_weights,
+                    binned_signal_classes,
+                    edges,
+                    binned_loss_var,
+                    binned_loss_signal,
+                )
         elif self.task.type == "regression":
             self.regress_log = self.task.regress_log
             if self.regress_log:
@@ -384,10 +505,23 @@ class HEPTorchDataset(Dataset):
 
         # Labels from pre-flattened arrays (single index)
         if self.task.type == "classifier":
-            label_int = int(self._truth_flat[idx, self.task.class_label_idx])
-            sample["y"] = torch.tensor(
-                self.task.class_idx_map[label_int], dtype=torch.long
-            )
+            pid_class = int(self._truth_flat[idx, self.task.class_label_idx])
+            if self.task.classification_binary:
+                sample["y"] = torch.tensor(
+                    pid_to_binary_label(
+                        pid_class, self.task.binary_signal_pid_classes
+                    ),
+                    dtype=torch.long,
+                )
+                sample["pid_label"] = torch.tensor(pid_class, dtype=torch.long)
+            else:
+                sample["y"] = torch.tensor(
+                    self.task.class_idx_map[pid_class], dtype=torch.long
+                )
+            if getattr(self, "use_binned_loss", False):
+                sample["loss_weight"] = torch.tensor(
+                    self._loss_weight_per_phys[idx], dtype=torch.float32
+                )
         elif self.task.type == "regression":
             regression_label_idx = 0
             if self.task.regress_E_available or self.task.regress_E_available_no_muon:
@@ -459,6 +593,8 @@ def load_data(
     event_sampler_random_state=42,
     use_energy_sums=False,
     event_types: list[int] | None = None,
+    binned_loss_var: str | None = None,
+    binned_loss_signal: str | None = None,
 ):
     supported_datasets = [
         "minerva_1A",
@@ -494,6 +630,11 @@ def load_data(
             nevts=-1,  # Here, keep the whole dataset, only later we will sample a subset of the data
             use_energy_sums=use_energy_sums,
             event_types=event_types,
+            binned_loss_var=binned_loss_var,
+            binned_loss_signal=binned_loss_signal,
+            data_path=path,
+            dataset_playlist=dataset_playlist,
+            dataset_split=dataset_type,
         )
         if nevts > 0 and nevts < len(data):
             print(f"Using a subset of the data: {nevts} events out of {len(data)}")
@@ -514,9 +655,9 @@ def load_data(
         )
         if task.type == "classifier":
             base_ds = data.dataset if isinstance(data, Subset) else data
-            return loader, base_ds.class_weights
+            return loader, base_ds.class_weights, getattr(base_ds, "use_binned_loss", False)
         else:
-            return loader, None
+            return loader, None, False
     else:
         raise ValueError(
             f"Dataset '{dataset_name}' not supported. Choose from {supported_datasets}."
