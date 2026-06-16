@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import warnings
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import matplotlib.pyplot as plt
 import numpy as np
 
 from src.eval._constants import plot_model_label
 
-from ._constants import DEFAULT_BASELINE_KEY
+from ._constants import DEFAULT_BASELINE_KEY, SMALL_PAPER_COMPACT_IQR_MPV_LEGEND_FS
 from ._grouped import (
     _SEED_SEP,
     _resolve_color_map,
@@ -44,6 +44,9 @@ def plot_rms_iqr_with_uncertainty(
     suppress_errors: bool = False,
     text: str = "",
     iqr_only: bool = True,
+    label_fn: Callable[[str], str] | None = None,
+    compact_figsize: tuple[float, float] | None = None,
+    compact_style: bool = False,
 ) -> plt.Figure | tuple[plt.Figure, dict]:
     """RMS / IQR vs *q3* with ±1 std-dev uncertainty bands across seeds.
 
@@ -61,6 +64,10 @@ def plot_rms_iqr_with_uncertainty(
         bottom = MPV vs $q_3$ (no left RMS panel).  If *False*, use the full 2×2
         layout (RMS, IQR, and duplicated MPV row); the MPV row has no legend
         (paper-style).
+    compact_figsize : optional ``(width, height)`` inches when ``iqr_only`` is *True*;
+        defaults to ``(4.8, 5.27)``.
+    compact_style : if *True* with ``iqr_only``, use short y-axis labels (``IQR / MPV``,
+        ``MPV``) and a single shared x-axis label on the bottom panel only.
     Other parameters match :func:`plot_rms_iqr`.  Only a single
     ``dataset_to_plot`` is supported; ``dataset_to_linestyle``,
     ``show_q3_histograms`` and ``return_hist_fig`` are accepted for API
@@ -180,10 +187,11 @@ def plot_rms_iqr_with_uncertainty(
     ax_mpv_panel: plt.Axes | None = None
     if iqr_only:
         # One column: IQR/MPV (top), MPV (bottom); same height ratio as full 2×2 bottom row.
+        _fs = compact_figsize if compact_figsize is not None else (4.8, 5.27)
         fig, axes_col = plt.subplots(
             2,
             1,
-            figsize=(4.8, 6.2),
+            figsize=_fs,
             gridspec_kw={"height_ratios": [2, 1]},
         )
         ax_iqr = axes_col[0]
@@ -347,7 +355,7 @@ def plot_rms_iqr_with_uncertainty(
             }
 
             color = color_map[config_label]
-            lbl = plot_model_label(config_label)
+            lbl = label_fn(config_label) if label_fn is not None else plot_model_label(config_label)
 
             with np.errstate(divide="ignore", invalid="ignore"):
                 rms_over_mpv = mean_rms / mean_mpv
@@ -427,7 +435,12 @@ def plot_rms_iqr_with_uncertainty(
             )
 
     # Legend placement; optional *text* is used as legend title if provided.
-    legend_kwargs: dict[str, Any] = {"fontsize": 9, "loc": "upper right"}
+    legend_fs = (
+        SMALL_PAPER_COMPACT_IQR_MPV_LEGEND_FS
+        if (iqr_only and compact_style)
+        else 9
+    )
+    legend_kwargs: dict[str, Any] = {"fontsize": legend_fs, "loc": "upper right"}
     if text:
         legend_kwargs["title"] = text
         legend_kwargs["title_fontsize"] = 10
@@ -439,28 +452,38 @@ def plot_rms_iqr_with_uncertainty(
         ax_iqr.legend(**legend_kwargs)
 
     ax_iqr.set(
-        xlabel="MC truth $q_3$ [GeV]",
-        ylabel="IQR / MPV of $E_{\\mathrm{available}}^{\\mathrm{reco}}/E_{\\mathrm{available}}^{\\mathrm{true}}$",
+        xlabel="" if (iqr_only and compact_style) else r"True $q_3$ [GeV]",
+        ylabel=(
+            "IQR / MPV"
+            if (iqr_only and compact_style)
+            else "IQR / MPV of $E_{\\mathrm{available}}^{\\mathrm{reco}}/E_{\\mathrm{available}}^{\\mathrm{true}}$"
+        ),
     )
     ax_iqr.grid(True)
+    if iqr_only and compact_style:
+        ax_iqr.tick_params(labelbottom=False)
     if iqr_only:
         ax_mpv_panel.set(
-            xlabel="MC truth $q_3$ [GeV]",
-            ylabel="MPV of $E_{\\mathrm{available}}^{\\mathrm{reco}}/E_{\\mathrm{available}}^{\\mathrm{true}}$",
+            xlabel=r"True $q_3$ [GeV]",
+            ylabel=(
+                "MPV"
+                if compact_style
+                else "MPV of $E_{\\mathrm{available}}^{\\mathrm{reco}}/E_{\\mathrm{available}}^{\\mathrm{true}}$"
+            ),
         )
         ax_mpv_panel.grid(True)
     else:
         ax_rms.set(
-            xlabel="MC truth $q_3$ [GeV]",
+            xlabel=r"True $q_3$ [GeV]",
             ylabel="RMS / MPV of $E_{\\mathrm{available}}^{\\mathrm{reco}}/E_{\\mathrm{available}}^{\\mathrm{true}}$",
         )
         ax_rms.grid(True)
         ax_bottom[0].set(
-            xlabel="MC truth $q_3$ [GeV]",
+            xlabel=r"True $q_3$ [GeV]",
             ylabel="MPV of $E_{\\mathrm{available}}^{\\mathrm{reco}}/E_{\\mathrm{available}}^{\\mathrm{true}}$",
         )
         ax_bottom[1].set(
-            xlabel="MC truth $q_3$ [GeV]",
+            xlabel=r"True $q_3$ [GeV]",
             ylabel="MPV of $E_{\\mathrm{available}}^{\\mathrm{reco}}/E_{\\mathrm{available}}^{\\mathrm{true}}$",
         )
         ax_bottom[0].grid(True)

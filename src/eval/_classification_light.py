@@ -20,7 +20,7 @@ Two-stage API (preferred for caching)
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -53,29 +53,105 @@ LightComponent = Literal["pion", "q3"]
 _LABEL_FS = 12
 _TICK_FS = 11
 _LEGEND_FS = 10
+_TITLE_FS = 13
 
 _COL_LABELS = ("AUPRC", "AUROC", "Efficiency (TPR)")
 
+# ``classification_tpr_at_fixed_fpr_baseline_1A.pdf`` — TPR vs kinematic per task.
+_SMALL_PAPER_TPR_TASKS: tuple[tuple[str, str, str], ...] = (
+    (r"$CC1\pi^\pm$", "pion_E", "eval_classification_light_cc1pi_pion_kinematics_1A.pdf"),
+    (r"$CC1\pi^0$", "pion_E", "eval_classification_light_cc1pi0_pion_kinematics_1A.pdf"),
+    (r"$CCN\pi^\pm$ ($N \geq 1$)", "w", "eval_classification_light_ccnpi_W_1A.pdf"),
+)
+_TPR_YLABEL = "Efficiency (TPR)"
+# ``classification_tpr_at_fixed_fpr_baseline_1A.pdf`` typography (+10% vs default light PDFs).
+_SMALL_PAPER_TPR_LABEL_FS = 13
+_SMALL_PAPER_TPR_TICK_FS = 12
+_SMALL_PAPER_TPR_LEGEND_FS = 11
+_SMALL_PAPER_TPR_TITLE_FS = 14
+# Baseline labels use ``_baseline_legend_with_global_fpr`` → ``" (FPR "`` suffix; keep per-panel.
+_PER_AXES_LEGEND_MARKER = " (FPR "
 
-def _shared_light_legend(fig: plt.Figure, axes: Iterable[plt.Axes]) -> None:
-    """One legend below the figure; first-seen label order, one handle per label."""
+
+def _iter_metrics_ordered(
+    all_metrics: dict,
+    model_order: list[str] | None,
+) -> Iterable[tuple[str, Any]]:
+    if not model_order:
+        yield from sorted(all_metrics.items(), key=lambda kv: kv[0])
+        return
+    seen: set[str] = set()
+    for name in model_order:
+        if name in all_metrics:
+            seen.add(name)
+            yield name, all_metrics[name]
+    for name in sorted(all_metrics):
+        if name not in seen:
+            yield name, all_metrics[name]
+
+
+def _shared_light_legend(
+    fig: plt.Figure,
+    axes: Iterable[plt.Axes],
+    *,
+    legend_fs: int | None = None,
+    label_order: list[str] | None = None,
+) -> None:
+    """Shared legend below; model lines aggregated, Baseline (FPR …) stays on each panel."""
+    legend_fs = _LEGEND_FS if legend_fs is None else legend_fs
+    axes_list = list(axes)
+
+    for ax in axes_list:
+        h_ax, l_ax = ax.get_legend_handles_labels()
+        per_h: list[plt.Artist] = []
+        per_l: list[str] = []
+        seen: set[str] = set()
+        for hi, li in zip(h_ax, l_ax):
+            if _PER_AXES_LEGEND_MARKER not in li:
+                continue
+            if li in seen:
+                continue
+            seen.add(li)
+            per_h.append(hi)
+            per_l.append(li)
+        if per_h:
+            ax.legend(
+                per_h,
+                per_l,
+                loc="best",
+                fontsize=legend_fs - 1,
+                frameon=True,
+                fancybox=True,
+                facecolor="white",
+                edgecolor="0.4",
+                framealpha=0.85,
+                handletextpad=0.4,
+                borderaxespad=0.3,
+            )
+
     by_label: dict[str, plt.Artist] = {}
     labels_order: list[str] = []
-    for ax in axes:
+    for ax in axes_list:
         h, lab = ax.get_legend_handles_labels()
         for hi, li in zip(h, lab):
+            if _PER_AXES_LEGEND_MARKER in li:
+                continue
             if li in by_label:
                 continue
             by_label[li] = hi
             labels_order.append(li)
     if not labels_order:
         return
+    if label_order:
+        ordered = [lab for lab in label_order if lab in by_label]
+        ordered.extend(lab for lab in labels_order if lab not in ordered)
+        labels_order = ordered
     handles = [by_label[k] for k in labels_order]
     n = len(labels_order)
     ncol = max(3, min(6, (n + 2) // 3)) if n > 2 else n
     legend_kw: dict = dict(
         ncol=ncol,
-        fontsize=_LEGEND_FS,
+        fontsize=legend_fs,
         frameon=True,
         fancybox=True,
         facecolor="white",
@@ -102,6 +178,56 @@ def _save_single_fig(fig: plt.Figure, path: Path) -> None:
     print("Saved:", path)
 
 
+def _draw_metrics_row_on_axes(
+    axes: tuple[plt.Axes, plt.Axes, plt.Axes],
+    all_metrics: dict[str, dict],
+    x: np.ndarray,
+    baseline_auprc: np.ndarray,
+    fixed_fpr: list[float],
+    reco_baseline_tpr: np.ndarray,
+    reco_label: str,
+    colors: dict[str, str],
+    *,
+    label_fn: Callable[[str], str],
+    reco_baseline_global_fpr: float | None = None,
+    row_title: str | None = None,
+    show_xlabel: bool = True,
+    xlabel: str = r"True $q_3$ [GeV]",
+    log_x: bool = False,
+) -> None:
+    axes[0].plot(
+        x, baseline_auprc, "o--", color="gray", label="Random baseline", zorder=1
+    )
+    for model_name, agg in sorted(all_metrics.items(), key=lambda kv: kv[0]):
+        clr = {"color": colors.get(model_name, "tab:gray")}
+        _plot_metric_line(axes[0], x, agg["auprc"], label_fn(model_name), True, **clr)
+        _plot_metric_line(axes[1], x, agg["auroc"], label_fn(model_name), True, **clr)
+        for fpr_val in fixed_fpr:
+            key = f"tpr@{fpr_val}"
+            _plot_metric_line(axes[2], x, agg[key], label_fn(model_name), True, **clr)
+
+    bl_lbl = (
+        _baseline_legend_with_global_fpr(reco_label, reco_baseline_global_fpr)
+        if reco_baseline_global_fpr is not None
+        and np.isfinite(reco_baseline_global_fpr)
+        else reco_label
+    )
+    axes[2].plot(x, reco_baseline_tpr, "s--", color="black", label=bl_lbl, zorder=2)
+
+    for col, metric in enumerate(_COL_LABELS):
+        ax = axes[col]
+        if show_xlabel:
+            ax.set_xlabel(xlabel, fontsize=_LABEL_FS)
+        ylabel = metric
+        if col == 0 and row_title is not None:
+            ylabel = f"{row_title}\n{metric}"
+        ax.set_ylabel(ylabel, fontsize=_LABEL_FS)
+        ax.tick_params(axis="both", labelsize=_TICK_FS)
+        ax.grid(True, alpha=0.35)
+        if log_x:
+            ax.set_xscale("log")
+
+
 def _figure_metrics_1x3(
     all_metrics: dict[str, dict],
     x: np.ndarray,
@@ -114,41 +240,188 @@ def _figure_metrics_1x3(
     *,
     log_x: bool = False,
     reco_baseline_global_fpr: float | None = None,
+    label_fn: Callable[[str], str] | None = None,
 ) -> plt.Figure:
     """One row: AUPRC | AUROC | TPR vs a common *x* (global FPR only)."""
+    if label_fn is None:
+        label_fn = plot_model_label
     fig, axes = plt.subplots(1, 3, figsize=(14.5, 4.6), constrained_layout=True)
-    axes[0].plot(
-        x, baseline_auprc, "o--", color="gray", label="Random baseline", zorder=1
+    row_axes = (axes[0], axes[1], axes[2])
+    _draw_metrics_row_on_axes(
+        row_axes,
+        all_metrics,
+        x,
+        baseline_auprc,
+        fixed_fpr,
+        reco_baseline_tpr,
+        reco_label,
+        colors,
+        label_fn=label_fn,
+        reco_baseline_global_fpr=reco_baseline_global_fpr,
+        show_xlabel=True,
+        xlabel=xlabel,
+        log_x=log_x,
     )
-
-    for model_name, agg in sorted(all_metrics.items(), key=lambda kv: kv[0]):
-        clr = {"color": colors.get(model_name, "tab:gray")}
-        _plot_metric_line(axes[0], x, agg["auprc"], plot_model_label(model_name), True, **clr)
-        _plot_metric_line(axes[1], x, agg["auroc"], plot_model_label(model_name), True, **clr)
-        for fpr_val in fixed_fpr:
-            key = f"tpr@{fpr_val}"
-            lbl = _tpr_line_legend_label(model_name, fpr_val, True)
-            _plot_metric_line(axes[2], x, agg[key], lbl, True, **clr)
-
-    bl_lbl = (
-        _baseline_legend_with_global_fpr(reco_label, reco_baseline_global_fpr)
-        if reco_baseline_global_fpr is not None
-        and np.isfinite(reco_baseline_global_fpr)
-        else reco_label
-    )
-    axes[2].plot(x, reco_baseline_tpr, "s--", color="black", label=bl_lbl, zorder=2)
-
-    for col, metric in enumerate(_COL_LABELS):
-        ax = axes[col]
-        ax.set_xlabel(xlabel, fontsize=_LABEL_FS)
-        ax.set_ylabel(metric, fontsize=_LABEL_FS)
-        ax.tick_params(axis="both", labelsize=_TICK_FS)
-        ax.grid(True, alpha=0.35)
-        if log_x:
-            ax.set_xscale("log")
-
     _shared_light_legend(fig, axes.ravel())
     return fig
+
+
+def _figure_metrics_3tasks_q3_baseline(
+    task_rows: list[tuple[str, dict[str, Any]]],
+    colors: dict[str, str],
+    *,
+    label_fn: Callable[[str], str] | None = None,
+) -> plt.Figure:
+    """Three stacked rows: CC1π±, CCπ⁰, CCNπ — each AUPRC | AUROC | TPR vs True *q₃*."""
+    if label_fn is None:
+        label_fn = plot_model_label
+    fig, axes = plt.subplots(3, 3, figsize=(14.5, 11.5), constrained_layout=True)
+    for row, (task_label, spec) in enumerate(task_rows):
+        row_axes = (axes[row, 0], axes[row, 1], axes[row, 2])
+        _draw_metrics_row_on_axes(
+            row_axes,
+            spec["all_metrics"],
+            spec["x"],
+            spec["baseline_auprc"],
+            spec["fixed_fpr"],
+            spec["reco_baseline_tpr"],
+            spec["reco_label"],
+            colors,
+            label_fn=label_fn,
+            reco_baseline_global_fpr=spec.get("reco_baseline_global_fpr"),
+            row_title=task_label,
+            show_xlabel=(row == len(task_rows) - 1),
+            xlabel=spec.get("xlabel", r"True $q_3$ [GeV]"),
+            log_x=spec.get("log_x", False),
+        )
+    _shared_light_legend(fig, axes.ravel())
+    return fig
+
+
+def _light_specs_by_filename(specs: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    return {
+        spec["filename"]: spec
+        for spec in specs
+        if spec.get("filename")
+    }
+
+
+def _small_paper_tpr_row_from_spec(spec: dict[str, Any], panel: str) -> dict[str, Any]:
+    """Normalize a light-cache spec to a single TPR-vs-*x* row."""
+    if panel == "pion_E":
+        if spec.get("type") != "2x3_pion":
+            raise ValueError(f"Expected 2x3_pion spec, got {spec.get('type')!r}")
+        return {
+            "all_metrics": spec["all_metrics"],
+            "x": spec["x_E"],
+            "fixed_fpr": spec["fixed_fpr"],
+            "reco_baseline_tpr": spec["reco_tpr_E"],
+            "reco_label": spec["reco_label"],
+            "reco_baseline_global_fpr": spec.get("reco_baseline_global_fpr"),
+            "xlabel": r"True $E_\pi$ [GeV]",
+            "log_x": True,
+            "kinematic": "E",
+        }
+    if panel == "w":
+        if spec.get("type") != "1x3":
+            raise ValueError(f"Expected 1x3 spec, got {spec.get('type')!r}")
+        return {
+            "all_metrics": spec["all_metrics"],
+            "x": spec["x"],
+            "fixed_fpr": spec["fixed_fpr"],
+            "reco_baseline_tpr": spec["reco_baseline_tpr"],
+            "reco_label": spec["reco_label"],
+            "reco_baseline_global_fpr": spec.get("reco_baseline_global_fpr"),
+            "xlabel": spec.get("xlabel", r"True hadronic $W$ [GeV]"),
+            "log_x": spec.get("log_x", False),
+            "kinematic": None,
+        }
+    raise ValueError(f"Unknown small-paper TPR panel: {panel!r}")
+
+
+def _draw_tpr_only_on_axis(
+    ax: plt.Axes,
+    row: dict[str, Any],
+    colors: dict[str, str],
+    *,
+    label_fn: Callable[[str], str],
+    model_order: list[str] | None = None,
+    row_title: str | None = None,
+    show_xlabel: bool = True,
+    label_fs: int = _LABEL_FS,
+    tick_fs: int = _TICK_FS,
+    title_fs: int = _TITLE_FS,
+) -> None:
+    x = row["x"]
+    kinematic = row.get("kinematic")
+    for model_name, agg in _iter_metrics_ordered(row["all_metrics"], model_order):
+        inner = agg[kinematic] if kinematic is not None else agg
+        clr = {"color": colors.get(model_name, "tab:gray")}
+        for fpr_val in row["fixed_fpr"]:
+            key = f"tpr@{fpr_val}"
+            _plot_metric_line(ax, x, inner[key], label_fn(model_name), True, **clr)
+
+    bl_lbl = (
+        _baseline_legend_with_global_fpr(row["reco_label"], row["reco_baseline_global_fpr"])
+        if row.get("reco_baseline_global_fpr") is not None
+        and np.isfinite(row["reco_baseline_global_fpr"])
+        else row["reco_label"]
+    )
+    ax.plot(x, row["reco_baseline_tpr"], "s--", color="black", label=bl_lbl, zorder=2)
+
+    if show_xlabel:
+        ax.set_xlabel(row["xlabel"], fontsize=label_fs)
+    if row_title is not None:
+        ax.set_title(row_title, fontsize=title_fs, pad=8)
+    ax.set_ylabel(_TPR_YLABEL, fontsize=label_fs)
+    ax.tick_params(axis="both", labelsize=tick_fs)
+    ax.grid(True, alpha=0.35)
+    if row.get("log_x"):
+        ax.set_xscale("log")
+        if len(x) > 0 and np.all(np.isfinite(x[[0, -1]])):
+            ax.set_xlim(float(x[0]) * 0.8, float(x[-1]) * 1.2)
+
+
+def _figure_metrics_3tasks_tpr_baseline(
+    task_rows: list[tuple[str, dict[str, Any]]],
+    colors: dict[str, str],
+    *,
+    label_fn: Callable[[str], str] | None = None,
+    model_order: list[str] | None = None,
+    legend_label_order: list[str] | None = None,
+) -> plt.Figure:
+    """One row, three columns: CC1π± | CCπ⁰ | CCNπ TPR; shared model legend below."""
+    if label_fn is None:
+        label_fn = plot_model_label
+    n = len(task_rows)
+    fig, axes = plt.subplots(1, n, figsize=(14.5, 4.25), constrained_layout=True)
+    if n == 1:
+        axes = [axes]
+    for col_idx, (task_label, row) in enumerate(task_rows):
+        _draw_tpr_only_on_axis(
+            axes[col_idx],
+            row,
+            colors,
+            label_fn=label_fn,
+            model_order=model_order,
+            row_title=task_label,
+            show_xlabel=True,
+            label_fs=_SMALL_PAPER_TPR_LABEL_FS,
+            tick_fs=_SMALL_PAPER_TPR_TICK_FS,
+            title_fs=_SMALL_PAPER_TPR_TITLE_FS,
+        )
+    _shared_light_legend(
+        fig, axes, legend_fs=_SMALL_PAPER_TPR_LEGEND_FS, label_order=legend_label_order,
+    )
+    return fig
+
+
+def _light_q3_specs_by_filename(specs: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    return {
+        spec["filename"]: spec
+        for spec in specs
+        if spec.get("type") == "1x3" and spec.get("filename")
+    }
 
 
 def _figure_metrics_2x3_pion(

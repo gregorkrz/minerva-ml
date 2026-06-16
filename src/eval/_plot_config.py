@@ -7,11 +7,13 @@ Load from a JSON file with ``PlotConfig.load(path)``; the schema is::
         {"name": "BERT-tiny", "color": "#0d9488", "display_name": "BERT-small"},
         {"name": "OmniLearned-small", "color": "#ff7f0e"}
       ],
-      "step_cutoff": null
+      "step_cutoff": null,
+      "flops_xmin": null
     }
 
 ``display_name`` is optional per-model; when omitted :func:`plot_model_label` is used.
 ``step_cutoff`` (int or null) clips the x-axis of the log-steps plot only.
+``flops_xmin`` (float or null) sets the minimum x-axis on log-FLOPs plots (``log10`` FLOPs).
 """
 
 from __future__ import annotations
@@ -33,6 +35,7 @@ class ModelEntry:
 class PlotConfig:
     models: list[ModelEntry] = field(default_factory=list)
     step_cutoff: int | None = None
+    flops_xmin: float | None = None
 
     # ------------------------------------------------------------------
     # Accessors
@@ -57,6 +60,15 @@ class PlotConfig:
         names = set(self.model_names())
         return {k: v for k, v in d.items() if k in names}
 
+    def filter_dict_ordered(
+        self,
+        d: dict,
+        tail: tuple[str, ...] = ("Transformer-xsmall", "Transformer-small", "MLP"),
+    ) -> dict:
+        """Like :meth:`filter_dict`, preserving :meth:`ordered_model_names` key order."""
+        filtered = self.filter_dict(d)
+        return {k: filtered[k] for k in self.ordered_model_names(tail) if k in filtered}
+
     def filter_nested(self, d: dict[str, Any]) -> dict[str, Any]:
         """Filter one level deep: ``{"Log1p": {model: ...}}`` → keep model keys."""
         out: dict[str, Any] = {}
@@ -67,6 +79,41 @@ class PlotConfig:
             else:
                 out[loss] = inner
         return out
+
+    def ordered_model_names(
+        self,
+        tail: tuple[str, ...] = ("Transformer-xsmall", "Transformer-small", "MLP"),
+    ) -> list[str]:
+        """Config model order with *tail* names moved to the end (legend / draw order)."""
+        tail_set = set(tail)
+        names = self.model_names()
+        ordered = [n for n in names if n not in tail_set]
+        ordered.extend(n for n in tail if n in names)
+        return ordered
+
+    def filter_nested_ordered(
+        self,
+        d: dict[str, Any],
+        tail: tuple[str, ...] = ("Transformer-xsmall", "Transformer-small", "MLP"),
+    ) -> dict[str, Any]:
+        """Like :meth:`filter_nested`, preserving :meth:`ordered_model_names` key order."""
+        filtered = self.filter_nested(d)
+        order_idx = {n: i for i, n in enumerate(self.ordered_model_names(tail))}
+        out: dict[str, Any] = {}
+        for loss, inner in filtered.items():
+            if isinstance(inner, dict):
+                keys = sorted(inner.keys(), key=lambda k: order_idx.get(k, len(order_idx)))
+                out[loss] = {k: inner[k] for k in keys}
+            else:
+                out[loss] = inner
+        return out
+
+    def legend_labels(
+        self,
+        tail: tuple[str, ...] = ("Transformer-xsmall", "Transformer-small", "MLP"),
+    ) -> list[str]:
+        """Display labels in :meth:`ordered_model_names` order."""
+        return [self.label_for(n) for n in self.ordered_model_names(tail)]
 
     # ------------------------------------------------------------------
     # Construction
@@ -84,4 +131,8 @@ class PlotConfig:
             )
             for m in data.get("models", [])
         ]
-        return cls(models=models, step_cutoff=data.get("step_cutoff"))
+        return cls(
+            models=models,
+            step_cutoff=data.get("step_cutoff"),
+            flops_xmin=data.get("flops_xmin"),
+        )

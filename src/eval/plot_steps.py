@@ -73,6 +73,8 @@ _SINGLE_PANEL_HEIGHT = 5 * 0.9
 _SINGLE_PANEL_FIGSIZE = (_SINGLE_PANEL_HEIGHT, _SINGLE_PANEL_HEIGHT)
 
 _STEPS_CACHE_NAME = "steps.pkl"
+# Baseline models shown last in combined-panel legends (config mode).
+_LEGEND_TAIL_MODELS = ("Transformer-xsmall", "Transformer-small", "MLP")
 
 
 @dataclass(frozen=True)
@@ -155,23 +157,20 @@ def _plot_flops_vs_loss(
     out_pdf: Path,
     *,
     legend_outside: bool = False,
+    legend_label_order: list[str] | None = None,
+    label_fn: Callable[[str], str] | None = None,
     ylabel: str = "Validation loss",
     figsize: tuple[float, float] = (8, 5),
+    flops_xmin: float | None = None,
 ) -> None:
     fig, ax = plt.subplots(figsize=figsize, constrained_layout=True)
     _draw_flops_curves(
-        ax, loss_histories, flops_per_step, colors, ylim, panel_title, ylabel=ylabel,
+        ax, loss_histories, flops_per_step, colors, ylim, panel_title,
+        label_fn=label_fn, ylabel=ylabel, flops_xmin=flops_xmin,
     )
-    if legend_outside:
-        ax.legend(
-            fontsize=_LEGEND_FS,
-            loc="upper left",
-            bbox_to_anchor=(1.02, 1.0),
-            borderaxespad=0.0,
-            frameon=True,
-        )
-    else:
-        ax.legend(fontsize=_LEGEND_FS, loc="upper right", frameon=True)
+    _apply_ax_legend(
+        ax, legend_outside=legend_outside, legend_label_order=legend_label_order,
+    )
     ax.grid(True)
     out_pdf.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_pdf, bbox_inches="tight")
@@ -189,6 +188,7 @@ def _draw_flops_curves(
     label_fn: Callable[[str], str] | None = None,
     *,
     ylabel: str = "Validation loss",
+    flops_xmin: float | None = None,
 ) -> None:
     if label_fn is None:
         label_fn = plot_model_label
@@ -216,12 +216,21 @@ def _draw_flops_curves(
         )
         cum_flops = steps_grid * flops
         x = np.log10(cum_flops + 1)
-        ax.plot(x, mean_loss, color=color, label=label_fn(model))
+        flop_mask = (
+            x >= flops_xmin if flops_xmin is not None
+            else np.ones(len(x), dtype=bool)
+        )
+        x_plot = x[flop_mask]
+        mean_loss_plot = mean_loss[flop_mask]
+        sigma_loss_plot = sigma_loss[flop_mask]
+        if len(x_plot) == 0:
+            continue
+        ax.plot(x_plot, mean_loss_plot, color=color, label=label_fn(model))
         if losses_aligned.shape[0] > 1:
             ax.fill_between(
-                x,
-                mean_loss - sigma_loss,
-                mean_loss + sigma_loss,
+                x_plot,
+                mean_loss_plot - sigma_loss_plot,
+                mean_loss_plot + sigma_loss_plot,
                 alpha=0.25,
                 color=color,
             )
@@ -233,6 +242,9 @@ def _draw_flops_curves(
     ax.tick_params(axis="both", labelsize=_TICK_FS)
     if ylim:
         ax.set_ylim(ylim)
+    if flops_xmin is not None:
+        _, xmax = ax.get_xlim()
+        ax.set_xlim(flops_xmin, xmax)
 
 
 def _plot_steps_vs_loss(
@@ -245,6 +257,7 @@ def _plot_steps_vs_loss(
     out_pdf: Path,
     *,
     legend_outside: bool = False,
+    legend_label_order: list[str] | None = None,
     label_fn: Callable[[str], str] | None = None,
     ylabel: str = "Validation loss",
     figsize: tuple[float, float] = (8, 5),
@@ -254,16 +267,9 @@ def _plot_steps_vs_loss(
         ax, loss_histories, flops_per_step, colors, ylim, panel_title, step_cutoff,
         label_fn=label_fn, ylabel=ylabel,
     )
-    if legend_outside:
-        ax.legend(
-            fontsize=_LEGEND_FS,
-            loc="upper left",
-            bbox_to_anchor=(1.02, 1.0),
-            borderaxespad=0.0,
-            frameon=True,
-        )
-    else:
-        ax.legend(fontsize=_LEGEND_FS, loc="upper right", frameon=True)
+    _apply_ax_legend(
+        ax, legend_outside=legend_outside, legend_label_order=legend_label_order,
+    )
     ax.grid(True)
     out_pdf.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_pdf, bbox_inches="tight")
@@ -333,7 +339,55 @@ def _draw_steps_curves(
         ax.set_ylim(ylim)
 
 
-def _shared_figure_legend(fig: plt.Figure, axes: tuple[plt.Axes, ...]) -> None:
+def _apply_ax_legend(
+    ax: plt.Axes,
+    *,
+    legend_outside: bool,
+    legend_label_order: list[str] | None,
+) -> None:
+    handles, labels = ax.get_legend_handles_labels()
+    handles, labels = _order_legend_handles_labels(handles, labels, legend_label_order)
+    legend_kw = dict(fontsize=_LEGEND_FS, frameon=True)
+    if legend_outside:
+        ax.legend(
+            handles,
+            labels,
+            loc="upper left",
+            bbox_to_anchor=(1.02, 1.0),
+            borderaxespad=0.0,
+            **legend_kw,
+        )
+    else:
+        ax.legend(handles, labels, loc="upper right", **legend_kw)
+
+
+def _legend_labels_from_cfg(
+    cfg: PlotConfig,
+    tail: tuple[str, ...] = _LEGEND_TAIL_MODELS,
+) -> list[str]:
+    """Display labels in config order, with *tail* model names moved to the end."""
+    return cfg.legend_labels(tail)
+
+
+def _order_legend_handles_labels(
+    handles: list,
+    labels: list[str],
+    label_order: list[str] | None,
+) -> tuple[list, list[str]]:
+    if not label_order:
+        return handles, labels
+    by_label = dict(zip(labels, handles))
+    ordered_labels = [lab for lab in label_order if lab in by_label]
+    ordered_labels.extend(sorted(set(by_label) - set(ordered_labels)))
+    return [by_label[lab] for lab in ordered_labels], ordered_labels
+
+
+def _shared_figure_legend(
+    fig: plt.Figure,
+    axes: tuple[plt.Axes, ...],
+    *,
+    label_order: list[str] | None = None,
+) -> None:
     """One legend for all *axes*, de-duplicated by model name."""
     by_label: dict[str, plt.Artist] = {}
     for ax in axes:
@@ -342,10 +396,12 @@ def _shared_figure_legend(fig: plt.Figure, axes: tuple[plt.Axes, ...]) -> None:
             by_label.setdefault(li, hi)
     labels = sorted(by_label.keys())
     handles = [by_label[k] for k in labels]
+    handles, labels = _order_legend_handles_labels(handles, labels, label_order)
     if not handles:
         return
     n = len(labels)
     ncol = max(3, min(6, (n + 2) // 3)) if n > 2 else n
+    ncol = min(n, ncol + 1)
     legend_kw: dict = dict(
         ncol=ncol,
         fontsize=_LEGEND_FS,
@@ -379,6 +435,8 @@ def _plot_combined_flops_row(
     ylim_r: tuple[float, float],
     out_pdf: Path,
     label_fn: Callable[[str], str] | None = None,
+    flops_xmin: float | None = None,
+    legend_label_order: list[str] | None = None,
 ) -> None:
     if not lh_c and not lh_r:
         print("Skip (no models):", out_pdf)
@@ -387,12 +445,12 @@ def _plot_combined_flops_row(
     fig, (ax0, ax1) = plt.subplots(
         1, 2, figsize=(11.5, 4.6), constrained_layout=True, sharey=False,
     )
-    _draw_flops_curves(ax0, lh_c, flops_c, colors, ylim_c, "Classification", label_fn)
-    _draw_flops_curves(ax1, lh_r, flops_r, colors, ylim_r, "Regression", label_fn)
+    _draw_flops_curves(ax0, lh_c, flops_c, colors, ylim_c, "Classification", label_fn, flops_xmin=flops_xmin)
+    _draw_flops_curves(ax1, lh_r, flops_r, colors, ylim_r, "Regression", label_fn, flops_xmin=flops_xmin)
     ax1.set_ylabel("")
     for ax in (ax0, ax1):
         ax.grid(True)
-    _shared_figure_legend(fig, (ax0, ax1))
+    _shared_figure_legend(fig, (ax0, ax1), label_order=legend_label_order)
     out_pdf.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_pdf, bbox_inches="tight")
     plt.close(fig)
@@ -411,6 +469,7 @@ def _plot_combined_steps_row(
     ylim_r: tuple[float, float],
     out_pdf: Path,
     label_fn: Callable[[str], str] | None = None,
+    legend_label_order: list[str] | None = None,
 ) -> None:
     if not lh_c and not lh_r:
         print("Skip (no models):", out_pdf)
@@ -429,7 +488,7 @@ def _plot_combined_steps_row(
     ax1.set_ylabel("")
     for ax in (ax0, ax1):
         ax.grid(True)
-    _shared_figure_legend(fig, (ax0, ax1))
+    _shared_figure_legend(fig, (ax0, ax1), label_order=legend_label_order)
     out_pdf.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_pdf, bbox_inches="tight")
     plt.close(fig)
@@ -450,7 +509,9 @@ def _plot_variant_bundle(
     *,
     separate_panels: bool,
     step_cutoff: int | None = None,
+    flops_xmin: float | None = None,
     label_fn: Callable[[str], str] | None = None,
+    legend_label_order: list[str] | None = None,
 ) -> None:
     lh_c_v, flops_c_v, colors_c_v = _subset_for_plot(
         lh_c, flops_c, colors_c, variant.model_filter, variant.colors_override
@@ -470,25 +531,32 @@ def _plot_variant_bundle(
         lh_r_v, flops_r_v, colors_r_v, ylim_r,
         combined_out / "log_flops_vs_val_loss.pdf",
         label_fn,
+        flops_xmin=flops_xmin,
+        legend_label_order=legend_label_order,
     )
     _plot_combined_steps_row(
         lh_c_v, flops_c_v, colors_c_v, ylim_c, step_cutoff,
         lh_r_v, flops_r_v, colors_r_v, ylim_r,
         combined_out / "log_steps_vs_val_loss.pdf",
         label_fn,
+        legend_label_order=legend_label_order,
     )
 
     if lh_c_v:
         _plot_flops_vs_loss(
             lh_c_v, flops_c_v, colors_c_v, "", ylim_c,
             combined_out / "log_flops_vs_val_loss_classification.pdf",
+            label_fn=label_fn,
+            legend_label_order=legend_label_order,
             ylabel="Validation loss (classification)",
             figsize=_SINGLE_PANEL_FIGSIZE,
+            flops_xmin=flops_xmin,
         )
         _plot_steps_vs_loss(
             lh_c_v, flops_c_v, colors_c_v, "", ylim_c, step_cutoff,
             combined_out / "log_steps_vs_val_loss_classification.pdf",
             label_fn=label_fn,
+            legend_label_order=legend_label_order,
             ylabel="Validation loss (classification)",
             figsize=_SINGLE_PANEL_FIGSIZE,
         )
@@ -496,13 +564,17 @@ def _plot_variant_bundle(
         _plot_flops_vs_loss(
             lh_r_v, flops_r_v, colors_r_v, "", ylim_r,
             combined_out / "log_flops_vs_val_loss_regression.pdf",
+            label_fn=label_fn,
+            legend_label_order=legend_label_order,
             ylabel="Validation loss (regression)",
             figsize=_SINGLE_PANEL_FIGSIZE,
+            flops_xmin=flops_xmin,
         )
         _plot_steps_vs_loss(
             lh_r_v, flops_r_v, colors_r_v, "", ylim_r, None,
             combined_out / "log_steps_vs_val_loss_regression.pdf",
             label_fn=label_fn,
+            legend_label_order=legend_label_order,
             ylabel="Validation loss (regression)",
             figsize=_SINGLE_PANEL_FIGSIZE,
         )
@@ -515,6 +587,7 @@ def _plot_variant_bundle(
     _plot_flops_vs_loss(
         lh_c_v, flops_c_v, colors_c_v, "Classification", ylim_c,
         clf_out / "log_flops_vs_val_loss.pdf", legend_outside=True,
+        flops_xmin=flops_xmin,
     )
     _plot_steps_vs_loss(
         lh_c_v, flops_c_v, colors_c_v, "Classification", ylim_c, step_cutoff,
@@ -523,11 +596,57 @@ def _plot_variant_bundle(
     _plot_flops_vs_loss(
         lh_r_v, flops_r_v, colors_r_v, "Regression", ylim_r,
         reg_out / "log_flops_vs_val_loss.pdf", legend_outside=False,
+        flops_xmin=flops_xmin,
     )
     _plot_steps_vs_loss(
         lh_r_v, flops_r_v, colors_r_v, "Regression", ylim_r, None,
         reg_out / "log_steps_vs_val_loss.pdf", legend_outside=False, label_fn=label_fn,
     )
+
+
+def write_classification_val_loss_log_flops_steps_pdf(
+    loss_histories: dict,
+    flops_per_step: dict,
+    colors: dict[str, str],
+    ylim: tuple[float, float],
+    out_pdf: Path,
+    *,
+    model_names: set[str] | None = None,
+    label_fn: Callable[[str], str] | None = None,
+    step_cutoff: int | None = None,
+    flops_xmin: float | None = None,
+) -> None:
+    """One row: log10(FLOPs) | log10(steps) vs classification validation loss."""
+    if model_names is None:
+        model_filter = lambda m: True  # noqa: E731
+    else:
+        model_filter = lambda m: m in model_names  # noqa: E731
+    lh, flops, clrs = _subset_for_plot(
+        loss_histories, flops_per_step, colors, model_filter,
+    )
+    if not lh:
+        print("Skip (no classification models):", out_pdf)
+        return
+
+    fig, (ax0, ax1) = plt.subplots(
+        1, 2, figsize=(11.5, 4.6), constrained_layout=True, sharey=True,
+    )
+    _draw_flops_curves(
+        ax0, lh, flops, clrs, ylim, "",
+        label_fn=label_fn, ylabel="Validation loss (classification)",
+        flops_xmin=flops_xmin,
+    )
+    _draw_steps_curves(
+        ax1, lh, flops, clrs, ylim, "", step_cutoff,
+        label_fn=label_fn, ylabel="",
+    )
+    for ax in (ax0, ax1):
+        ax.grid(True)
+    _shared_figure_legend(fig, (ax0, ax1))
+    out_pdf.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_pdf, bbox_inches="tight")
+    plt.close(fig)
+    print("Saved:", out_pdf)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -619,13 +738,16 @@ def main(argv: list[str] | None = None) -> None:
         colors_override = cfg.colors()
         variant = StepsPlotVariant("", custom_filter, colors_override)
         label_fn = cfg.label_for
+        legend_label_order = _legend_labels_from_cfg(cfg)
         _plot_variant_bundle(
             variant, lh_c, flops_c, colors_c, ylim_c,
             lh_r, flops_r, colors_r, ylim_r,
             plots_root,
             separate_panels=args.separate_panels,
             step_cutoff=cfg.step_cutoff,
+            flops_xmin=cfg.flops_xmin,
             label_fn=label_fn,
+            legend_label_order=legend_label_order,
         )
     else:
         for variant in STEPS_PLOT_VARIANTS:

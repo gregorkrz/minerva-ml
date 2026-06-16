@@ -401,11 +401,11 @@ def plot_rms_iqr(
     ax[0].legend(fontsize=7)
     ax[1].legend(fontsize=7)
     ax[0].set(
-        xlabel="MC truth $q_3$ [GeV]",
+        xlabel=r"True $q_3$ [GeV]",
         ylabel="RMS of $E_{\\mathrm{available}}^{\\mathrm{reco}}/E_{\\mathrm{available}}^{\\mathrm{true}}$",
     )
     ax[1].set(
-        xlabel="MC truth $q_3$ [GeV]",
+        xlabel=r"True $q_3$ [GeV]",
         ylabel="25-75 IQR of $E_{\\mathrm{available}}^{\\mathrm{reco}}/E_{\\mathrm{available}}^{\\mathrm{true}}$",
     )
     ax[0].grid(True)

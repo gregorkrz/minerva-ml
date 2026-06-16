@@ -315,7 +315,7 @@ def main(argv: list[str] | None = None) -> None:
         ax.plot(q3, bl["iqr"], "k--", label="Baseline (1B)")
 
     ax.set(
-        xlabel="MC truth $q_3$ [GeV]",
+        xlabel=r"True $q_3$ [GeV]",
         ylabel=r"25-75 IQR of $E_{\mathrm{available}}^{\mathrm{reco}}/E_{\mathrm{available}}^{\mathrm{true}}$",
     )
     selection_text = ""
