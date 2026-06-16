@@ -1,0 +1,14 @@
+{
+  "_comment": "NPML poster subset plus Transformer-xsmall. Transformers use emerald dark/light pair (#047857 / #10b981); HyperScale uses sky-blue pair.",
+  "models": [
+    {"name": "MLP",                  "color": "#2ca02c"},
+    {"name": "OmniLearned-small",    "color": "#ff7f0e"},
+    {"name": "OmniLearned-small-rw", "color": "#e377c2"},
+    {"name": "Transformer-xsmall",   "color": "#047857", "display_name": "Transformer-xsmall-rw"},
+    {"name": "Transformer-small",    "color": "#10b981", "display_name": "Transformer-small-rw"},
+    {"name": "HyperScale-small",     "color": "#0369a1"},
+    {"name": "HyperScale-small-rw",  "color": "#60a5fa"}
+  ],
+  "step_cutoff": null,
+  "flops_xmin": 14.5
+}

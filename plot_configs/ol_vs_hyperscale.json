@@ -1,14 +1,6 @@
 {
-  "_comment": "HyperScale + OmniLearned small/medium (incl. -rw) + Transformer baselines.",
+  "_comment": "Same as hyperscale.json but without Transformer-small / Transformer-xsmall baselines.",
   "models": [
-    {
-      "name": "Transformer-xsmall",
-      "color": "#1d4ed8"
-    },
-    {
-      "name": "Transformer-small",
-      "color": "#0891b2"
-    },
     {
       "name": "OmniLearned-small",
       "color": "#c2410c"

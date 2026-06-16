@@ -355,7 +355,7 @@ Each `*.json` file selects which models appear on the figures and their colors. 
 - `**display_name**` — optional legend label override.
 - `**step_cutoff**` — optional int; clips the x-axis on log-steps plots only.
 
-**Existing configs:** `default.json` (full model lineup), `bert_vs_ol.json`, `hyperscale.json`, `V1Paper.json`, `20260606_Comparison.json`.
+**Existing configs:** `default.json` (full model lineup), `bert_vs_ol.json`, `hyperscale.json`, `ol_vs_hyperscale.json`, `V1Paper.json`, `20260606_Comparison.json`.
 
 **Add a new configuration:**
 

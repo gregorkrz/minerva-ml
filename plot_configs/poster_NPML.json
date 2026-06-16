@@ -1,0 +1,13 @@
+{
+  "_comment": "NPML poster / paper subset: MLP + OL-small + Transformer-small baselines, plus HyperScale-small. Colors from CLRS_CLASSIFICATION; HyperScale uses sky blue dark/light pair.",
+  "models": [
+    {"name": "MLP",                  "color": "#2ca02c"},
+    {"name": "OmniLearned-small",    "color": "#ff7f0e"},
+    {"name": "OmniLearned-small-rw", "color": "#e377c2"},
+    {"name": "Transformer-small",    "color": "#17becf"},
+    {"name": "HyperScale-small",     "color": "#0369a1"},
+    {"name": "HyperScale-small-rw",  "color": "#60a5fa"}
+  ],
+  "step_cutoff": null,
+  "flops_xmin": 14.5
+}

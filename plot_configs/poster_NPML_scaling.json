@@ -1,0 +1,15 @@
+{
+  "_comment": "Scaling comparison: poster_NPML_with_xsmall plus OmniLearned-medium-frozen and HyperScale-medium; no MLP. Transformers use emerald pair; HyperScale uses sky-blue (small) + purple (medium).",
+  "models": [
+    {"name": "OmniLearned-small",    "color": "#ff7f0e"},
+    {"name": "OmniLearned-small-rw", "color": "#e377c2"},
+    {"name": "OmniLearned-medium",   "color": "#9467bd", "display_name": "OmniLearned-medium-frozen"},
+    {"name": "Transformer-xsmall",   "color": "#047857", "display_name": "Transformer-xsmall-rw"},
+    {"name": "Transformer-small",    "color": "#10b981", "display_name": "Transformer-small-rw"},
+    {"name": "HyperScale-small",     "color": "#0369a1"},
+    {"name": "HyperScale-small-rw",  "color": "#60a5fa"},
+    {"name": "HyperScale-medium",    "color": "#86198f"}
+  ],
+  "step_cutoff": null,
+  "flops_xmin": 14.5
+}
