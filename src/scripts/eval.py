@@ -188,6 +188,7 @@ def evaluate(model, dataloader, device, args_dict, use_amp=False):
 
     all_preds = []
     all_targets = []
+    all_pid_labels = []
     all_losses = []
     all_cond = []
 
@@ -205,6 +206,7 @@ def evaluate(model, dataloader, device, args_dict, use_amp=False):
                 use_cond=use_cond,
                 include_E_sum=include_E_sum,
                 zero_cond_feature=zero_cond_feature,
+                energy_order=args_dict.get("bert_energy_order", False),
             )
         else:
             inputs = prepare_batch(
@@ -262,6 +264,8 @@ def evaluate(model, dataloader, device, args_dict, use_amp=False):
             all_preds.append(logits.cpu().numpy())
 
         all_targets.append(inputs["y"].cpu().numpy())
+        if mode == "classifier" and batch.get("pid_label") is not None:
+            all_pid_labels.append(batch["pid_label"].cpu().numpy())
         all_cond.append(batch["cond"].cpu().numpy())
         # Each 10th step, print 1st 10 predictions and targets
 
@@ -278,6 +282,8 @@ def evaluate(model, dataloader, device, args_dict, use_amp=False):
         "targets": all_targets,
         "cond": all_cond,
     }
+    if all_pid_labels:
+        results["pid_labels"] = np.concatenate(all_pid_labels)
     return results
 
 
@@ -360,7 +366,7 @@ def main():
     use_omnilearned = args_dict.get("use_omnilearned", None)
     use_bert = args_dict.get("use_bert", None)
     concat_additional_info = not (bool(use_omnilearned) or bool(use_bert))
-    dataloader, _ = load_data(
+    dataloader, _, _ = load_data(
         dataset_name=dataset_name,
         path=data_path,
         batch=args.batch_size,
@@ -415,7 +421,11 @@ def main():
     np.savez(
         output_file,
         prediction=results["predictions"],
-        pid=results["targets"],
+        pid=(
+            results["pid_labels"]
+            if "pid_labels" in results
+            else results["targets"]
+        ),
         cond=results["cond"],
     )
     print(f"Predictions saved to: {output_file}")

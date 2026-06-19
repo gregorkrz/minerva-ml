@@ -9,3 +9,7 @@ wandb
 *.sh
 .env
 old_*
+
+# Generated plot PDFs and HTML indexes — published via S3/CloudFront (see scripts/publish_plots.sh)
+plots/
+.claude

@@ -431,7 +431,9 @@ def plot_ratio_histogram_q3_two_panels(
 ) -> plt.Figure:
     """Two side-by-side :math:`E_{\\mathrm{reco}}/E_{\\mathrm{true}}` histograms for *q₃* slices.
 
-    Left: :math:`q_3 \\in [0, 1)` GeV; right: :math:`q_3 \\in [1, 2)` GeV. Figure height equals
+    Left: :math:`q_3 \\in [0, 1)` GeV; right: :math:`q_3 \\in [1, 2)` GeV. Each histogram is
+    normalized to unit area (``density=True``) so the two *q₃* slices are comparable despite
+    different event counts. Figure height equals
     :data:`SMALL_PAPER_COMPACT_IQR_MPV_FIGSIZE_INCHES` width; ``wspace`` is small so the
     panels sit close together; ``set_box_aspect(1)`` keeps each subplot ~square. Legend
     on the left panel only (``loc="best"``); the right panel has no legend.
@@ -520,6 +522,7 @@ def plot_ratio_histogram_q3_two_panels(
                 ratio_bl,
                 bins=ratio_bins,
                 histtype="step",
+                density=True,
                 label=bl_lab,
                 color=baseline_color_kw,
             )
@@ -538,6 +541,7 @@ def plot_ratio_histogram_q3_two_panels(
                     ratio_model,
                     bins=ratio_bins,
                     histtype="step",
+                    density=True,
                     label=lab,
                     color=mcol,
                 )
@@ -547,7 +551,7 @@ def plot_ratio_histogram_q3_two_panels(
             r"$E_{\mathrm{available}}^{\mathrm{reco}} / E_{\mathrm{available}}^{\mathrm{true}}$",
             fontsize=fs_a,
         )
-        ax.set_ylabel("Counts", fontsize=fs_a)
+        ax.set_ylabel("Density", fontsize=fs_a)
         ax.tick_params(axis="both", which="major", labelsize=fs_k)
         ax.grid(True)
         ax.set_title(panel_title, fontsize=_REGRESSION_TITLE_FS, pad=8)

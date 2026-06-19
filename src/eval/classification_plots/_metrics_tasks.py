@@ -8,6 +8,7 @@ import numpy as np
 
 from ._constants import DEFAULT_FIXED_FPR
 from ._metrics_binned import (
+    _align_per_event_array,
     _pion_kinematic_bin_mask,
     aggregate_metrics,
     compute_binned_metrics_q3,
@@ -146,10 +147,12 @@ def compute_signal_baseline(
     first_run = results[first_model][0]
     sig = get_signal_probabilities(first_run, signal_classes, playlist)
     y_true = sig["ytrue"]
+    n_pred = len(y_true)
     is_signal = y_true == 1
     is_background = y_true == 0
 
     if event_mask is not None:
+        event_mask = _align_per_event_array(event_mask, data, playlist, n_pred)
         is_signal = is_signal & event_mask
         is_background = is_background & event_mask
 
@@ -165,6 +168,8 @@ def compute_signal_baseline(
             bin_index=i,
             edges=E_bins,
             require_has_pion=pion_bins_require_has_pion,
+            playlist=playlist,
+            n_pred=n_pred,
         )
         n_sig = (is_signal & bm).sum()
         baseline_E.append(n_sig / (n_sig + n_bg) if n_sig > 0 else np.nan)
@@ -179,12 +184,14 @@ def compute_signal_baseline(
             bin_index=i,
             edges=theta_bins,
             require_has_pion=pion_bins_require_has_pion,
+            playlist=playlist,
+            n_pred=n_pred,
         )
         n_sig = (is_signal & bm).sum()
         baseline_theta.append(n_sig / (n_sig + n_bg) if n_sig > 0 else np.nan)
 
     # q3 bins
-    q3 = data["q3_GeV"]
+    q3 = _align_per_event_array(data["q3_GeV"], data, playlist, n_pred, key="q3_GeV")
     q3_edges = data["q3_bin_edges"]
     baseline_q3 = []
     for i in range(len(q3_edges) - 1):
@@ -213,8 +220,12 @@ def compute_signal_baseline_W(
     first_run = results[first_model][0]
     sig = get_signal_probabilities(first_run, signal_classes, playlist)
     y_true = sig["ytrue"]
+    n_pred = len(y_true)
 
-    w = data["W_GeV"]
+    if event_mask is not None:
+        event_mask = _align_per_event_array(event_mask, data, playlist, n_pred)
+
+    w = _align_per_event_array(data["W_GeV"], data, playlist, n_pred, key="W_GeV")
     edges = data["W_bin_edges"]
     baseline_w = []
     for i in range(len(edges) - 1):

@@ -8,6 +8,8 @@ The training script supports:
 
 - **PointGlobalMixedViT** (`Transformer1` style runs)
 - **OmniLearned PET2** (`--use-omnilearned small|medium|large`)
+- **BERT baseline** (`--use-bert tiny|tiny-rw|small|distil`)
+- **HyperScale ParticleViT** (`--use-hyperscale basic|embedding|pool`)
 - **CondOnlyMLP** baseline (`--cond_only`)
 
 Tasks are either:
@@ -93,7 +95,29 @@ In `src/jobs/submit_train_jobs.py`, the `model` identifiers in the `for model in
 - `OLS_RW` -> OmniLearned small from random initialization (`--use-omnilearned small` with no `--use-pretrained`)
 - `OLM` -> OmniLearned medium + pretrained (`--use-pretrained pretrain_m`)
 
-## 3) CondOnlyMLP baseline
+## 3) HyperScale ParticleViT
+
+Implementation: `src/models/hyperscale/` (vendored from
+[`gregorkrz/HyperScale`](https://github.com/gregorkrz/HyperScale)), wrapped by
+`HyperScaleBaseline` in `src/scripts/train.py`.
+
+Enabled via:
+
+```bash
+--use-hyperscale basic       # linear input embed + CLS token
+--use-hyperscale embedding   # split kin/PID/vertex embeddings (requires 9 features)
+--use-hyperscale pool        # linear input embed + learned attention pool (no CLS)
+```
+
+Architecture knobs reuse the existing flags `--d_model`, `--depth`, `--n_heads`,
+plus `--hs-mlp-ratio` (default `8/3`, matching upstream HyperScale). The
+transformer block uses **reordered (double) RMSNorm** around attention and
+SwiGLU FFN, **QK-Norm** for attention stability, and OLMo-style trunc-normal
+initialization. When `--use_cond` (or `--include-E-sum`) is set, global event
+features are projected to `d_model` and prepended as a single token (mirroring
+the BERT baseline).
+
+## 4) CondOnlyMLP baseline
 
 Implementation: `CondOnlyMLP` in `src/scripts/train.py`.
 

@@ -205,6 +205,391 @@ class TestCondOnlyMLP:
         assert out.shape == (B, 5)
 
 
+class TestHyperScale:
+    """Vendored HyperScale ParticleViT models (no wrapper)."""
+
+    def test_basic_forward(self):
+        from src.models.hyperscale import ParticleVIT
+
+        m = ParticleVIT(
+            num_features=10,
+            num_classes=1,
+            embed_dim=64,
+            depth=2,
+            num_heads=4,
+            mlp_ratio=8 / 3,
+        )
+        m.eval()
+        mask = torch.ones(B, N, dtype=torch.bool)
+        mask[:, 20:] = False
+        with torch.no_grad():
+            out = m(torch.randn(B, N, 10), attn_mask=mask)
+        assert out.shape == (B, 1)
+
+    def test_embedding_forward(self):
+        from src.models.hyperscale import ParticleVIT_Embedding
+
+        m = ParticleVIT_Embedding(
+            num_features=9,
+            num_classes=5,
+            embed_dim=64,
+            depth=2,
+            num_heads=4,
+            mlp_ratio=8 / 3,
+        )
+        m.eval()
+        X = torch.randn(B, N, 9)
+        X[:, :, 4] = torch.randint(0, 9, (B, N)).float()
+        mask = torch.ones(B, N, dtype=torch.bool)
+        with torch.no_grad():
+            out = m(X, attn_mask=mask)
+        assert out.shape == (B, 5)
+
+    def test_embedding_requires_9_features(self):
+        from src.models.hyperscale import ParticleVIT_Embedding
+
+        with pytest.raises(ValueError, match="expects 9 features"):
+            ParticleVIT_Embedding(
+                num_features=10,
+                num_classes=1,
+                embed_dim=64,
+                depth=1,
+                num_heads=4,
+                mlp_ratio=8 / 3,
+            )
+
+    def test_pool_forward(self):
+        from src.models.hyperscale import ParticleVIT_Pool
+
+        m = ParticleVIT_Pool(
+            num_features=10,
+            num_classes=1,
+            embed_dim=64,
+            depth=2,
+            num_heads=4,
+            mlp_ratio=8 / 3,
+        )
+        m.eval()
+        mask = torch.ones(B, N, dtype=torch.bool)
+        mask[:, 25:] = False
+        with torch.no_grad():
+            out = m(torch.randn(B, N, 10), attn_mask=mask)
+        assert out.shape == (B, 1)
+
+
+class TestHyperScaleBaseline:
+    """Train.py wrapper that adds an optional projected global token."""
+
+    def test_basic_forward(self):
+        from src.scripts.train import HyperScaleBaseline
+
+        model = HyperScaleBaseline(
+            input_dim=10,
+            output_dim=1,
+            embed_dim=64,
+            depth=2,
+            num_heads=4,
+            variant="basic",
+            mlp_ratio=8 / 3,
+        )
+        model.eval()
+        with torch.no_grad():
+            out = model(torch.randn(B, N, 10), torch.ones(B, N))
+        assert out.shape == (B, 1)
+
+    def test_basic_with_global_token(self):
+        from src.scripts.train import HyperScaleBaseline
+
+        model = HyperScaleBaseline(
+            input_dim=10,
+            output_dim=5,
+            embed_dim=64,
+            depth=2,
+            num_heads=4,
+            variant="basic",
+            mlp_ratio=8 / 3,
+            global_cont_dim=16,
+        )
+        model.eval()
+        with torch.no_grad():
+            out = model(
+                torch.randn(B, N, 10),
+                torch.ones(B, N),
+                global_cont=torch.randn(B, 16),
+            )
+        assert out.shape == (B, 5)
+
+    def test_global_token_requires_cond(self):
+        from src.scripts.train import HyperScaleBaseline
+
+        model = HyperScaleBaseline(
+            input_dim=10,
+            output_dim=1,
+            embed_dim=64,
+            depth=2,
+            num_heads=4,
+            variant="basic",
+            mlp_ratio=8 / 3,
+            global_cont_dim=16,
+        )
+        model.eval()
+        with pytest.raises(ValueError, match="global_cont is missing"):
+            with torch.no_grad():
+                _ = model(torch.randn(B, N, 10), torch.ones(B, N))
+
+    def test_embedding_variant(self):
+        from src.scripts.train import HyperScaleBaseline
+
+        model = HyperScaleBaseline(
+            input_dim=9,
+            output_dim=1,
+            embed_dim=64,
+            depth=2,
+            num_heads=4,
+            variant="embedding",
+            mlp_ratio=8 / 3,
+        )
+        model.eval()
+        X = torch.randn(B, N, 9)
+        X[:, :, 4] = torch.randint(0, 9, (B, N)).float()
+        with torch.no_grad():
+            out = model(X, torch.ones(B, N))
+        assert out.shape == (B, 1)
+
+    def test_pool_variant(self):
+        from src.scripts.train import HyperScaleBaseline
+
+        model = HyperScaleBaseline(
+            input_dim=10,
+            output_dim=3,
+            embed_dim=64,
+            depth=2,
+            num_heads=4,
+            variant="pool",
+            mlp_ratio=8 / 3,
+            global_cont_dim=16,
+        )
+        model.eval()
+        with torch.no_grad():
+            out = model(
+                torch.randn(B, N, 10),
+                torch.ones(B, N),
+                global_cont=torch.randn(B, 16),
+            )
+        assert out.shape == (B, 3)
+
+    def test_unknown_variant_rejected(self):
+        from src.scripts.train import HyperScaleBaseline
+
+        with pytest.raises(ValueError, match="Unknown HyperScale variant"):
+            HyperScaleBaseline(
+                input_dim=10,
+                output_dim=1,
+                embed_dim=64,
+                depth=2,
+                num_heads=4,
+                variant="bogus",
+                mlp_ratio=8 / 3,
+            )
+
+    def test_load_pretrained_transfers_encoder_skips_head(self, tmp_path):
+        """Pretrained loader copies token_embed/blocks/cls_token weights but
+        leaves the task-specific head and the wrapper-only global_proj at init."""
+        from src.scripts.train import HyperScaleBaseline
+        from src.models.hyperscale import load_pretrained_hyperscale
+
+        # Source: trained on 1-class regression head, no global token.
+        src = HyperScaleBaseline(
+            input_dim=10,
+            output_dim=1,
+            embed_dim=64,
+            depth=2,
+            num_heads=4,
+            variant="basic",
+            mlp_ratio=8 / 3,
+        )
+        ckpt_path = tmp_path / "hs_source.pt"
+        torch.save({"model_state_dict": src.state_dict()}, ckpt_path)
+
+        # Target: same encoder shape but a 5-way classifier head and a new
+        # global token projection.
+        dst = HyperScaleBaseline(
+            input_dim=10,
+            output_dim=5,
+            embed_dim=64,
+            depth=2,
+            num_heads=4,
+            variant="basic",
+            mlp_ratio=8 / 3,
+            global_cont_dim=16,
+        )
+
+        head_before = dst.head.weight.detach().clone()
+        gproj_before = dst.global_proj.weight.detach().clone()
+        embed_before = dst.token_embed.weight.detach().clone()
+
+        load_pretrained_hyperscale(dst, str(ckpt_path), verbose=False)
+
+        # Encoder transferred.
+        assert torch.allclose(dst.token_embed.weight, src.token_embed.weight)
+        assert torch.allclose(dst.cls_token, src.cls_token)
+        assert torch.allclose(
+            dst.blocks[0].pre_attn_norm.weight, src.blocks[0].pre_attn_norm.weight
+        )
+        # token_embed actually moved away from its init.
+        assert not torch.allclose(dst.token_embed.weight, embed_before)
+        # Task head and global_proj are left at init (shape mismatch / not in ckpt).
+        assert torch.allclose(dst.head.weight, head_before)
+        assert torch.allclose(dst.global_proj.weight, gproj_before)
+
+
+class TestHyperScaleAutofill:
+    """--hs-pretrained alone should auto-fill arch from the checkpoint's saved args."""
+
+    def test_autofill_overrides_missing_arch(self, tmp_path):
+        import argparse
+        from src.scripts.train import _maybe_autofill_hyperscale_args
+
+        # Save a checkpoint that mimics src.scripts.train.save_checkpoint output:
+        # {"args": vars(args), "model_state_dict": ...}.
+        saved_args = {
+            "use_hyperscale": "pool",
+            "d_model": 128,
+            "depth": 3,
+            "n_heads": 4,
+            "hs_mlp_ratio": 2.0,
+        }
+        ckpt = tmp_path / "fake_hs.pt"
+        torch.save({"args": saved_args, "model_state_dict": {}}, ckpt)
+
+        # User passes only --hs-pretrained (no --use-hyperscale, no arch flags).
+        args = argparse.Namespace(
+            hs_pretrained=str(ckpt),
+            use_hyperscale=None,
+            d_model=999,
+            depth=999,
+            n_heads=999,
+            hs_mlp_ratio=999.0,
+        )
+        changed = _maybe_autofill_hyperscale_args(args)
+        assert changed is True
+        assert args.use_hyperscale == "pool"
+        assert args.d_model == 128
+        assert args.depth == 3
+        assert args.n_heads == 4
+        assert args.hs_mlp_ratio == 2.0
+
+    def test_cli_variant_blocks_autofill(self, tmp_path):
+        import argparse
+        from src.scripts.train import _maybe_autofill_hyperscale_args
+
+        saved_args = {"use_hyperscale": "pool", "d_model": 128}
+        ckpt = tmp_path / "fake_hs.pt"
+        torch.save({"args": saved_args}, ckpt)
+
+        # User explicitly passed --use-hyperscale, so we trust their CLI.
+        args = argparse.Namespace(
+            hs_pretrained=str(ckpt),
+            use_hyperscale="basic",
+            d_model=64,
+            depth=2,
+            n_heads=4,
+            hs_mlp_ratio=8 / 3,
+        )
+        changed = _maybe_autofill_hyperscale_args(args)
+        assert changed is False
+        assert args.use_hyperscale == "basic"
+        assert args.d_model == 64
+
+    def test_autofill_from_directory_path(self, tmp_path):
+        """--hs-pretrained can point at the run directory; the loader finds
+        the upstream pvit_final.pth and the sibling train_config.yaml."""
+        import argparse
+        from src.scripts.train import _maybe_autofill_hyperscale_args
+
+        run_dir = tmp_path / "emb_6e17_d4_e448"
+        run_dir.mkdir()
+        (run_dir / "train_config.yaml").write_text(
+            "model_type: ParticleVIT_Embedding\n"
+            "model_params:\n"
+            "  embed_dim: 448\n"
+            "  depth: 4\n"
+            "  num_heads: 7\n"
+            "  mlp_ratio: 2.6666666666666665\n"
+        )
+        # Upstream HyperScale ships pvit_final.pth (not best_model.pt).
+        torch.save({"w": torch.zeros(1)}, run_dir / "pvit_final.pth")
+
+        args = argparse.Namespace(
+            hs_pretrained=str(run_dir),  # NOTE: directory, not file
+            use_hyperscale=None,
+            d_model=0,
+            depth=0,
+            n_heads=0,
+            hs_mlp_ratio=0.0,
+        )
+        _maybe_autofill_hyperscale_args(args)
+        assert args.use_hyperscale == "embedding"
+        assert args.d_model == 448
+        assert args.depth == 4
+        assert args.n_heads == 7
+
+    def test_autofill_from_upstream_train_config_yaml(self, tmp_path):
+        """When ckpt has no saved args, fall back to train_config.yaml next to it."""
+        import argparse
+        from src.scripts.train import _maybe_autofill_hyperscale_args
+
+        # Upstream HyperScale dumps train_config.yaml alongside best_model.pt.
+        # Use the exact format from gregorkrz/HyperScale's train.py.
+        (tmp_path / "train_config.yaml").write_text(
+            "model_type: ParticleVIT_Embedding\n"
+            "model_params:\n"
+            "  num_features: 9\n"
+            "  num_classes: 210\n"
+            "  embed_dim: 448\n"
+            "  depth: 4\n"
+            "  num_heads: 7\n"
+            "  mlp_ratio: 2.6666666666666665\n"
+        )
+        ckpt = tmp_path / "best_model.pt"
+        torch.save({"some_weight": torch.zeros(1)}, ckpt)  # raw, no "args" key
+
+        args = argparse.Namespace(
+            hs_pretrained=str(ckpt),
+            use_hyperscale=None,
+            d_model=0,
+            depth=0,
+            n_heads=0,
+            hs_mlp_ratio=0.0,
+        )
+        changed = _maybe_autofill_hyperscale_args(args)
+        assert changed is True
+        assert args.use_hyperscale == "embedding"
+        assert args.d_model == 448
+        assert args.depth == 4
+        assert args.n_heads == 7
+        assert args.hs_mlp_ratio == pytest.approx(8 / 3)
+
+    def test_autofill_needs_saved_args(self, tmp_path):
+        import argparse
+        import pytest as _pytest
+        from src.scripts.train import _maybe_autofill_hyperscale_args
+
+        # Bare state-dict checkpoint with no "args" key.
+        ckpt = tmp_path / "raw_hs.pt"
+        torch.save({"some_weight": torch.zeros(1)}, ckpt)
+        args = argparse.Namespace(
+            hs_pretrained=str(ckpt),
+            use_hyperscale=None,
+            d_model=0,
+            depth=0,
+            n_heads=0,
+            hs_mlp_ratio=0.0,
+        )
+        with _pytest.raises(ValueError, match="no saved args"):
+            _maybe_autofill_hyperscale_args(args)
+
+
 class TestBertBaseline:
 
     def test_forward(self):
@@ -255,3 +640,48 @@ class TestBertBaseline:
         with pytest.raises(ValueError, match="global_cont is missing"):
             with torch.no_grad():
                 _ = model(torch.randn(B, N, 4), torch.ones(B, N))
+
+
+class TestSortParticlesByEnergy:
+    def test_sorts_valid_particles_descending(self):
+        from src.scripts.train import sort_particles_by_energy
+
+        # log(E) is feature index 3
+        X = torch.tensor(
+            [
+                [
+                    [0.0, 0.0, 0.0, 1.0],
+                    [0.0, 0.0, 0.0, 3.0],
+                    [0.0, 0.0, 0.0, 2.0],
+                    [0.0, 0.0, 0.0, 0.0],
+                ]
+            ],
+            dtype=torch.float32,
+        )
+        mask = torch.tensor([[1.0, 1.0, 1.0, 0.0]], dtype=torch.float32)
+        X_out, mask_out = sort_particles_by_energy(X, mask)
+        assert X_out[0, :3, 3].tolist() == [3.0, 2.0, 1.0]
+        assert mask_out[0].tolist() == [1.0, 1.0, 1.0, 0.0]
+
+    def test_prepare_batch_bert_energy_order(self):
+        from src.scripts.train import prepare_batch_bert
+
+        batch = {
+            "X": torch.tensor(
+                [
+                    [
+                        [0.0, 0.0, 0.0, 1.0, 0.0],
+                        [0.0, 0.0, 0.0, 3.0, 0.0],
+                        [0.0, 0.0, 0.0, 2.0, 0.0],
+                    ]
+                ],
+                dtype=torch.float32,
+            ),
+            "y": torch.tensor([0.0], dtype=torch.float32),
+            "attention_mask": torch.tensor([[1.0, 1.0, 1.0]], dtype=torch.float32),
+        }
+        out = prepare_batch_bert(
+            batch, torch.device("cpu"), use_pid=True, pid_idx=4, energy_order=True
+        )
+        assert out["X"].shape == (1, 3, 4)
+        assert out["X"][0, :, 3].tolist() == [3.0, 2.0, 1.0]

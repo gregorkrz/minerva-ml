@@ -1,0 +1,11 @@
+{
+  "_comment": "V1 paper models: OmniLearned + Transformer baselines, no BERT/HyperScale. Same colors as CLRS_CLASSIFICATION.",
+  "models": [
+    {"name": "OmniLearned-small",    "color": "#ff7f0e"},
+    {"name": "OmniLearned-small-rw", "color": "#e377c2"},
+    {"name": "OmniLearned-medium",   "color": "#9467bd", "display_name": "OL-medium-frozen"},
+    {"name": "Transformer-xsmall",   "color": "#1f77b4"},
+    {"name": "Transformer-small",    "color": "#17becf"}
+  ],
+  "step_cutoff": null
+}

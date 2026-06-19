@@ -2,6 +2,9 @@
 
 This repository contains the data processing and model training code used for ML studies on MINERvA events.
 
+> **Evaluation plots** — browse the latest model-comparison figures (classification, regression, training curves) by configuration:
+> **[minerva-ml plots](https://d1to0n5578l1po.cloudfront.net/index.html)**
+
 ## Dataset
 
 The processed dataset used by this project is available on Hugging Face:
@@ -27,7 +30,6 @@ The typical workflow is:
 ## 0) Environment set-up
 
 Use the `gkrz/minerva_ml:v1` container (see the provided `Dockerfile`).
-
 
 ## 1) Get the data (two options)
 
@@ -89,6 +91,115 @@ python -m src.scripts.split_dataset \
 
 To inspect created features quickly, see `notebooks/stats.ipynb`.
 
+### Dataset distribution plots
+
+After splitting, summarize the ML-ready `.pb` tensors with `src.scripts.plot_dataset_distributions`. Run from the repository root with your project Python environment activated (see section 0).
+
+**Full run** (reads the split, writes all PDFs and a JSON summary):
+
+```bash
+cd ~/minerva-ml-hyperscale
+
+python -m src.scripts.plot_dataset_distributions \
+  --data-path <SPLIT_OUTPUT_DIR> \
+  --playlist 1A \
+  --split train \
+  --out-dir plots/dataset_distributions
+```
+
+**Quick check** on a subsample (faster; good for testing):
+
+```bash
+python -m src.scripts.plot_dataset_distributions \
+  --data-path <SPLIT_OUTPUT_DIR> \
+  --playlist 1A --split train \
+  --max-events 50000 \
+  --out-dir plots/dataset_distributions
+```
+
+#### What gets produced
+
+Outputs live under `plots/dataset_distributions/` (per playlist + split, tag like `1A_train`):
+
+
+| Path                              | Contents                                           |
+| --------------------------------- | -------------------------------------------------- |
+| `particle_features_<tag>.pdf`     | Per-particle columns (η, φ, log pT, log E, PID, …) |
+| `logE_by_PID_<tag>.pdf`           | log(E) histogram per reconstruction PID type       |
+| `global_features_<tag>.pdf`       | 16 event-level conditioning features               |
+| `truth_labels_<tag>.pdf`          | All 15 MC truth columns                            |
+| `n_particles_per_event_<tag>.pdf` | Token multiplicity                                 |
+| `summary_<tag>.json`              | min/max/mean/std/percentiles per variable          |
+| `poster/`                         | Publication-style step histograms (see below)      |
+| `poster_v2/`                      | Same figures, two-red palette + Matter font        |
+
+
+**Poster figures** (`poster/` and `poster_v2/`):
+
+
+| File                                | Description                                                                            |
+| ----------------------------------- | -------------------------------------------------------------------------------------- |
+| `tokens_per_event_<tag>.pdf`        | Tokens per MINERvA event                                                               |
+| `energy_comparison_<tag>.pdf`       | True neutrino energy vs sum of token energies                                          |
+| `e_available_spectrum_<tag>.pdf`    | MC `E_available` and `E_available + E_μ`                                               |
+| `e_available_by_class_<tag>.pdf`    | `E_ν` plus `E_available` per Pi_labels_v2 class (CC 1π±, CC Nπ±, CC 1π⁰, CC other, NC) |
+| `joint/tokens_per_event_<tag>.pdf`  | MINERvA vs JetClass-II token multiplicity overlay                                      |
+| `joint/energy_comparison_<tag>.pdf` | MINERvA neutrino energy vs JetClass-II jet energy (log–log)                            |
+
+
+Poster plots use density-normalized step histograms. The first full run also writes pickle caches under `poster/poster_bins_<tag>.pkl` (and `poster_bins_jetclass2_<tag>.pkl` when JetClass-II is enabled).
+
+#### Fast replot (poster only, no dataset read)
+
+After a full run has built the poster caches, restyle or tweak poster code without reloading `.pb` files:
+
+```bash
+python -m src.scripts.plot_dataset_distributions \
+  --playlist 1A --split train \
+  --out-dir plots/dataset_distributions \
+  --poster-from-cache
+```
+
+This regenerates both `poster/` and `poster_v2/`. If a cache predates newer plots (e.g. `E_available` spectra), the script reloads truth labels from the dataset only for those missing sections.
+
+#### JetClass-II overlays (optional)
+
+Joint MINERvA/JetClass-II figures need preprocessed JetClass-II h5 shards. By default one file is sampled from the OmniLearned path; skip with `--no-jetclass2`:
+
+```bash
+python -m src.scripts.plot_dataset_distributions \
+  --data-path <SPLIT_OUTPUT_DIR> \
+  --playlist 1A --split train \
+  --jetclass2-path /path/to/jetclass2/train \
+  --jetclass2-n-files 1 \
+  --max-events 50000 \
+  --out-dir plots/dataset_distributions
+```
+
+#### Useful flags
+
+
+| Flag                  | Purpose                                        |
+| --------------------- | ---------------------------------------------- |
+| `--playlist`          | Playlist subfolder (`1A`, `1B`, …)             |
+| `--split`             | `train`, `val`, or `test`                      |
+| `--max-events`        | Subsample events (deterministic with `--seed`) |
+| `--bins`              | Histogram bins for overview grids (default 80) |
+| `--log-y`             | Log y-axis on overview continuous histograms   |
+| `--poster-from-cache` | Regenerate poster PDFs from cached bins only   |
+| `--no-jetclass2`      | Skip JetClass-II and joint overlays            |
+
+
+#### Publish
+
+Dataset distribution PDFs are included when you publish the local `plots/` tree:
+
+```bash
+bash scripts/publish_plots.sh
+```
+
+Browse at **[minerva-ml plots](https://d1to0n5578l1po.cloudfront.net/index.html)** → `dataset_distributions`.
+
 ## 4) Train models
 
 ### Direct training command
@@ -111,6 +222,7 @@ python -m src.scripts.train \
 `src/jobs/submit_train_jobs.py` builds training commands, writes SLURM scripts, and submits them with `sbatch`.
 
 Current defaults in that script:
+
 - loops over `seed`, `data_cap`, `task`, and `model`
 - uses `task in {regression, classifier}` (these map directly to `--mode` values)
 - supports `model in {Transformer1, OLS, OLS_RW, OLM}`
@@ -147,44 +259,141 @@ python -m src.scripts.print_eval_commands --wandb-flag <TAG>
 
 ### Evaluation plots (`src.eval`)
 
-Offline plotting reads cached pickles under `out/` (by default) and writes PDFs under `plots/` (by default). Run from the repository root with `PYTHONPATH` set to the repo (or install the package in editable mode) so imports resolve.
+Offline plotting reads cached pickles and writes PDFs under `plots/`. Run from the repository root with your project Python environment activated (see section 0).
 
-**1. Cache eval inputs** (loads checkpoints / W&B histories; paths are configurable in `src/eval/_constants.py`):
+W&B runs are selected by the **wandb tag** passed as `--flag` (see `fetch_runs_from_wandb` in `src/utils/utils.py`). Model keys in plot configs must match the grouped model names in those pickles (e.g. `OmniLearned-small`, `BERT-tiny`).
 
-```bash
-export PYTHONPATH="$PWD"
-python -m src.eval.collect_eval_data --flag Run_2703 --out-dir /global/cfs/cdirs/m3246/gregork/Minerva/runs/
-
-```
-
-This writes `out/classification_<TAG>.pkl` and `out/regression_<TAG>.pkl`. Use `--out-dir` optionally.
-
-W&B runs are selected by the **wandb tag** passed as `--flag` (see `fetch_runs_from_wandb` in `src/utils/utils.py`). BERT baselines from `submit_train_jobs.py` use names like `Run_1703_BERT_tiny_{regression|classifier}_<cap>_seed…`; tag those runs in W&B (e.g. `Run_1703`) and pass the same tag to `collect_eval_data` / `plot_*` so they are grouped as **BERT-tiny** and **BERT-tiny-rw**. Training-curve x-positions use FLOPs per step from `src/eval/_constants.py` (`FLOPS_PER_STEP`); BERT-tiny entries match `train.py --calculate-flops` (training heuristic 3× inference per batch). Re-measure if you change batch size, depth, or architecture.
-
-**Optional:** Download latest cached model outputs
-
-* Instead of using `python -m src.eval.collect_eval_data`, you can use download the latest files with evaluation data (https://huggingface.co/datasets/gregorkrzmanc/minerva-ml-eval), and set $OUT to the path where you download this data.
-**2. Generate PDFs** (each script accepts `--flag`, `--out-dir`, and `--plots-dir`; defaults match the layout below). Plotting code lives under ``src.eval.classification_plots`` and ``src.eval.e_available_plots`` (several modules each); notebooks may still use ``from eval_*_plots import …`` via thin shims in ``notebooks/``.
+#### 1. Cache eval inputs (once per W&B tag)
 
 ```bash
+cd ~/minerva-ml-hyperscale
 export FLAG=Run_2703
-export OUT=/global/cfs/cdirs/m3246/gregork/Minerva/runs/
-python -m src.eval.plot_steps                 --flag $FLAG --out-dir $OUT     # training curves → plots/steps_combined/ (1×2 clf|reg, one legend); add --separate-panels for plots/{classification,regression}/steps/
-python -m src.eval.plot_regression            --flag $FLAG --out-dir $OUT     # energy / q₃ / scaling → plots/regression/
-python -m src.eval.plot_classification_W      --flag $FLAG --out-dir $OUT     # vs hadronic W → plots/classification/w_bins/
-python -m src.eval.plot_classification_q3     --flag $FLAG --out-dir $OUT     # vs q₃, CCNπ, light appendix → plots/classification/q3/ and .../light/
-python -m src.eval.plot_classification_Pions  --flag $FLAG --out-dir $OUT     # pion kinematics, CC1π⁰, light appendix → plots/classification/pions/ and .../light/
-python -m src.eval.plot_classification_light  --flag $FLAG --out-dir $OUT     # light PDFs only → plots/classification/light/ (see --components)
+export OUT=/global/cfs/cdirs/m3246/gregork/Minerva/runs
+
+python -m src.eval.collect_eval_data \
+    --flag $FLAG --out-dir $OUT
 ```
 
+Writes `classification_<TAG>.pkl` and `regression_<TAG>.pkl` under `$OUT`. Alternatively, download pre-built pickles from [gregorkrzmanc/minerva-ml-eval](https://huggingface.co/datasets/gregorkrzmanc/minerva-ml-eval) and point `$OUT` at that directory.
 
-**3. Figures for a LaTeX paper** (copies or single-page extracts into `figures_latex/`):
+#### 2. Build plot caches (once; expensive step)
+
+Use `**scripts/rebuild_plot_caches.sh**` to rebuild all CFS caches after new eval data:
+
+```bash
+bash scripts/rebuild_plot_caches.sh --force --sync-canonical
+```
+
+Caches live on CFS at `**/global/cfs/cdirs/m3246/gregork/Minerva/runs/plots/tmp_results/**` (not in the local repo).
+
+
+| Cache file                   | Built by                                | Used for                         |
+| ---------------------------- | --------------------------------------- | -------------------------------- |
+| `classification_metrics.pkl` | `build_classification_cache`            | q3, W, pions (`--plots-only`)    |
+| `classification_light.pkl`   | `plot_classification_light`             | light appendix + q3 light panels |
+| `steps.pkl`                  | `build_steps_cache`                     | training-curve plots (`plot_steps --plots-only`) |
+| `regression.pkl`             | `plot_regression` / `collect_eval_data` | energy-regression plots          |
+
+
+#### 3. Generate PDFs from cache (fast; config-driven)
+
+**One-shot** (rebuild caches + render + publish):
+
+```bash
+bash scripts/rebuild_plot_caches.sh --force --config default --publish
+```
+
+**PDFs only** (caches already fresh):
+
+```bash
+bash scripts/generate_comparison_plots.sh --config default
+bash scripts/publish_plots.sh
+```
+
+#### 4. Publish plots (S3 / CloudFront)
+
+Plot PDFs are not tracked in git. After generating locally, publish the HTML index and figures:
+
+```bash
+bash scripts/publish_plots.sh
+```
+
+Public browse URL: **[https://d1to0n5578l1po.cloudfront.net/index.html](https://d1to0n5578l1po.cloudfront.net/index.html)**
+
+**Single config** (example: BERT vs OmniLearned):
+
+```bash
+CONFIG=plot_configs/bert_vs_ol.json
+PLOTS=plots/bert_vs_ol
+CACHE=plots/tmp_results/classification_metrics.pkl
+
+python -m src.eval.plot_classification_q3 \
+    --plots-only --config $CONFIG --plots-dir $PLOTS --metrics-cache $CACHE
+python -m src.eval.plot_classification_W \
+    --plots-only --config $CONFIG --plots-dir $PLOTS --metrics-cache $CACHE
+python -m src.eval.plot_classification_Pions \
+    --plots-only --config $CONFIG --plots-dir $PLOTS --metrics-cache $CACHE
+# … likewise for plot_steps, plot_classification_light, plot_regression
+```
+
+#### Plot configs (`plot_configs/`)
+
+Each `*.json` file selects which models appear on the figures and their colors. Schema (see `src/eval/_plot_config.py`):
+
+```json
+{
+  "models": [
+    {"name": "OmniLearned-small", "color": "#ff7f0e", "display_name": "OL-small"},
+    {"name": "BERT-tiny", "color": "#0d9488", "display_name": "BERT-small"}
+  ],
+  "step_cutoff": null
+}
+```
+
+- `**name**` — must match a model key in the eval pickles (from W&B grouping).
+- `**color**` — matplotlib color for that model.
+- `**display_name**` — optional legend label override.
+- `**step_cutoff**` — optional int; clips the x-axis on log-steps plots only.
+
+**Existing configs:** `default.json` (full model lineup), `bert_vs_ol.json`, `hyperscale.json`, `ol_vs_hyperscale.json`, `V1Paper.json`, `20260606_Comparison.json`.
+
+**Add a new configuration:**
+
+1. Copy an existing file, e.g. `cp plot_configs/bert_vs_ol.json plot_configs/my_paper.json`.
+2. Edit the `models` list — keep only the models you want on the figures; reuse colors from `default.json` or `src/eval/_constants.py` (`CLRS_CLASSIFICATION` / `CLRS_REGRESSION`) for consistency.
+3. Run plots into a matching output folder:
+  ```bash
+   python -m src.eval.plot_classification_q3 \
+       --plots-only --config plot_configs/my_paper.json --plots-dir plots/my_paper \
+       --metrics-cache plots/tmp_results/classification_metrics.pkl
+  ```
+   Or add `my_paper.json` to the loop in `scripts/generate_comparison_plots.sh` (it already picks up every `plot_configs/*.json`).
+
+Output layout per config: `plots/<config>/classification/{q3,w_bins,pions,light}/`, `plots/<config>/regression/`, `plots/<config>/steps_combined/`, etc.
+
+#### Full recompute (no cache)
+
+If caches are missing or eval data changed, run the individual `plot_*` scripts **without** `--plots-only` (slower; recomputes and refreshes caches):
+
+```bash
+python -m src.eval.plot_steps              --flag $FLAG --out-dir $OUT
+python -m src.eval.plot_regression             --flag $FLAG --out-dir $OUT
+python -m src.eval.plot_classification_W      --flag $FLAG --out-dir $OUT
+python -m src.eval.plot_classification_q3     --flag $FLAG --out-dir $OUT
+python -m src.eval.plot_classification_Pions  --flag $FLAG --out-dir $OUT
+python -m src.eval.plot_classification_light  --flag $FLAG --out-dir $OUT
+```
+
+Plotting code lives under `src.eval.classification_plots` and `src.eval.e_available_plots`; notebooks may use thin shims in `notebooks/`.
+
+#### Figures for a LaTeX paper
+
+Copies or single-page extracts into `figures_latex/`:
 
 ```bash
 python -m src.scripts.copy_figures_for_paper
 # or: python -m src.scripts.copy_figures_for_paper --dry-run
 ```
-
 
 ## 6) Event displays
 
@@ -194,3 +403,4 @@ python -m src.scripts.make_event_displays \
   --output_dir <PATH_TO_OUTPUT_DIR> \
   --n_events 10
 ```
+

@@ -10,6 +10,7 @@ SLURM_TEMPLATE_GPU = """#!/bin/bash
 #SBATCH --job-name={job_name}
 #SBATCH --output={log_dir}
 #SBATCH --error={error_dir}
+{mem_directive}
 
 set -euo pipefail
 mkdir -p logs
@@ -30,7 +31,7 @@ WORKSPACE="$HOME"
 CONTAINER_CMD=$(cat << 'EOF'
 set -euo pipefail
 export CUDA_VISIBLE_DEVICES=0
-cd /workspace/minerva-data-processing
+cd /workspace/minerva-ml-hyperscale
 
 # Verify GPU is available inside the container
 nvidia-smi
@@ -52,7 +53,7 @@ if podman-hpc container exists "$NAME"; then
     fi
 else
     echo "🚀 Creating new container $NAME ..."
-    podman-hpc run -d --name "$NAME" --shm-size=16g --gpu \
+    podman-hpc run -d --name "$NAME" --shm-size={shm_size} --gpu \
         -e CUDA_VISIBLE_DEVICES \
         -v "${{WORKSPACE}}:/workspace" \
         -v /global/cfs/cdirs/m3246/gregork:/global/cfs/cdirs/m3246/gregork \

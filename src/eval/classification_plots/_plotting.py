@@ -8,7 +8,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import numpy.ma as ma
-from sklearn.metrics import auc, precision_recall_curve
+from sklearn.metrics import auc, confusion_matrix, precision_recall_curve
 
 from src.eval._constants import plot_model_label
 
@@ -24,12 +24,17 @@ from ._constants import (
     _TICK_FS,
     _baseline_legend_with_global_fpr,
     _default_signal_label,
+    _global_score_thresholds_at_target_fprs,
     _reco_baseline_fpr_on_mask,
     _tpr_column_title_vs_kinematics,
     _tpr_line_legend_label,
     merge_int_type_arr,
 )
-from ._metrics_binned import get_signal_probabilities
+from ._metrics_binned import (
+    _align_per_event_array,
+    get_signal_probabilities,
+    mc_value_in_bin,
+)
 from ._metrics_tasks import (
     compute_all_metrics,
     compute_all_metrics_q3,
@@ -518,6 +523,9 @@ def plot_binned_by_inttype(
     pion_bins_require_has_pion: bool = True,
     legend_title: str | None = CLASSIFICATION_PERFORMANCE_LEGEND_TITLE,
     use_global_fpr: bool = True,
+    precomputed_agg: "dict[int, dict] | None" = None,
+    precomputed_bl_values: "dict[int, np.ndarray] | None" = None,
+    precomputed_y_true_binary: "np.ndarray | None" = None,
 ) -> plt.Figure:
     """One row per merged interaction type (``{DIS, RES, Other}`` by default),
     3 columns: AUPRC, AUROC, TPR (global or per-bin FPR).
@@ -558,10 +566,13 @@ def plot_binned_by_inttype(
     if n_int == 1:
         axes = axes[np.newaxis, :]
 
-    first_model = next(iter(results))
-    y_true_binary = get_signal_probabilities(
-        results[first_model][0], signal_classes, playlist
-    )["ytrue"]
+    if precomputed_y_true_binary is not None:
+        y_true_binary = precomputed_y_true_binary
+    else:
+        first_model = next(iter(results))
+        y_true_binary = get_signal_probabilities(
+            results[first_model][0], signal_classes, playlist
+        )["ytrue"]
     label_for_signal = (
         signal_label
         if signal_label is not None
@@ -644,61 +655,69 @@ def plot_binned_by_inttype(
                 ax.set_title(f"{int_name} (N={n_events:,})")
             continue
 
-        # Compute baseline
-        bl = compute_signal_baseline(
-            results,
-            data,
-            signal_classes,
-            int_mask,
-            playlist,
-            pion_bins_require_has_pion=pion_bins_require_has_pion,
-        )
-
-        if x_var == "q3":
-            bl_values = bl["q3"]
-            all_agg = compute_all_metrics_q3(
-                results,
-                data,
-                signal_classes,
-                threshold,
-                fixed_fpr,
-                int_mask,
-                playlist,
-                use_global_fpr=use_global_fpr,
-            )
-        elif x_var == "W":
-            bl_values = compute_signal_baseline_W(
-                results,
-                data,
-                signal_classes,
-                int_mask,
-                playlist,
-            )
-            all_agg = compute_all_metrics_W(
-                results,
-                data,
-                signal_classes,
-                threshold,
-                fixed_fpr,
-                int_mask,
-                playlist,
-                use_global_fpr=use_global_fpr,
-            )
+        if (
+            precomputed_agg is not None
+            and int_code in precomputed_agg
+            and precomputed_bl_values is not None
+            and int_code in precomputed_bl_values
+        ):
+            all_agg = precomputed_agg[int_code]
+            bl_values = precomputed_bl_values[int_code]
         else:
-            bl_values = bl[{"pion_E": "E", "pion_theta": "theta"}[x_var]]
-            all_agg_full = compute_all_metrics(
+            bl = compute_signal_baseline(
                 results,
                 data,
                 signal_classes,
-                threshold,
-                fixed_fpr,
                 int_mask,
                 playlist,
                 pion_bins_require_has_pion=pion_bins_require_has_pion,
-                use_global_fpr=use_global_fpr,
             )
-            sub_key = {"pion_E": "E", "pion_theta": "theta"}[x_var]
-            all_agg = {mn: m[sub_key] for mn, m in all_agg_full.items()}
+
+            if x_var == "q3":
+                bl_values = bl["q3"]
+                all_agg = compute_all_metrics_q3(
+                    results,
+                    data,
+                    signal_classes,
+                    threshold,
+                    fixed_fpr,
+                    int_mask,
+                    playlist,
+                    use_global_fpr=use_global_fpr,
+                )
+            elif x_var == "W":
+                bl_values = compute_signal_baseline_W(
+                    results,
+                    data,
+                    signal_classes,
+                    int_mask,
+                    playlist,
+                )
+                all_agg = compute_all_metrics_W(
+                    results,
+                    data,
+                    signal_classes,
+                    threshold,
+                    fixed_fpr,
+                    int_mask,
+                    playlist,
+                    use_global_fpr=use_global_fpr,
+                )
+            else:
+                bl_values = bl[{"pion_E": "E", "pion_theta": "theta"}[x_var]]
+                all_agg_full = compute_all_metrics(
+                    results,
+                    data,
+                    signal_classes,
+                    threshold,
+                    fixed_fpr,
+                    int_mask,
+                    playlist,
+                    pion_bins_require_has_pion=pion_bins_require_has_pion,
+                    use_global_fpr=use_global_fpr,
+                )
+                sub_key = {"pion_E": "E", "pion_theta": "theta"}[x_var]
+                all_agg = {mn: m[sub_key] for mn, m in all_agg_full.items()}
 
         # Random baseline (circle markers like models; dashed + gray to distinguish)
         axes[row_idx, 0].plot(
@@ -1025,9 +1044,10 @@ def plot_composition_vs_kinematic(
     x_var: str,
     playlist: str = "1A",
 ) -> plt.Figure:
-    """3-row × 3-col event-composition figure for CC1π±, CC1π⁰, CCNπ±.
+    """4-row × 3-col event-composition figure for CC1π±, CC1π⁰, CCNπ±.
 
-    Rows: CC1π± (class 0), CC1π⁰ (class 2), CCNπ± (classes [0, 1]).
+    Rows: CC1π± (class 0), CC1π⁰ (class 2), CCNπ± N≥1 (classes [0, 1]),
+    CCNπ± N>1 (class 1).
     Columns:
       0. N_signal events per *x* bin, stacked by {DIS, RES, Other}.
       1. N_background events per *x* bin, stacked by {DIS, RES, Other}.
@@ -1052,11 +1072,15 @@ def plot_composition_vs_kinematic(
         (r"$CC1\pi^\pm$", [0]),
         (r"$CC1\pi^0$", [2]),
         (r"$CCN\pi^\pm$ ($N \geq 1$)", [0, 1]),
+        (r"$CCN\pi^\pm$ ($N > 1$)", [1]),
     ]
     merged_int = merge_int_type_arr(data["int_type_arr"])
     all_mask = np.ones(len(hist_var), dtype=bool)
 
-    fig, axes = plt.subplots(3, 3, figsize=(14.5, 11.0), constrained_layout=True)
+    n_rows = len(signals)
+    fig, axes = plt.subplots(
+        n_rows, 3, figsize=(14.5, 3.2 * n_rows + 1.5), constrained_layout=True
+    )
 
     for row_idx, (row_label, classes) in enumerate(signals):
         sig_mask = np.isin(pid, classes)
@@ -1163,6 +1187,8 @@ def plot_prc_curves(
     max_threshold: float | None = None,
     colors: dict[str, str] | None = None,
     legend_title: str | None = CLASSIFICATION_PERFORMANCE_LEGEND_TITLE,
+    precomputed_curves: "dict[str, dict] | None" = None,
+    signal_frac: "float | None" = None,
 ) -> plt.Figure:
     """Plot PRC curves for all models with optional uncertainty bands.
 
@@ -1172,12 +1198,21 @@ def plot_prc_curves(
         portion of each curve where the mean classification threshold is
         below this value.
     legend_title : optional legend title; ``None`` to omit.
+    precomputed_curves : pre-computed output of ``_compute_prc_curves``; when
+        provided, skips the expensive per-model precision-recall computation.
+    signal_frac : pre-computed signal fraction (``ytrue.mean()``); when
+        provided together with *precomputed_curves*, no access to *results* is
+        needed.
     """
-    curves = _compute_prc_curves(results, signal_classes, playlist)
+    if precomputed_curves is not None:
+        curves = precomputed_curves
+    else:
+        curves = _compute_prc_curves(results, signal_classes, playlist)
 
-    first_model = next(iter(results))
-    sig = get_signal_probabilities(results[first_model][0], signal_classes, playlist)
-    signal_frac = sig["ytrue"].mean()
+    if signal_frac is None:
+        first_model = next(iter(results))
+        sig = get_signal_probabilities(results[first_model][0], signal_classes, playlist)
+        signal_frac = sig["ytrue"].mean()
 
     fig, axes = plt.subplots(1, 2, figsize=(16, 7), constrained_layout=True)
 
@@ -1227,6 +1262,262 @@ def plot_prc_curves(
             ax.set_ylim(0, 1)
 
     _shared_light_legend(fig, axes.ravel())
+    return fig
+
+
+# ---------------------------------------------------------------------------
+# Confusion matrices at baseline FPR cutoff
+# ---------------------------------------------------------------------------
+
+
+def _binary_confusion_on_mask(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    mask: np.ndarray,
+) -> np.ndarray:
+    """2×2 confusion matrix (background, signal) on events where *mask* is True."""
+    y_true = np.asarray(y_true).ravel()
+    y_pred = np.asarray(y_pred).ravel()
+    m = np.asarray(mask, dtype=bool).ravel()
+    n = len(y_true)
+    if len(y_pred) != n or len(m) != n:
+        raise ValueError(
+            "Confusion-matrix lengths disagree: "
+            f"y_true={n}, y_pred={len(y_pred)}, mask={len(m)}."
+        )
+    if not m.any():
+        return np.zeros((2, 2), dtype=int)
+    yt = y_true[m]
+    yp = y_pred[m]
+    if yt.size == 0 or yp.size == 0:
+        return np.zeros((2, 2), dtype=int)
+    return confusion_matrix(yt, yp, labels=[0, 1])
+
+
+def _model_binary_pred_at_baseline_fpr(
+    run_result: dict,
+    signal_classes: list[int],
+    target_fpr: float,
+    *,
+    use_global_fpr: bool,
+    global_thr: float | None,
+    bin_mask: np.ndarray | None,
+    playlist: str,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Binary ``y_true`` / ``y_pred`` at the baseline FPR operating point."""
+    sig = get_signal_probabilities(run_result, signal_classes, playlist)
+    y_true = sig["ytrue"]
+    probs = sig["ypred"]
+    valid = ~np.isnan(probs)
+
+    if use_global_fpr:
+        t_cut = global_thr
+        if t_cut is None or not np.isfinite(t_cut):
+            y_pred = np.zeros_like(y_true, dtype=int)
+        else:
+            y_pred = (probs >= t_cut).astype(int)
+        return y_true, y_pred
+
+    m = np.asarray(bin_mask, dtype=bool) & valid
+    if m.sum() == 0:
+        return y_true, np.zeros_like(y_true, dtype=int)
+    thr_map = _global_score_thresholds_at_target_fprs(
+        y_true[m], probs[m], [target_fpr]
+    )
+    t_cut = thr_map.get(target_fpr, float("nan"))
+    if not np.isfinite(t_cut):
+        y_pred = np.zeros_like(y_true, dtype=int)
+    else:
+        y_pred = (probs >= t_cut).astype(int)
+    return y_true, y_pred
+
+
+def _plot_binary_cm_on_ax(
+    ax: plt.Axes,
+    cm: np.ndarray,
+    *,
+    title: str,
+) -> None:
+    """Draw a 2×2 signal/background confusion matrix on *ax*."""
+    cm = np.asarray(cm, dtype=float)
+    if cm.sum() == 0:
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.set_xlabel("Predicted", fontsize=_TICK_FS - 1)
+        ax.set_ylabel("True", fontsize=_TICK_FS - 1)
+        ax.set_title(title, fontsize=_TICK_FS)
+        ax.text(
+            0.5,
+            0.5,
+            "no events",
+            ha="center",
+            va="center",
+            transform=ax.transAxes,
+            fontsize=_TICK_FS,
+            color="0.45",
+        )
+        ax.set_facecolor("0.96")
+        return
+
+    row_sums = cm.sum(axis=1, keepdims=True)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        cm_pct = np.where(row_sums > 0, 100.0 * cm / row_sums, 0.0)
+
+    annot = np.empty(cm.shape, dtype=object)
+    for i in range(cm.shape[0]):
+        for j in range(cm.shape[1]):
+            if cm[i, j] == 0:
+                annot[i, j] = "0"
+            else:
+                annot[i, j] = f"{int(cm[i, j])}\n({cm_pct[i, j]:.0f}%)"
+
+    ax.imshow(cm, cmap="Blues", vmin=0)
+    ax.set_xticks([0, 1])
+    ax.set_yticks([0, 1])
+    ax.set_xticklabels(["Bkg", "Sig"], fontsize=_TICK_FS - 1)
+    ax.set_yticklabels(["Bkg", "Sig"], fontsize=_TICK_FS - 1)
+    ax.set_xlabel("Predicted", fontsize=_TICK_FS - 1)
+    ax.set_ylabel("True", fontsize=_TICK_FS - 1)
+    ax.set_title(title, fontsize=_TICK_FS)
+    for i in range(2):
+        for j in range(2):
+            color = "white" if cm[i, j] > cm.max() * 0.55 else "black"
+            ax.text(
+                j,
+                i,
+                annot[i, j],
+                ha="center",
+                va="center",
+                color=color,
+                fontsize=_TICK_FS - 1,
+            )
+
+
+def plot_confusion_matrices_at_threshold_W(
+    results: dict[str, list[dict]],
+    signal_classes: list[int],
+    data: dict,
+    baseline_fpr: float,
+    reco_pred: np.ndarray,
+    *,
+    use_global_fpr: bool = True,
+    playlist: str = "1A",
+    title: str | None = None,
+    model_label_fn=plot_model_label,
+) -> plt.Figure:
+    """Grid of binary confusion matrices per *W* bin and globally.
+
+    Rows: each *W* bin plus one **global** row (all bins).  Columns: reco
+    baseline (fixed binary cuts) and each model at the score threshold that
+    matches the baseline's **global** FPR (``use_global_fpr=True``) or a
+    **per-bin** threshold (``use_global_fpr=False``), same convention as
+    :func:`plot_multi_classification_vs_W`.
+    """
+    first_model = next(iter(results))
+    run0 = results[first_model][0]
+    y_true = get_signal_probabilities(run0, signal_classes, playlist)["ytrue"]
+    n_pred = len(y_true)
+    reco_pred = np.asarray(reco_pred, dtype=int).ravel()
+    if len(reco_pred) != n_pred:
+        # Cache/pickle mismatch: align baseline preds onto the test split.
+        test_idx = data["test_idx"]
+        if isinstance(test_idx, dict):
+            test_idx = test_idx[playlist]
+        test_idx = np.asarray(test_idx)
+        if len(reco_pred) > n_pred and len(test_idx) == n_pred:
+            reco_pred = reco_pred[test_idx]
+        elif len(reco_pred) == len(test_idx) and n_pred > len(reco_pred):
+            aligned = np.zeros(n_pred, dtype=int)
+            aligned[test_idx] = reco_pred
+            reco_pred = aligned
+        if len(reco_pred) != n_pred:
+            raise ValueError(
+                f"reco_pred length {len(reco_pred)} does not match model "
+                f"predictions ({n_pred})."
+            )
+
+    w = _align_per_event_array(
+        data["W_GeV"], data, playlist, n_pred, key="W_GeV"
+    )
+    edges = np.asarray(data["W_bin_edges"], dtype=float)
+    n_bins = len(edges) - 1
+
+    bin_masks: list[tuple[str, np.ndarray]] = []
+    for i in range(n_bins):
+        lo, hi = edges[i], edges[i + 1]
+        if i == n_bins - 1:
+            lbl = rf"$W \in [{lo:.2f}, {hi:.2f}]$ GeV"
+        else:
+            lbl = rf"$W \in [{lo:.2f}, {hi:.2f})$ GeV"
+        bin_masks.append((lbl, mc_value_in_bin(w, edges, i, require_finite=False)))
+    bin_masks.append(("All $W$ bins", np.ones(n_pred, dtype=bool)))
+
+    model_names = sorted(results.keys())
+    col_labels = ["Baseline"] + [model_label_fn(m) for m in model_names]
+    n_rows = len(bin_masks)
+    n_cols = len(col_labels)
+
+    fig, axes = plt.subplots(
+        n_rows,
+        n_cols,
+        figsize=(3.2 * n_cols, 2.6 * n_rows),
+        constrained_layout=True,
+        squeeze=False,
+    )
+
+    global_thr_by_model: dict[str, float] = {}
+    if use_global_fpr and np.isfinite(baseline_fpr):
+        for model_name in model_names:
+            sig = get_signal_probabilities(
+                results[model_name][0], signal_classes, playlist
+            )
+            valid = ~np.isnan(sig["ypred"])
+            thr_map = _global_score_thresholds_at_target_fprs(
+                sig["ytrue"][valid], sig["ypred"][valid], [baseline_fpr]
+            )
+            global_thr_by_model[model_name] = thr_map.get(
+                baseline_fpr, float("nan")
+            )
+
+    fpr_tag = "global FPR cut" if use_global_fpr else "per-bin FPR cut"
+    bl_lbl = _baseline_legend_with_global_fpr("Baseline", baseline_fpr)
+
+    for row, (row_lbl, mask) in enumerate(bin_masks):
+        # Baseline: fixed reco cuts (implicit global operating point).
+        cm_bl = _binary_confusion_on_mask(y_true, reco_pred, mask)
+        _plot_binary_cm_on_ax(
+            axes[row, 0],
+            cm_bl,
+            title=bl_lbl if row == 0 else "",
+        )
+        if row > 0:
+            axes[row, 0].set_title("")
+
+        for col, model_name in enumerate(model_names, start=1):
+            y_m, y_p = _model_binary_pred_at_baseline_fpr(
+                results[model_name][0],
+                signal_classes,
+                baseline_fpr,
+                use_global_fpr=use_global_fpr,
+                global_thr=global_thr_by_model.get(model_name),
+                bin_mask=mask,
+                playlist=playlist,
+            )
+            cm = _binary_confusion_on_mask(y_m, y_p, mask)
+            col_title = col_labels[col] if row == 0 else ""
+            _plot_binary_cm_on_ax(axes[row, col], cm, title=col_title)
+            if row > 0:
+                axes[row, col].set_title("")
+
+        axes[row, 0].set_ylabel(f"{row_lbl}\nTrue", fontsize=_TICK_FS)
+
+    if title is None:
+        sig_lbl = _default_signal_label(signal_classes)
+        title = (
+            rf"Confusion matrices at baseline FPR ({fpr_tag}) — "
+            rf"{sig_lbl} — Playlist {playlist}"
+        )
+    fig.suptitle(title, fontsize=14)
     return fig
 
 

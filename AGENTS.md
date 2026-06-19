@@ -6,12 +6,12 @@ This is a Python ML research codebase for neutrino event classification and ener
 
 ### Running scripts
 
-All scripts are invoked as Python modules from the repo root:
+All scripts are invoked as Python modules from the repo root. On NERSC, use the **`omni`** conda environment (PyTorch, h5py, matplotlib, etc.):
 
 ```bash
-python -m src.scripts.train ...
-python -m src.scripts.eval ...
-python -m src.scripts.split_dataset ...
+/global/homes/g/gregork/.conda/envs/omni/bin/python -m src.scripts.train ...
+/global/homes/g/gregork/.conda/envs/omni/bin/python -m src.scripts.eval ...
+/global/homes/g/gregork/.conda/envs/omni/bin/python -m src.scripts.split_dataset ...
 ```
 
 See `README.md` for full command examples.
@@ -25,3 +25,6 @@ See `README.md` for full command examples.
 - **No linter configuration** is checked in. The codebase has pre-existing `ruff` warnings (unused imports, f-string placeholders) that are not enforced.
 - **W&B (`wandb`) and real data** are needed for the full workflow (experiment tracking, evaluation notebooks). For basic dev/test, use `--no_wandb` and synthetic data.
 - **The `preprocess_dataset.py` script requires ROOT (PyROOT)**, which is not available in Cloud Agent VMs. Preprocessing of raw ROOT files is not possible here; use the HuggingFace preprocessed dataset or synthetic data instead.
+
+
+On perlmutter, use the /global/homes/g/gregork/.conda/envs/omni/bin/python interpreter.

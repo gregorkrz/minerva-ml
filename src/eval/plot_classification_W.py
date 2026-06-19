@@ -3,6 +3,9 @@
 
 Pickles default under ``<repo>/<--out-dir>/``; PDFs under
 ``<repo>/<--plots-dir>/classification/w_bins/``.
+
+Use ``--plots-only`` to skip the 16 GB source pickle and load from the
+pre-computed metrics cache (``plots/tmp_results/classification_metrics.pkl``).
 """
 
 from __future__ import annotations
@@ -25,22 +28,63 @@ from src.eval.classification_plots import (
     compute_signal_baseline_W,
     plot_binned_by_inttype,
     plot_composition_vs_kinematic,
+    plot_confusion_matrices_at_threshold_W,
     plot_multi_classification_vs_W,
     save_figures_to_pdf,
 )
 from src.eval._bootstrap import silence_classification_empty_bin_warnings
+from src.eval._classification_metrics_cache import (
+    CLF_METRICS_CACHE_NAME,
+    build_metrics_cache,
+    load_metrics_cache,
+    precomputed_bl_from_signal_baseline,
+    precomputed_inttype_agg,
+    save_metrics_cache,
+)
 from src.eval._constants import (
+    CANONICAL_CLASSIFICATION_PICKLE,
     CLASSIFICATION_PICKLE_STEM,
+    DEFAULT_CACHE_DIR,
+    DEFAULT_CFS_CACHE_DIR,
     DEFAULT_OUT_DIR,
-    DEFAULT_PLOTS_DIR,
     DEFAULT_WANDB_TAG,
-    filter_classification_results_for_standard_plots,
+    canonical_classification_pickle_paths,
     repo_output_path,
 )
+from src.eval._constants import plot_model_label
+from src.eval._plot_config import PlotConfig
+
+_CC1PI_CLASSES = [0]
+_CC1PI0_CLASSES = [2]
+_CCNPI_GE1_CLASSES = [0, 1]
+_CCNPI_GT1_CLASSES = [1]
 
 
 def _pickle_path(out_dir: Path, flag: str) -> Path:
     return out_dir / f"{CLASSIFICATION_PICKLE_STEM}_{flag}.pkl"
+
+
+def _resolve_classification_pickle(
+    args: argparse.Namespace,
+    repo_root: Path,
+    cache_root: Path,
+    data_root: Path,
+    *,
+    plots_only: bool = False,
+) -> Path:
+    """Pickle path: explicit override, then largest existing candidate, else default."""
+    if args.classification_pickle is not None:
+        return Path(str(args.classification_pickle).strip())
+    candidates = canonical_classification_pickle_paths(
+        repo_root, args.flag, data_root
+    )
+    existing = [p for p in candidates if p.exists()]
+    if existing:
+        # Avoid truncated copies of the same pickle (cache symlink/cp can be partial).
+        return max(existing, key=lambda p: p.stat().st_size)
+    if plots_only:
+        return candidates[0]
+    return _pickle_path(data_root, args.flag)
 
 
 def _run_w_notebook_style(
@@ -84,66 +128,35 @@ def _run_w_notebook_style(
         baseline_fpr_cc1pi = fp / (fp + tn)
 
         metrics_W_cc1pi = compute_all_metrics_W(
-            results,
-            data_w,
-            signal_classes=cc1pi_classes,
-            fixed_fpr=[baseline_fpr_cc1pi],
-            playlist=playlist,
-            use_global_fpr=use_global_fpr,
+            results, data_w, signal_classes=cc1pi_classes,
+            fixed_fpr=[baseline_fpr_cc1pi], playlist=playlist, use_global_fpr=use_global_fpr,
         )
-        baseline_W_cc1pi = compute_signal_baseline_W(
-            results,
-            data_w,
-            signal_classes=cc1pi_classes,
-            playlist=playlist,
-        )
+        baseline_W_cc1pi = compute_signal_baseline_W(results, data_w, signal_classes=cc1pi_classes, playlist=playlist)
         is_signal_cc1pi = y_true_cc1pi == 1
         reco_baseline_tpr_W_cc1pi = compute_reco_baseline_recall_per_bin(
-            y_pred_cc1pi,
-            is_signal_cc1pi,
-            data_w["W_GeV"],
-            data_w["W_bin_edges"],
+            y_pred_cc1pi, is_signal_cc1pi, data_w["W_GeV"], data_w["W_bin_edges"],
         )
         fig = plot_multi_classification_vs_W(
-            metrics_W_cc1pi,
-            data_w,
-            baseline_W_cc1pi,
-            fixed_fpr=[baseline_fpr_cc1pi],
-            uncertainties=True,
+            metrics_W_cc1pi, data_w, baseline_W_cc1pi,
+            fixed_fpr=[baseline_fpr_cc1pi], uncertainties=True,
             reco_baseline_tpr_W=reco_baseline_tpr_W_cc1pi,
-            reco_baseline_global_fpr=baseline_fpr_cc1pi,
-            colors=clrs,
+            reco_baseline_global_fpr=baseline_fpr_cc1pi, colors=clrs,
             title=rf"$CC1\pi^\pm$ tagging - MINERvA Open Data Playlist {playlist}",
-            use_global_fpr=use_global_fpr,
-            playlist=playlist,
+            use_global_fpr=use_global_fpr, playlist=playlist,
         )
-        figs_cc1pi_W.append(fig)
-        plt.close(fig)
+        figs_cc1pi_W.append(fig); plt.close(fig)
 
         fig = plot_binned_by_inttype(
-            results,
-            data_w,
-            signal_classes=cc1pi_classes,
-            x_var="W",
+            results, data_w, signal_classes=cc1pi_classes, x_var="W",
             xlabel=r"$W$ [GeV]",
             title=rf"$CC1\pi^\pm$ tagging - MINERvA Open Data Playlist {playlist} - by interaction type",
-            uncertainties=True,
-            fixed_fpr=[baseline_fpr_cc1pi],
-            reco_baseline_pred=y_pred_cc1pi,
-            playlist=playlist,
-            colors=clrs,
+            uncertainties=True, fixed_fpr=[baseline_fpr_cc1pi],
+            reco_baseline_pred=y_pred_cc1pi, playlist=playlist, colors=clrs,
             use_global_fpr=use_global_fpr,
         )
-        figs_cc1pi_W.append(fig)
-        plt.close(fig)
-        save_figures_to_pdf(
-            figs_cc1pi_W,
-            out_dir / f"eval_cc1pi_tagging_W_{playlist}{tag_suffix}{_PDF_FPR_TAG}.pdf",
-        )
-        print(
-            "Saved:",
-            out_dir / f"eval_cc1pi_tagging_W_{playlist}{tag_suffix}{_PDF_FPR_TAG}.pdf",
-        )
+        figs_cc1pi_W.append(fig); plt.close(fig)
+        save_figures_to_pdf(figs_cc1pi_W, out_dir / f"eval_cc1pi_tagging_W_{playlist}{tag_suffix}{_PDF_FPR_TAG}.pdf")
+        print("Saved:", out_dir / f"eval_cc1pi_tagging_W_{playlist}{tag_suffix}{_PDF_FPR_TAG}.pdf")
 
         # ----- CC1pi0 -----
         figs_cc1pi0_W = []
@@ -164,66 +177,35 @@ def _run_w_notebook_style(
         baseline_fpr_cc1pi0 = fp0 / (fp0 + tn0) if (fp0 + tn0) > 0 else float("nan")
 
         metrics_W_cc1pi0 = compute_all_metrics_W(
-            results,
-            data_w,
-            signal_classes=cc1pi0_classes,
-            fixed_fpr=[baseline_fpr_cc1pi0],
-            playlist=playlist,
-            use_global_fpr=use_global_fpr,
+            results, data_w, signal_classes=cc1pi0_classes,
+            fixed_fpr=[baseline_fpr_cc1pi0], playlist=playlist, use_global_fpr=use_global_fpr,
         )
-        baseline_W_cc1pi0 = compute_signal_baseline_W(
-            results,
-            data_w,
-            signal_classes=cc1pi0_classes,
-            playlist=playlist,
-        )
+        baseline_W_cc1pi0 = compute_signal_baseline_W(results, data_w, signal_classes=cc1pi0_classes, playlist=playlist)
         is_signal_cc1pi0 = y_true_cc1pi0 == 1
         reco_baseline_tpr_W_cc1pi0 = compute_reco_baseline_recall_per_bin(
-            y_pred_cc1pi0,
-            is_signal_cc1pi0,
-            data_w["W_GeV"],
-            data_w["W_bin_edges"],
+            y_pred_cc1pi0, is_signal_cc1pi0, data_w["W_GeV"], data_w["W_bin_edges"],
         )
         fig = plot_multi_classification_vs_W(
-            metrics_W_cc1pi0,
-            data_w,
-            baseline_W_cc1pi0,
-            fixed_fpr=[baseline_fpr_cc1pi0],
-            uncertainties=True,
+            metrics_W_cc1pi0, data_w, baseline_W_cc1pi0,
+            fixed_fpr=[baseline_fpr_cc1pi0], uncertainties=True,
             reco_baseline_tpr_W=reco_baseline_tpr_W_cc1pi0,
-            reco_baseline_global_fpr=baseline_fpr_cc1pi0,
-            colors=clrs,
+            reco_baseline_global_fpr=baseline_fpr_cc1pi0, colors=clrs,
             title=rf"$CC1\pi^0$ tagging - MINERvA Open Data Playlist {playlist}",
-            use_global_fpr=use_global_fpr,
-            playlist=playlist,
+            use_global_fpr=use_global_fpr, playlist=playlist,
         )
-        figs_cc1pi0_W.append(fig)
-        plt.close(fig)
+        figs_cc1pi0_W.append(fig); plt.close(fig)
 
         fig = plot_binned_by_inttype(
-            results,
-            data_w,
-            signal_classes=cc1pi0_classes,
-            x_var="W",
+            results, data_w, signal_classes=cc1pi0_classes, x_var="W",
             xlabel=r"$W$ [GeV]",
             title=rf"$CC1\pi^0$ tagging - MINERvA Open Data Playlist {playlist} - by interaction type",
-            uncertainties=True,
-            fixed_fpr=[baseline_fpr_cc1pi0],
-            reco_baseline_pred=y_pred_cc1pi0,
-            playlist=playlist,
-            colors=clrs,
+            uncertainties=True, fixed_fpr=[baseline_fpr_cc1pi0],
+            reco_baseline_pred=y_pred_cc1pi0, playlist=playlist, colors=clrs,
             use_global_fpr=use_global_fpr,
         )
-        figs_cc1pi0_W.append(fig)
-        plt.close(fig)
-        save_figures_to_pdf(
-            figs_cc1pi0_W,
-            out_dir / f"eval_cc1pi0_tagging_W_{playlist}{tag_suffix}{_PDF_FPR_TAG}.pdf",
-        )
-        print(
-            "Saved:",
-            out_dir / f"eval_cc1pi0_tagging_W_{playlist}{tag_suffix}{_PDF_FPR_TAG}.pdf",
-        )
+        figs_cc1pi0_W.append(fig); plt.close(fig)
+        save_figures_to_pdf(figs_cc1pi0_W, out_dir / f"eval_cc1pi0_tagging_W_{playlist}{tag_suffix}{_PDF_FPR_TAG}.pdf")
+        print("Saved:", out_dir / f"eval_cc1pi0_tagging_W_{playlist}{tag_suffix}{_PDF_FPR_TAG}.pdf")
 
         # ----- CCNpi N>=1 -----
         figs_npi_W = []
@@ -238,66 +220,129 @@ def _run_w_notebook_style(
         baseline_fpr_ccnpi = fpn / (fpn + tnn)
 
         metrics_W = compute_all_metrics_W(
-            results,
-            data_w,
-            signal_classes=multi_pi_classes,
-            fixed_fpr=[baseline_fpr_ccnpi],
-            playlist=playlist,
-            use_global_fpr=use_global_fpr,
+            results, data_w, signal_classes=multi_pi_classes,
+            fixed_fpr=[baseline_fpr_ccnpi], playlist=playlist, use_global_fpr=use_global_fpr,
         )
-        baseline_W_multi = compute_signal_baseline_W(
-            results,
-            data_w,
-            signal_classes=multi_pi_classes,
-            playlist=playlist,
-        )
+        baseline_W_multi = compute_signal_baseline_W(results, data_w, signal_classes=multi_pi_classes, playlist=playlist)
         is_signal_ccnpi = y_true_ccnpi == 1
         reco_baseline_tpr_W = compute_reco_baseline_recall_per_bin(
-            y_pred_ccnpi,
-            is_signal_ccnpi,
-            data_w["W_GeV"],
-            data_w["W_bin_edges"],
+            y_pred_ccnpi, is_signal_ccnpi, data_w["W_GeV"], data_w["W_bin_edges"],
         )
         fig = plot_multi_classification_vs_W(
-            metrics_W,
-            data_w,
-            baseline_W_multi,
-            fixed_fpr=[baseline_fpr_ccnpi],
-            uncertainties=True,
+            metrics_W, data_w, baseline_W_multi,
+            fixed_fpr=[baseline_fpr_ccnpi], uncertainties=True,
             reco_baseline_tpr_W=reco_baseline_tpr_W,
-            reco_baseline_global_fpr=baseline_fpr_ccnpi,
-            colors=clrs,
+            reco_baseline_global_fpr=baseline_fpr_ccnpi, colors=clrs,
             title=rf"$CCN\pi^\pm$ tagging ($N \geq 1$) - MINERvA Open Data Playlist {playlist}",
-            use_global_fpr=use_global_fpr,
-            playlist=playlist,
+            use_global_fpr=use_global_fpr, playlist=playlist,
         )
-        figs_npi_W.append(fig)
-        plt.close(fig)
+        figs_npi_W.append(fig); plt.close(fig)
 
         fig = plot_binned_by_inttype(
-            results,
-            data_w,
-            signal_classes=multi_pi_classes,
-            x_var="W",
+            results, data_w, signal_classes=multi_pi_classes, x_var="W",
             xlabel=r"$W$ [GeV]",
             title=rf"$CCN\pi^\pm$ tagging ($N \geq 1$) - MINERvA Open Data Playlist {playlist} - by interaction type",
-            uncertainties=True,
-            fixed_fpr=[baseline_fpr_ccnpi],
-            reco_baseline_pred=y_pred_ccnpi,
-            playlist=playlist,
-            colors=clrs,
+            uncertainties=True, fixed_fpr=[baseline_fpr_ccnpi],
+            reco_baseline_pred=y_pred_ccnpi, playlist=playlist, colors=clrs,
             use_global_fpr=use_global_fpr,
         )
-        figs_npi_W.append(fig)
-        plt.close(fig)
-        save_figures_to_pdf(
-            figs_npi_W,
-            out_dir / f"eval_Npi_tagging_W_{playlist}{tag_suffix}{_PDF_FPR_TAG}.pdf",
+        figs_npi_W.append(fig); plt.close(fig)
+        save_figures_to_pdf(figs_npi_W, out_dir / f"eval_Npi_tagging_W_{playlist}{tag_suffix}{_PDF_FPR_TAG}.pdf")
+        print("Saved:", out_dir / f"eval_Npi_tagging_W_{playlist}{tag_suffix}{_PDF_FPR_TAG}.pdf")
+
+
+def _run_conf_matrix_at_threshold(
+    results: dict,
+    data_w_by_playlist: dict,
+    out_dir: Path,
+    playlists: list[str],
+    use_global_fpr: bool,
+    *,
+    baseline_fpr_by_tag: dict[str, dict[str, float]] | None = None,
+    reco_pred_by_tag: dict[str, dict[str, np.ndarray]] | None = None,
+    cfg: PlotConfig | None = None,
+) -> None:
+    """One multi-page PDF: binary CMs per *W* bin + global at baseline FPR."""
+    _PDF_FPR_TAG = "_global_fpr" if use_global_fpr else "_per_bin_fpr"
+    label_fn = cfg.label_for if cfg is not None else None
+
+    _SIGNALS = (
+        ("cc1pi", _CC1PI_CLASSES, r"$CC1\pi^\pm$ tagging"),
+        ("cc1pi0", _CC1PI0_CLASSES, r"$CC1\pi^0$ tagging"),
+        ("ccnpi_ge1", _CCNPI_GE1_CLASSES, r"$CCN\pi^\pm$ tagging ($N \geq 1$)"),
+        ("ccnpi_gt1", _CCNPI_GT1_CLASSES, r"$CCN\pi^\pm$ tagging ($N > 1$)"),
+    )
+
+    for playlist in playlists:
+        data_w = data_w_by_playlist[playlist]
+        figs: list[plt.Figure] = []
+        for tag, sig_classes, title_base in _SIGNALS:
+            if baseline_fpr_by_tag is not None and reco_pred_by_tag is not None:
+                baseline_fpr = baseline_fpr_by_tag[tag][playlist]
+                reco_pred = reco_pred_by_tag[tag][playlist]
+            else:
+                test_idx = data_w["test_idx"][playlist]
+                baselines_pl = data_w["baselines"][playlist]
+                n_muons = baselines_pl["n_muons"][test_idx]
+                n_charged_prongs = baselines_pl["n_charged_prongs"][test_idx]
+                improved_nmichel = baselines_pl["improved_nmichel"][test_idx]
+                first_model = next(iter(results))
+                pid = results[first_model][0][playlist]["pid"]
+                y_true = np.isin(pid, sig_classes).astype(int)
+
+                if tag == "cc1pi":
+                    reco_pred = (
+                        (n_muons == 1)
+                        & (n_charged_prongs == 1)
+                        & (improved_nmichel == 1)
+                    ).astype(int)
+                elif tag == "cc1pi0":
+                    PI0_MASS_MEV = 134.977
+                    is_pizero_signal = baselines_pl["is_pizero_signal"][test_idx]
+                    two_gamma_inv_mass = baselines_pl["two_gamma_invariant_mass"][test_idx]
+                    reco_pred = (
+                        (n_muons == 1)
+                        & (is_pizero_signal == 2)
+                        & (np.abs(two_gamma_inv_mass - PI0_MASS_MEV) < PI0_MASS_MEV)
+                        & (improved_nmichel == 0)
+                    ).astype(int)
+                elif tag == "ccnpi_ge1":
+                    reco_pred = (
+                        (n_muons == 1)
+                        & (n_charged_prongs >= 1)
+                        & (improved_nmichel >= 1)
+                    ).astype(int)
+                else:
+                    reco_pred = (
+                        (n_muons == 1)
+                        & (n_charged_prongs >= 2)
+                        & (improved_nmichel >= 1)
+                    ).astype(int)
+
+                fp = int(((reco_pred == 1) & (y_true == 0)).sum())
+                tn = int(((reco_pred == 0) & (y_true == 0)).sum())
+                baseline_fpr = fp / (fp + tn) if (fp + tn) > 0 else float("nan")
+
+            fig = plot_confusion_matrices_at_threshold_W(
+                results,
+                sig_classes,
+                data_w,
+                baseline_fpr,
+                reco_pred,
+                use_global_fpr=use_global_fpr,
+                playlist=playlist,
+                title=rf"{title_base} — MINERvA Open Data Playlist {playlist}",
+                model_label_fn=label_fn or plot_model_label,
+            )
+            figs.append(fig)
+            plt.close(fig)
+
+        fp = (
+            out_dir / "conf_matrix_at_threshold.pdf"
+            if use_global_fpr
+            else out_dir / f"conf_matrix_at_threshold{_PDF_FPR_TAG}.pdf"
         )
-        print(
-            "Saved:",
-            out_dir / f"eval_Npi_tagging_W_{playlist}{tag_suffix}{_PDF_FPR_TAG}.pdf",
-        )
+        save_figures_to_pdf(figs, fp)
 
 
 def _run_w_ngt1(
@@ -334,65 +379,35 @@ def _run_w_ngt1(
         baseline_fpr_ccnpi = fp / (fp + tn)
 
         metrics_W = compute_all_metrics_W(
-            results,
-            data_w,
-            signal_classes=multi_pi_classes,
-            fixed_fpr=[baseline_fpr_ccnpi],
-            playlist=playlist,
-            use_global_fpr=use_global_fpr,
+            results, data_w, signal_classes=multi_pi_classes,
+            fixed_fpr=[baseline_fpr_ccnpi], playlist=playlist, use_global_fpr=use_global_fpr,
         )
-        baseline_W_multi = compute_signal_baseline_W(
-            results,
-            data_w,
-            signal_classes=multi_pi_classes,
-            playlist=playlist,
-        )
+        baseline_W_multi = compute_signal_baseline_W(results, data_w, signal_classes=multi_pi_classes, playlist=playlist)
         is_signal_ccnpi = y_true_ccnpi == 1
         reco_baseline_tpr_W = compute_reco_baseline_recall_per_bin(
-            y_pred_ccnpi,
-            is_signal_ccnpi,
-            data_w["W_GeV"],
-            data_w["W_bin_edges"],
+            y_pred_ccnpi, is_signal_ccnpi, data_w["W_GeV"], data_w["W_bin_edges"],
         )
         fig = plot_multi_classification_vs_W(
-            metrics_W,
-            data_w,
-            baseline_W_multi,
-            fixed_fpr=[baseline_fpr_ccnpi],
-            uncertainties=True,
+            metrics_W, data_w, baseline_W_multi,
+            fixed_fpr=[baseline_fpr_ccnpi], uncertainties=True,
             reco_baseline_tpr_W=reco_baseline_tpr_W,
-            reco_baseline_global_fpr=baseline_fpr_ccnpi,
-            colors=clrs,
+            reco_baseline_global_fpr=baseline_fpr_ccnpi, colors=clrs,
             title=rf"$CCN\pi^\pm$ tagging ($N > 1$) - MINERvA Open Data Playlist {playlist}",
-            use_global_fpr=use_global_fpr,
-            playlist=playlist,
+            use_global_fpr=use_global_fpr, playlist=playlist,
         )
-        figs_npi_W.append(fig)
-        plt.close(fig)
+        figs_npi_W.append(fig); plt.close(fig)
 
         fig = plot_binned_by_inttype(
-            results,
-            data_w,
-            signal_classes=multi_pi_classes,
-            x_var="W",
+            results, data_w, signal_classes=multi_pi_classes, x_var="W",
             xlabel=r"$W$ [GeV]",
             title=rf"$CCN\pi^\pm$ tagging ($N > 1$) - MINERvA Open Data Playlist {playlist} - by interaction type",
-            uncertainties=True,
-            fixed_fpr=[baseline_fpr_ccnpi],
-            reco_baseline_pred=y_pred_ccnpi,
-            playlist=playlist,
-            colors=clrs,
+            uncertainties=True, fixed_fpr=[baseline_fpr_ccnpi],
+            reco_baseline_pred=y_pred_ccnpi, playlist=playlist, colors=clrs,
             use_global_fpr=use_global_fpr,
         )
-        figs_npi_W.append(fig)
-        plt.close(fig)
-        save_figures_to_pdf(
-            figs_npi_W,
-            out_dir / f"eval_Npi_Ngt1_tagging_W_{playlist}{_PDF_FPR_TAG}.pdf",
-        )
-        print(
-            "Saved:", out_dir / f"eval_Npi_Ngt1_tagging_W_{playlist}{_PDF_FPR_TAG}.pdf"
-        )
+        figs_npi_W.append(fig); plt.close(fig)
+        save_figures_to_pdf(figs_npi_W, out_dir / f"eval_Npi_Ngt1_tagging_W_{playlist}{_PDF_FPR_TAG}.pdf")
+        print("Saved:", out_dir / f"eval_Npi_Ngt1_tagging_W_{playlist}{_PDF_FPR_TAG}.pdf")
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -408,50 +423,211 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument(
         "--plots-dir",
         type=Path,
-        default=DEFAULT_PLOTS_DIR,
-        help="Root for PDF output (default: plots/ under repo)",
+        default=None,
+        help="Root for PDF output (default: <out-dir>/plots)",
     )
-    ap.add_argument("--classification-pickle", type=Path, default=None)
+    ap.add_argument(
+        "--classification-pickle",
+        type=Path,
+        default=None,
+        help="Override classification pickle "
+        f"(default: {DEFAULT_CFS_CACHE_DIR / CANONICAL_CLASSIFICATION_PICKLE} "
+        "or repo plots/tmp_results/classification.pkl for --plots-only, "
+        "else <out-dir>/classification_<flag>.pkl).",
+    )
+    ap.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        metavar="JSON",
+        help="Plot config JSON (models, colors, optional display_name). "
+        "When given, only listed models are drawn.",
+    )
+    ap.add_argument(
+        "--plots-only",
+        action="store_true",
+        help="Load metrics from plots/tmp_results/classification_metrics.pkl "
+        f"and model scores from {DEFAULT_CFS_CACHE_DIR / CANONICAL_CLASSIFICATION_PICKLE} "
+        "(fast path).",
+    )
+    ap.add_argument(
+        "--metrics-cache",
+        type=Path,
+        default=None,
+        metavar="PKL",
+        help="Override the metrics cache path "
+        "(default: plots/tmp_results/classification_metrics.pkl).",
+    )
     args = ap.parse_args(argv)
+    if args.plots_dir is None:
+        args.plots_dir = Path(args.out_dir or DEFAULT_OUT_DIR) / "plots"
 
+    cache_root = repo_output_path(_REPO_ROOT, DEFAULT_CACHE_DIR)
     data_root = repo_output_path(_REPO_ROOT, Path(args.out_dir or DEFAULT_OUT_DIR))
     plots_root = repo_output_path(_REPO_ROOT, args.plots_dir)
     out_dir = plots_root / "classification" / "w_bins"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    pkl = args.classification_pickle or _pickle_path(data_root, args.flag)
+    metrics_cache_path = args.metrics_cache or (cache_root / CLF_METRICS_CACHE_NAME)
+    cfg: PlotConfig | None = PlotConfig.load(args.config) if args.config else None
+
+    if args.plots_only:
+        _run_plots_only(args, cfg, out_dir, metrics_cache_path, cache_root, data_root)
+        return
+
+    # --- Normal path ---
+    pkl = _resolve_classification_pickle(
+        args, _REPO_ROOT, cache_root, data_root
+    )
     with open(pkl, "rb") as f:
         clf = pickle.load(f)
 
-    results = filter_classification_results_for_standard_plots(clf["results"])
+    results = clf["results"]
     data_w_by_playlist = clf["data_w_by_playlist"]
     clrs = clf["clrs_dict_full"]
     use_global_fpr = clf.get("use_global_fpr_W", True)
-    playlists = ["1A"]  # match Eval_Classification_W notebook default
+    playlists = ["1A"]
 
-    _run_w_notebook_style(
-        results,
-        data_w_by_playlist,
-        clrs,
-        use_global_fpr,
-        out_dir,
-        playlists,
-        tag_suffix="",
-    )
+    if cfg is not None:
+        results = cfg.filter_dict(results)
+        clrs = {**clrs, **cfg.colors()}
+        clrs = cfg.filter_dict(clrs)
+
+    # Build and save the metrics cache (config-independent).
+    if not metrics_cache_path.exists():
+        print("Building classification metrics cache …")
+        cache = build_metrics_cache(clf)
+        save_metrics_cache(cache, metrics_cache_path)
+
+    _run_w_notebook_style(results, data_w_by_playlist, clrs, use_global_fpr, out_dir, playlists, tag_suffix="")
     _run_w_ngt1(results, data_w_by_playlist, clrs, use_global_fpr, out_dir, playlists)
+    _run_conf_matrix_at_threshold(
+        results, data_w_by_playlist, out_dir, playlists, use_global_fpr,
+    )
 
-    # Event-composition (signal + background + S/B vs W) for all three signal
-    # definitions — one single-page PDF per playlist.
     for playlist in playlists:
         data_w = data_w_by_playlist[playlist]
         first_model = next(iter(results))
         pid = results[first_model][0][playlist]["pid"]
-        fig_comp = plot_composition_vs_kinematic(
-            data=data_w,
-            pid=pid,
-            x_var="W",
-            playlist=playlist,
+        fig_comp = plot_composition_vs_kinematic(data=data_w, pid=pid, x_var="W", playlist=playlist)
+        fp = out_dir / f"event_composition_W_{playlist}.pdf"
+        fig_comp.savefig(fp, bbox_inches="tight")
+        plt.close(fig_comp)
+        print("Saved:", fp)
+
+
+def _load_results_for_conf_matrix(
+    args: argparse.Namespace,
+    cfg: PlotConfig | None,
+    cache_root: Path,
+    data_root: Path,
+) -> dict | None:
+    """Load model results from the classification pickle (needed for score cuts)."""
+    pkl = _resolve_classification_pickle(
+        args, _REPO_ROOT, cache_root, data_root, plots_only=True
+    )
+    if not pkl.exists():
+        print(
+            f"Skipping conf_matrix_at_threshold: classification pickle not found "
+            f"({pkl}; pass --classification-pickle)."
         )
+        return None
+    print(f"Loading classification results for conf matrices from {pkl} …")
+    with open(pkl, "rb") as f:
+        results = pickle.load(f)["results"]
+    if cfg is not None:
+        results = cfg.filter_dict(results)
+    return results
+
+
+def _run_plots_only(
+    args: argparse.Namespace,
+    cfg: PlotConfig | None,
+    out_dir: Path,
+    metrics_cache_path: Path,
+    cache_root: Path,
+    data_root: Path,
+) -> None:
+    """Fast --plots-only path using the precomputed metrics cache."""
+    cache = load_metrics_cache(metrics_cache_path)
+
+    clrs = cache["clrs_dict_full"]
+    use_global_fpr = cache["use_global_fpr_W"]
+    data_w_by_playlist = cache["data_w_by_playlist"]
+    playlists = ["1A"]
+
+    if cfg is not None:
+        clrs = {**clrs, **cfg.colors()}
+        clrs = cfg.filter_dict(clrs)
+
+    _PDF_FPR_TAG = "_global_fpr" if use_global_fpr else "_per_bin_fpr"
+
+    def _filter(d: dict) -> dict:
+        return cfg.filter_dict(d) if cfg is not None else d
+
+    def _draw_one_signal(sig_tag, sig_classes, pdf_stem, title_base):
+        for playlist in playlists:
+            data_w = data_w_by_playlist[playlist]
+            figs = []
+            fpr = cache["baseline_fpr"][sig_tag][playlist]
+            metrics_all = _filter(cache["metrics_W_clf"][sig_tag][playlist]["all"])
+            baseline_W = cache["W_clf_baseline"][sig_tag][playlist]
+            reco_tpr = cache["W_clf_reco_tpr"][sig_tag][playlist]
+            reco_pred = cache["reco_pred"][sig_tag][playlist]
+            y_true_binary = np.isin(cache["pid"][playlist], sig_classes).astype(int)
+
+            fig = plot_multi_classification_vs_W(
+                metrics_all, data_w, baseline_W,
+                fixed_fpr=[fpr], uncertainties=True,
+                reco_baseline_tpr_W=reco_tpr, reco_baseline_global_fpr=fpr,
+                colors=clrs, title=rf"{title_base} - MINERvA Open Data Playlist {playlist}",
+                use_global_fpr=use_global_fpr, playlist=playlist,
+            )
+            figs.append(fig); plt.close(fig)
+
+            pre_agg = precomputed_inttype_agg(cache["metrics_W_clf"][sig_tag][playlist])
+            pre_agg = {code: _filter(agg) for code, agg in pre_agg.items()}
+            pre_bl = {
+                code: bl
+                for code, bl in cache["W_clf_baseline_inttype"][sig_tag][playlist].items()
+            }
+            fig = plot_binned_by_inttype(
+                {}, data_w, sig_classes, x_var="W", xlabel=r"$W$ [GeV]",
+                title=rf"{title_base} - MINERvA Open Data Playlist {playlist} - by interaction type",
+                uncertainties=True, fixed_fpr=[fpr],
+                reco_baseline_pred=reco_pred, playlist=playlist, colors=clrs,
+                use_global_fpr=use_global_fpr,
+                precomputed_agg=pre_agg, precomputed_bl_values=pre_bl,
+                precomputed_y_true_binary=y_true_binary,
+            )
+            figs.append(fig); plt.close(fig)
+            fp = out_dir / f"{pdf_stem}_{playlist}{_PDF_FPR_TAG}.pdf"
+            save_figures_to_pdf(figs, fp)
+            print("Saved:", fp)
+
+    _draw_one_signal("cc1pi", _CC1PI_CLASSES, "eval_cc1pi_tagging_W", r"$CC1\pi^\pm$ tagging")
+    _draw_one_signal("cc1pi0", _CC1PI0_CLASSES, "eval_cc1pi0_tagging_W", r"$CC1\pi^0$ tagging")
+    _draw_one_signal("ccnpi_ge1", _CCNPI_GE1_CLASSES, "eval_Npi_tagging_W", r"$CCN\pi^\pm$ tagging ($N \geq 1$)")
+    _draw_one_signal("ccnpi_gt1", _CCNPI_GT1_CLASSES, "eval_Npi_Ngt1_tagging_W", r"$CCN\pi^\pm$ tagging ($N > 1$)")
+
+    results_cm = _load_results_for_conf_matrix(args, cfg, cache_root, data_root)
+    if results_cm is not None:
+        _run_conf_matrix_at_threshold(
+            results_cm,
+            data_w_by_playlist,
+            out_dir,
+            playlists,
+            use_global_fpr,
+            baseline_fpr_by_tag=cache["baseline_fpr"],
+            reco_pred_by_tag=cache["reco_pred"],
+            cfg=cfg,
+        )
+
+    # Event composition
+    for playlist in playlists:
+        data_w = data_w_by_playlist[playlist]
+        pid = cache["pid"][playlist]
+        fig_comp = plot_composition_vs_kinematic(data=data_w, pid=pid, x_var="W", playlist=playlist)
         fp = out_dir / f"event_composition_W_{playlist}.pdf"
         fig_comp.savefig(fp, bbox_inches="tight")
         plt.close(fig_comp)

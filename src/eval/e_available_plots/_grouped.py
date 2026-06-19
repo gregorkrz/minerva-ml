@@ -12,27 +12,6 @@ from ._load import load_eval_data
 _SEED_SEP = "§"
 
 
-def eval_row_key_for_predictions(
-    models_dict: dict[str, Any],
-    config_label: str,
-    seed_index: int,
-) -> str | None:
-    """Key in ``E_pred_dict[dataset][loss]`` (same for ``E_true_dict``) for one seed.
-
-    ``load_eval_data_grouped`` / ``flatten_grouped_training_names`` use
-    ``f"{label}{_SEED_SEP}{i}"``.  Cached pickles built with flat
-    ``load_eval_data(..., {loss: {model: run}})`` store the first (only) seed under
-    the bare *config_label* with no ``§`` suffix — resolve that here when
-    ``seed_index == 0``.
-    """
-    seeded = f"{config_label}{_SEED_SEP}{seed_index}"
-    if seeded in models_dict:
-        return seeded
-    if seed_index == 0 and config_label in models_dict:
-        return config_label
-    return None
-
-
 def _extract_sample_count(label: str) -> float:
     """Extract numeric sample count from labels like 'Transformer 6M' or '500k'."""
     match = re.search(r"(\d+(?:\.\d+)?)\s*([kKmM])\b", label)

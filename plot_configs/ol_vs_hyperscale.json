@@ -1,0 +1,30 @@
+{
+  "_comment": "Same as hyperscale.json but without Transformer-small / Transformer-xsmall baselines.",
+  "models": [
+    {
+      "name": "OmniLearned-small",
+      "color": "#c2410c"
+    },
+    {
+      "name": "OmniLearned-small-rw",
+      "color": "#fb923c"
+    },
+    {
+      "name": "HyperScale-small",
+      "color": "#0369a1"
+    },
+    {
+      "name": "HyperScale-small-rw",
+      "color": "#7dd3fc"
+    },
+    {
+      "name": "HyperScale-medium",
+      "color": "#86198f"
+    },
+    {
+      "name": "HyperScale-medium-rw",
+      "color": "#e879f9"
+    }
+  ],
+  "step_cutoff": null
+}

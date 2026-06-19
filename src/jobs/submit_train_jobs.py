@@ -1,7 +1,93 @@
 # Train the transformer locally
 from src.constants.slurm_template import SLURM_TEMPLATE_GPU
+import functools
 import os
 from datetime import datetime as dt
+
+
+# ---------------------------------------------------------------------------
+# HyperScale presets.
+#
+# HYPERSCALE_PRETRAINED_PATHS maps a sweep size tag (e.g. "small") to a
+# pretrained run directory. The directory must contain both a checkpoint
+# (best_model.pt / final.pt / last.pt / any single *.pt) and the upstream
+# train_config.yaml — the latter is the single source of truth for the
+# architecture (variant, d_model, depth, n_heads, mlp_ratio), which we read
+# at submission time via peek_hyperscale_checkpoint_args.
+#
+# The --hs-pretrained flag (in train.py) loads encoder weights only — the
+# task output head and any global-feature projection are left at random
+# init, so the same checkpoint can be reused across regression / classifier
+# runs with different output dims.
+#
+# NOTE: the small ckpt below was trained as ParticleVIT_Embedding (split
+# kin/PID/vertex input embeddings). For --use-hyperscale embedding the full
+# encoder transfers; for basic/pool only the transformer blocks (and CLS/norm
+# where shapes match) load, because the token_embed module differs — expect
+# a "loaded X/Y model tensors" log line with X << Y in those runs.
+# ---------------------------------------------------------------------------
+HYPERSCALE_PRETRAINED_PATHS = {
+    "small": (
+        "/global/cfs/cdirs/m3246/jaluus/Hyperscale_V5/Pretrain_Scaling/"
+        "emb_6e17_d4_e448_bs512_lr5e-4_run3_normalized"
+    ),
+}
+
+HYPERSCALE_VARIANTS = ("basic", "embedding", "pool")
+
+
+@functools.lru_cache(maxsize=None)
+def _hyperscale_arch_for(size):
+    """Read the architecture for ``HYPERSCALE_PRETRAINED_PATHS[size]`` from
+    its run directory (train_config.yaml, with the ckpt as a fallback).
+
+    Returns a dict with the same keys ``train.py`` puts on its ``args``
+    namespace: ``use_hyperscale`` (variant), ``d_model``, ``depth``,
+    ``n_heads``, ``hs_mlp_ratio``. Cached so the yaml is parsed once per
+    ``submit_train_jobs.py`` invocation.
+    """
+    if size not in HYPERSCALE_PRETRAINED_PATHS:
+        raise KeyError(
+            f"No HyperScale pretrained path for size {size!r}; "
+            f"known sizes: {tuple(HYPERSCALE_PRETRAINED_PATHS)}"
+        )
+    from src.models.hyperscale import peek_hyperscale_checkpoint_args
+
+    arch = peek_hyperscale_checkpoint_args(HYPERSCALE_PRETRAINED_PATHS[size])
+    if arch is None:
+        raise ValueError(
+            "Could not read HyperScale arch from "
+            f"{HYPERSCALE_PRETRAINED_PATHS[size]!r} "
+            "(no 'args' field in the checkpoint and no train_config.yaml in "
+            "the directory)."
+        )
+    return arch
+
+
+def _parse_hyperscale_tag(model):
+    """Parse 'HyperScale-{size}[-rw]-{variant}' into (size, random_init, variant)."""
+    parts = model.split("-")
+    # parts[0] = "HyperScale", parts[1] = size, then optionally "rw", then variant.
+    if len(parts) < 3 or parts[0] != "HyperScale":
+        raise ValueError(f"Invalid HyperScale model tag: {model!r}")
+    size = parts[1]
+    if size not in HYPERSCALE_PRETRAINED_PATHS:
+        raise ValueError(
+            f"Unknown HyperScale size {size!r}; "
+            f"expected one of {tuple(HYPERSCALE_PRETRAINED_PATHS)}"
+        )
+    if parts[2] == "rw":
+        random_init = True
+        variant = "-".join(parts[3:])
+    else:
+        random_init = False
+        variant = "-".join(parts[2:])
+    if variant not in HYPERSCALE_VARIANTS:
+        raise ValueError(
+            f"Unknown HyperScale variant {variant!r}; "
+            f"expected one of {HYPERSCALE_VARIANTS}"
+        )
+    return size, random_init, variant
 
 
 def get_env_vars():
@@ -39,12 +125,18 @@ def generate_cmd(
     resume_run_name="",
     model_n_layers=4,
     event_types=None,
+    binned_loss_var=None,
+    binned_loss_signal=None,
+    binary_classifier=False,
 ):
     if continue_from:
         base = f"python -m src.scripts.train --resume {continue_from} -name {resume_run_name} --resume-run-id {resume_run_id} --max_steps 1000000"
         return base.format(continue_from=continue_from)
     base = "python -m src.scripts.train -bs {bs} --mode {task} {detailed_task} -name {name} --d_model {model_dim} --depth {model_depth} --n_heads {model_n_heads} --dropout {model_dropout} --attn_dropout {model_attn_dropout} {cap} --seed {seed} -seed-event-sampler {seed}  --max_steps {max_steps} --grad_accum_steps {grad_accum_steps} {extra} --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260326 "
-    # Model options: ... "OLS", "OLS_int", "OLS_RW", "OLM"/"OLM_FB", "BERT-tiny", "BERT-tiny-rw" (BERT tiny arch, random encoder weights)
+    # Model options: ... "OLS", "OLS_int", "OLS_RW", "OLM"/"OLM_FB",
+    # "BERT-tiny", "BERT-tiny-rw" (BERT tiny arch, random encoder weights),
+    # "HyperScale-small[-rw]-{basic|embedding|pool}" (HyperScale ParticleViT;
+    # "-rw" trains from random init, otherwise loads HYPERSCALE_PRETRAINED_PATHS[size]).
     # Seed both the event sampler and the whole training with seed
     detailed_task = "-E-available-no-muon" if task == "regression" else "-npi2"
     model_dim = 128
@@ -74,6 +166,30 @@ def generate_cmd(
     elif model == "BERT-tiny-rw":
         name = f"Run_1703_BERT_tiny_rw_{task}_{data_cap}_seed{seed}"
         extra = " --use-bert tiny-rw --zero-cond-feature 2 "
+    elif model == "BERT-tiny-energy-order":
+        name = f"Run_1703_BERT_tiny_energy_order_{task}_{data_cap}_seed{seed}"
+        extra = " --use-bert tiny --bert-energy-order --zero-cond-feature 2 "
+    elif model.startswith("HyperScale-"):
+        hs_size, hs_random_init, hs_variant = _parse_hyperscale_tag(model)
+        # Arch comes from the pretrained run's train_config.yaml — single
+        # source of truth. Used for both pretrained and -rw runs so they
+        # share an architecture.
+        arch = _hyperscale_arch_for(hs_size)
+        model_dim = arch["d_model"]
+        model_depth = arch["depth"]
+        model_n_heads = arch["n_heads"]
+        rw_tag = "_rw" if hs_random_init else ""
+        name = (
+            f"Run_1703_HyperScale_{hs_size}{rw_tag}_{hs_variant}"
+            f"_{task}_{data_cap}_seed{seed}"
+        )
+        extra = (
+            f" --use-hyperscale {hs_variant} "
+            f"--hs-mlp-ratio {arch['hs_mlp_ratio']} "
+            "--zero-cond-feature 2 "
+        )
+        if not hs_random_init:
+            extra += f" --hs-pretrained {HYPERSCALE_PRETRAINED_PATHS[hs_size]} "
     elif model in (
         "Transformer1",
         "Transformer1NR",
@@ -109,6 +225,23 @@ def generate_cmd(
         # Tag the run name so it doesn't collide with unfiltered runs.
         suffix = "_" + "".join(str(t).upper() for t in event_types) + "_only"
         name = name + suffix
+    if binned_loss_var and binned_loss_signal:
+        if task != "classifier":
+            raise ValueError("Binned loss weighting requires task='classifier'.")
+        binned_tag = binned_loss_signal
+        if binary_classifier:
+            binned_tag = f"{binned_loss_signal}Bin"
+            extra += " --binary-classifier "
+            extra += f" --binary-signal {binned_loss_signal} "
+        extra += (
+            f" --binned-loss-var {binned_loss_var} "
+            f"--binned-loss-signal {binned_loss_signal} "
+        )
+        name += f"_binned{binned_loss_var}_{binned_tag}"
+    elif binned_loss_var or binned_loss_signal:
+        raise ValueError(
+            "Both binned_loss_var and binned_loss_signal must be set together."
+        )
     return base.format(
         bs=bs,
         task=task,
@@ -175,6 +308,44 @@ def get_cmds_and_slurm_times():
             )
             cmds.append(cmd)
             slurm_times.append(walltime_bert)
+    return cmds, slurm_times
+
+
+def get_cmds_and_slurm_times_hyperscale():
+    """HyperScale sweep: small × {pretrained, rw} × embedding × 4 seeds ×
+    {regression, classifier} = 16 jobs.
+
+    Restricted to the ``embedding`` variant because the pretrained checkpoint
+    at HYPERSCALE_PRETRAINED_PATHS["small"] is a ParticleVIT_Embedding run —
+    the basic / pool variants would only partially transfer (token_embed shape
+    mismatch). Add them back to ``variants`` once matching checkpoints exist.
+    """
+    cmds = []
+    slurm_times = []
+    seeds = [55, 56, 57, 58]
+    tasks = ["regression", "classifier"]
+    sizes = ["small"]
+    variants = ["embedding"]
+    max_steps = 200000
+    walltime = "02:00:00"
+    for size in sizes:
+        for variant in variants:
+            for use_rw in (False, True):
+                rw_part = "rw-" if use_rw else ""
+                model_tag = f"HyperScale-{size}-{rw_part}{variant}"
+                for seed in seeds:
+                    for task in tasks:
+                        cmd = generate_cmd(
+                            data_cap=-1,
+                            seed=seed,
+                            task=task,
+                            model=model_tag,
+                            max_steps=max_steps,
+                            bs=2048,
+                            grad_accum_steps=1,
+                        )
+                        cmds.append(cmd)
+                        slurm_times.append(walltime)
     return cmds, slurm_times
 
 
@@ -378,6 +549,10 @@ def get_cmds_and_slurm_times_continue():
 CONTAINER_IMAGE = "docker.io/gkrz/minerva_ml:v1"
 
 if __name__ == "__main__":
+    # To submit the HyperScale sweep instead (16 jobs across small ×
+    # pretrained/rw × embedding × 4 seeds × {regression, classifier}),
+    # swap the next line for:
+    #     cmds, slurm_times = get_cmds_and_slurm_times_hyperscale()
     cmds, slurm_times = get_cmds_and_slurm_times()
     for i, cmd in enumerate(cmds):
         job_name = f"run_{i}_{dt.now().strftime('%Y%m%d_%H%M%S')}"

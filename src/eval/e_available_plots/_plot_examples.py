@@ -16,7 +16,6 @@ from ._load import _build_event_mask
 from ._grouped import (
     _extract_sample_count,
     _resolve_color_map,
-    eval_row_key_for_predictions,
     flatten_grouped_training_names,
     load_eval_data_grouped,
     _SEED_SEP,
@@ -101,24 +100,21 @@ def plot_example_E_pred_true(
             if not runs:
                 continue
             seed_indices = [0] if first_seed_only else list(range(len(runs)))
-            models_sub = E_pred_dict.get(dp, {}).get(loss, {})
             for s in seed_indices:
                 flat_key = f"{config_label}{_SEED_SEP}{s}"
-                row_key = eval_row_key_for_predictions(models_sub, config_label, s)
-                if row_key is None:
+                if flat_key not in E_pred_dict.get(dp, {}).get(loss, {}):
                     if verbose:
                         print(
-                            f"  [skip] {flat_key} (or bare {config_label!r}) not in "
-                            f"E_pred_dict['{dp}']['{loss}']"
+                            f"  [skip] {flat_key} not in E_pred_dict['{dp}']['{loss}']"
                         )
                     continue
-                true_vec = np.asarray(E_true_dict[dp][loss][row_key]).flatten()
-                pred_vec = np.asarray(E_pred_dict[dp][loss][row_key]).flatten()
+                true_vec = np.asarray(E_true_dict[dp][loss][flat_key]).flatten()
+                pred_vec = np.asarray(E_pred_dict[dp][loss][flat_key]).flatten()
                 valid = mask_sel & (true_vec > 0)
                 idx = np.flatnonzero(valid)
                 if idx.size == 0:
                     if verbose:
-                        print(f"  [skip] {row_key}: no events pass selection")
+                        print(f"  [skip] {flat_key}: no events pass selection")
                     continue
                 label_off = sum(ord(c) for c in config_label) % 10_007
                 rng = np.random.default_rng(seed + s * 100_003 + label_off)
@@ -128,7 +124,7 @@ def plot_example_E_pred_true(
                 p = pred_vec[pick]
                 base = plot_model_label(config_label)
                 title = f"{base}" if first_seed_only else f"{base} §{s}"
-                entries.append((title, loss, row_key, t, p, config_label))
+                entries.append((title, loss, flat_key, t, p, config_label))
                 if config_label not in all_labels:
                     all_labels.append(config_label)
 
@@ -148,7 +144,7 @@ def plot_example_E_pred_true(
     for ax in axes.flat:
         ax.set_visible(False)
 
-    for i, (title, loss, row_key, t, p, cfg_key) in enumerate(entries):
+    for i, (title, loss, flat_key, t, p, cfg_key) in enumerate(entries):
         r, c = divmod(i, ncols)
         ax = axes[r, c]
         ax.set_visible(True)
@@ -166,7 +162,7 @@ def plot_example_E_pred_true(
         ax.set_ylabel(r"$E_{\mathrm{available}}^{\mathrm{reco}}$ [GeV]")
         ax.grid(True, alpha=0.3)
         if verbose:
-            print(f"\n--- {title} ({loss}) [{row_key}] ---")
+            print(f"\n--- {title} ({loss}) [{flat_key}] ---")
             print(f"{'i':>3}  {'E_true':>12}  {'E_pred':>12}  {'pred/true':>10}")
             for j in range(len(t)):
                 ratio = p[j] / t[j] if t[j] != 0 else float("nan")

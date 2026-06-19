@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Classification “light” PDFs only (no main q₃ / pion figure bundles).
+"""Classification "light" PDFs only (no main q₃ / pion figure bundles).
 
 Reads the classification pickle and writes under
 ``<--plots-dir>/classification/light/`` — same outputs as the light appendix
@@ -11,6 +11,16 @@ Use ``--components`` to limit work:
 * ``q3`` — CCNπ vs *q₃* / *W* light figures only.
 * ``pion`` — CC1π± and CCπ⁰ light figures only.
 * ``all`` (default) — both sets.
+
+Caching
+-------
+On first run the script computes all AUPRC/AUROC metrics and saves them to a
+*plots cache* pickle (default ``plots/tmp_results/classification_light.pkl``).
+Subsequent runs with ``--plots-only`` load that cache and skip the expensive
+metric computation, going straight to figure drawing.
+
+The cache stores metrics for *all* models; ``--config`` filtering is applied at
+draw time, so one cache serves multiple configs.
 """
 
 from __future__ import annotations
@@ -25,20 +35,25 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from src.eval._bootstrap import silence_classification_empty_bin_warnings
-from src.eval._classification_light import save_light_classification_pdfs
+from src.eval._classification_light import (
+    compute_light_classification_data,
+    draw_light_classification_from_cache,
+)
 from src.eval._constants import (
     CLASSIFICATION_PICKLE_STEM,
+    DEFAULT_CACHE_DIR,
     DEFAULT_OUT_DIR,
-    DEFAULT_PLOTS_DIR,
     DEFAULT_WANDB_TAG,
-    filter_classification_results_for_standard_plots,
     repo_output_path,
 )
+from src.eval._plot_config import PlotConfig
 from src.eval.classification_plots import (
     CLASSIFICATION_PERFORMANCE_LEGEND_TITLE,
     DEFAULT_FIXED_FPR,
     get_signal_probabilities,
 )
+
+_LIGHT_CACHE_NAME = "classification_light.pkl"
 
 
 def _pickle_path(out_dir: Path, flag: str) -> Path:
@@ -60,8 +75,8 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument(
         "--plots-dir",
         type=Path,
-        default=DEFAULT_PLOTS_DIR,
-        help="Root for PDF output (default: plots/ under repo)",
+        default=None,
+        help="Root for PDF output (default: <out-dir>/plots)",
     )
     ap.add_argument(
         "--components",
@@ -70,28 +85,67 @@ def main(argv: list[str] | None = None) -> None:
         help="Which light bundle to emit (default: all).",
     )
     ap.add_argument("--classification-pickle", type=Path, default=None)
+    ap.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        metavar="JSON",
+        help="Plot config JSON (models, colors, optional display_name). "
+        "When given, only listed models are drawn.",
+    )
+    ap.add_argument(
+        "--plots-only",
+        action="store_true",
+        help="Skip metric computation; read pre-computed draw specs from the plots "
+        "cache (default: plots/tmp_results/classification_light.pkl). Requires a "
+        "previous non-plots-only run to have written the cache.",
+    )
+    ap.add_argument(
+        "--plots-cache",
+        type=Path,
+        default=None,
+        metavar="PKL",
+        help="Override the plots cache path used by --plots-only or written during "
+        "a normal run (default: plots/tmp_results/classification_light.pkl).",
+    )
     args = ap.parse_args(argv)
+    if args.plots_dir is None:
+        args.plots_dir = Path(args.out_dir or DEFAULT_OUT_DIR) / "plots"
 
-    # Random / uninformative score (independent of label): ROC is the diagonal, so
-    # TPR on signal equals FPR on background at the same threshold; fixing FPR=α
-    # implies TPR=α in expectation (“perturb positives at random” → no extra skill).
     print(
         "Random baseline TPR/FPR: for scores independent of truth (same notion as "
-        "the gray “Random baseline” in AUPRC), expected TPR equals FPR at every "
+        'the gray "Random baseline" in AUPRC), expected TPR equals FPR at every '
         "operating point. Fixed-FPR targets used in these figures: "
         f"{list(DEFAULT_FIXED_FPR)!r} → random TPR equals each target FPR."
     )
 
-    data_root = repo_output_path(_REPO_ROOT, Path(args.out_dir or DEFAULT_OUT_DIR))
     plots_root = repo_output_path(_REPO_ROOT, args.plots_dir)
     light_dir = plots_root / "classification" / "light"
     light_dir.mkdir(parents=True, exist_ok=True)
 
+    cache_root = repo_output_path(_REPO_ROOT, DEFAULT_CACHE_DIR)
+    plots_cache_path = args.plots_cache or (cache_root / _LIGHT_CACHE_NAME)
+
+    cfg: PlotConfig | None = PlotConfig.load(args.config) if args.config else None
+
+    if args.plots_only:
+        print(f"Loading plots cache from {plots_cache_path} …")
+        with open(plots_cache_path, "rb") as f:
+            cached = pickle.load(f)
+        specs = cached["specs"]
+        clrs = dict(cached["clrs"])
+        if cfg is not None:
+            clrs.update(cfg.colors())
+        draw_light_classification_from_cache(specs, clrs, light_dir, cfg=cfg)
+        return
+
+    # --- Normal (compute + cache + draw) path ---
+    data_root = repo_output_path(_REPO_ROOT, Path(args.out_dir or DEFAULT_OUT_DIR))
     pkl = args.classification_pickle or _pickle_path(data_root, args.flag)
     with open(pkl, "rb") as f:
         clf = pickle.load(f)
 
-    results = filter_classification_results_for_standard_plots(clf["results"])
+    results = clf["results"]
     data_by_playlist = clf["data_by_playlist"]
     data_w_by_playlist = clf.get("data_w_by_playlist")
     clrs = clf["clrs_dict_full"]
@@ -118,15 +172,25 @@ def main(argv: list[str] | None = None) -> None:
         if bits:
             print(f"Playlist {playlist} — overall signal fraction: " + "; ".join(bits))
 
-    save_light_classification_pdfs(
-        light_dir,
+    # Compute metrics for ALL models (cache is config-independent).
+    print("Computing light classification metrics (this may take a few minutes)…")
+    specs = compute_light_classification_data(
         results,
         data_by_playlist,
-        clrs,
         playlists,
-        components=components,
+        components,
         data_w_by_playlist=data_w_by_playlist,
     )
+
+    # Save plots cache so --plots-only can skip recomputation next time.
+    plots_cache_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(plots_cache_path, "wb") as f:
+        pickle.dump({"specs": specs, "clrs": clrs}, f, protocol=pickle.HIGHEST_PROTOCOL)
+    print(f"Saved plots cache → {plots_cache_path}")
+
+    # Draw (apply config filter at draw time).
+    draw_clrs = {**clrs, **(cfg.colors() if cfg else {})}
+    draw_light_classification_from_cache(specs, draw_clrs, light_dir, cfg=cfg)
 
 
 if __name__ == "__main__":

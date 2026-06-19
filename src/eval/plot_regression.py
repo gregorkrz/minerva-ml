@@ -4,6 +4,11 @@
 Pickles default under ``<repo>/<--out-dir>/``; PDFs under
 ``<repo>/<--plots-dir>/regression/`` and small-paper ratio histograms under
 ``<repo>/<--plots-dir>/small_paper/``.
+
+Pass ``--config JSON`` to restrict plots to a model subset with custom colors.
+Pass ``--plots-only`` to read from the regression plots cache
+(``plots/tmp_results/regression.pkl``) instead of the eval pickle; on a normal
+run the cache is written automatically.
 """
 
 from __future__ import annotations
@@ -30,15 +35,16 @@ from src.eval.e_available_plots import (
     plot_rms_iqr_with_uncertainty,
 )
 from src.eval._constants import (
+    DEFAULT_CACHE_DIR,
     DEFAULT_OUT_DIR,
-    DEFAULT_PLOTS_DIR,
     DEFAULT_WANDB_TAG,
     REGRESSION_PICKLE_STEM,
-    filter_regression_training_names,
-    model_key_excluded_from_metric_eval_plots,
     plot_model_label,
     repo_output_path,
 )
+from src.eval._plot_config import PlotConfig
+
+_REG_CACHE_NAME = "regression.pkl"
 
 
 def _maybe_register_arial() -> None:
@@ -75,38 +81,68 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument(
         "--plots-dir",
         type=Path,
-        default=DEFAULT_PLOTS_DIR,
-        help="Root for PDF output (default: plots/ under repo)",
+        default=None,
+        help="Root for PDF output (default: <out-dir>/plots)",
     )
     ap.add_argument("--regression-pickle", type=Path, default=None)
+    ap.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        metavar="JSON",
+        help="Plot config JSON (models, colors). When given, only listed models "
+        "appear in all regression figures.",
+    )
+    ap.add_argument(
+        "--plots-only",
+        action="store_true",
+        help="Read from the regression plots cache "
+        "(plots/tmp_results/regression.pkl) instead of the eval pickle.",
+    )
+    ap.add_argument(
+        "--plots-cache",
+        type=Path,
+        default=None,
+        metavar="PKL",
+        help="Override the regression plots cache path "
+        "(default: plots/tmp_results/regression.pkl).",
+    )
     args = ap.parse_args(argv)
+    if args.plots_dir is None:
+        args.plots_dir = Path(args.out_dir or DEFAULT_OUT_DIR) / "plots"
 
     _maybe_register_arial()
 
-    data_root = repo_output_path(_REPO_ROOT, Path(args.out_dir or DEFAULT_OUT_DIR))
     plots_root = repo_output_path(_REPO_ROOT, args.plots_dir)
     out_dir = plots_root / "regression"
     out_dir.mkdir(parents=True, exist_ok=True)
     small_paper_dir = plots_root / "small_paper"
     small_paper_dir.mkdir(parents=True, exist_ok=True)
 
-    pkl = args.regression_pickle or _pickle_path(data_root, args.flag)
-    with open(pkl, "rb") as f:
-        reg = pickle.load(f)
+    cache_root = repo_output_path(_REPO_ROOT, DEFAULT_CACHE_DIR)
+    plots_cache_path = args.plots_cache or (cache_root / _REG_CACHE_NAME)
+
+    cfg: PlotConfig | None = PlotConfig.load(args.config) if args.config else None
+
+    if args.plots_only:
+        print(f"Loading regression cache from {plots_cache_path} …")
+        with open(plots_cache_path, "rb") as f:
+            reg = pickle.load(f)
+    else:
+        data_root = repo_output_path(_REPO_ROOT, Path(args.out_dir or DEFAULT_OUT_DIR))
+        pkl = args.regression_pickle or _pickle_path(data_root, args.flag)
+        with open(pkl, "rb") as f:
+            reg = pickle.load(f)
+        # Save plots cache for --plots-only reuse.
+        plots_cache_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(plots_cache_path, "wb") as f:
+            pickle.dump(reg, f, protocol=pickle.HIGHEST_PROTOCOL)
+        print(f"Saved regression cache → {plots_cache_path}")
 
     CKPT_DIR = Path(reg["ckpt_dir"])
     suppress = bool(reg["suppress_errors"])
     training_names_full_no_rw = reg["training_names_full_no_rw"]
     training_names_full_first_only = reg["training_names_full_first_only"]
-    training_names_main = filter_regression_training_names(
-        training_names_full_no_rw, small_paper=False
-    )
-    training_names_first_main = filter_regression_training_names(
-        training_names_full_first_only, small_paper=False
-    )
-    training_names_small_paper_hist = filter_regression_training_names(
-        training_names_full_first_only, small_paper=True
-    )
     baseline_run = reg["baseline_run"]
     clrs = reg["clrs_dict_full"]
     runs_by_model_cap = reg["runs_by_model_cap"]
@@ -115,9 +151,19 @@ def main(argv: list[str] | None = None) -> None:
     data_first = reg.get("eval_data_first_only")
     data_scaling = reg.get("eval_data_scaling")
 
+    # Apply config filtering.
+    if cfg is not None:
+        clrs = {**clrs, **cfg.colors()}
+        training_names_full_no_rw = cfg.filter_nested(training_names_full_no_rw)
+        training_names_full_first_only = cfg.filter_nested(training_names_full_first_only)
+        config_model_names = set(cfg.model_names())
+        runs_by_model_cap = {
+            k: v for k, v in runs_by_model_cap.items() if k in config_model_names
+        }
+
     fig_i = plot_rms_iqr_with_uncertainty(
         CKPT_DIR=CKPT_DIR,
-        training_names=training_names_main,
+        training_names=training_names_full_no_rw,
         playlists=["1A"],
         dataset_to_plot="1A",
         baseline_run=baseline_run,
@@ -141,7 +187,7 @@ def main(argv: list[str] | None = None) -> None:
     for pl in ratio_playlists:
         fig_q = plot_ratio_histogram_q3_two_panels(
             CKPT_DIR=CKPT_DIR,
-            training_names=training_names_small_paper_hist,
+            training_names=training_names_full_first_only,
             playlists=[pl],
             dataset_to_plot=pl,
             baseline_run=baseline_run,
@@ -157,7 +203,7 @@ def main(argv: list[str] | None = None) -> None:
 
     fig_i = plot_rms_iqr_with_uncertainty(
         CKPT_DIR=CKPT_DIR,
-        training_names=training_names_main,
+        training_names=training_names_full_no_rw,
         playlists=["1A"],
         dataset_to_plot="1A",
         baseline_run=baseline_run,
@@ -178,7 +224,7 @@ def main(argv: list[str] | None = None) -> None:
 
     fig_i = plot_rms_iqr_with_uncertainty(
         CKPT_DIR=CKPT_DIR,
-        training_names=training_names_main,
+        training_names=training_names_full_no_rw,
         playlists=["1B"],
         dataset_to_plot="1B",
         baseline_run=baseline_run,
@@ -195,7 +241,7 @@ def main(argv: list[str] | None = None) -> None:
 
     fig_dbg = plot_example_E_pred_true(
         CKPT_DIR=CKPT_DIR,
-        training_names=training_names_main,
+        training_names=training_names_full_no_rw,
         playlists=["1A"],
         dataset_to_plot="1A",
         baseline_run=baseline_run,
@@ -214,7 +260,7 @@ def main(argv: list[str] | None = None) -> None:
 
     fig_1A, vals_1A = plot_rms_iqr_with_uncertainty(
         CKPT_DIR=CKPT_DIR,
-        training_names=training_names_main,
+        training_names=training_names_full_no_rw,
         playlists=["1A"],
         dataset_to_plot="1A",
         baseline_run=baseline_run,
@@ -226,7 +272,7 @@ def main(argv: list[str] | None = None) -> None:
 
     fig_1B, vals_1B = plot_rms_iqr_with_uncertainty(
         CKPT_DIR=CKPT_DIR,
-        training_names=training_names_main,
+        training_names=training_names_full_no_rw,
         playlists=["1B"],
         dataset_to_plot="1B",
         baseline_run=baseline_run,
@@ -269,7 +315,7 @@ def main(argv: list[str] | None = None) -> None:
         ax.plot(q3, bl["iqr"], "k--", label="Baseline (1B)")
 
     ax.set(
-        xlabel="MC truth $q_3$ [GeV]",
+        xlabel=r"True $q_3$ [GeV]",
         ylabel=r"25-75 IQR of $E_{\mathrm{available}}^{\mathrm{reco}}/E_{\mathrm{available}}^{\mathrm{true}}$",
     )
     selection_text = ""
@@ -283,7 +329,7 @@ def main(argv: list[str] | None = None) -> None:
 
     fig_ii = plot_residuals_by_energy(
         CKPT_DIR=CKPT_DIR,
-        training_names=training_names_first_main,
+        training_names=training_names_full_first_only,
         playlists=["1A"],
         dataset_to_plot="1A",
         baseline_run=baseline_run,
@@ -296,7 +342,7 @@ def main(argv: list[str] | None = None) -> None:
 
     fig_ii_q3 = plot_residuals_by_q3(
         CKPT_DIR=CKPT_DIR,
-        training_names=training_names_first_main,
+        training_names=training_names_full_first_only,
         playlists=["1A"],
         dataset_to_plot="1A",
         baseline_run=baseline_run,
@@ -314,7 +360,7 @@ def main(argv: list[str] | None = None) -> None:
 
     fig_ii_q3 = plot_residuals_by_q3(
         CKPT_DIR=CKPT_DIR,
-        training_names=training_names_first_main,
+        training_names=training_names_full_first_only,
         playlists=["1A"],
         dataset_to_plot="1A",
         baseline_run=baseline_run,
@@ -330,10 +376,8 @@ def main(argv: list[str] | None = None) -> None:
     plt.close(fig_ii_q3)
     print("Saved:", out_dir / "residuals_by_q3_select_events_by_muons.pdf")
 
-    training_names_grouped = {"Log1p": {}}
+    training_names_grouped: dict = {"Log1p": {}}
     for model, caps in runs_by_model_cap.items():
-        if model_key_excluded_from_metric_eval_plots(model):
-            continue
         for cap, run_list in sorted(
             caps.items(), key=lambda x: (x[0] == -1, -x[0] if x[0] > 0 else 0)
         ):
@@ -372,9 +416,9 @@ def main(argv: list[str] | None = None) -> None:
     for loss in values:
         if loss in ("q3_bin_mids", "baseline"):
             continue
-        for cfg, v in values[loss].items():
-            methods.setdefault(_method(cfg), []).append(
-                (_n_samples(cfg), v["iqr_mean"][Q3_BIN_IDX], v["iqr_std"][Q3_BIN_IDX])
+        for cfg_label, v in values[loss].items():
+            methods.setdefault(_method(cfg_label), []).append(
+                (_n_samples(cfg_label), v["iqr_mean"][Q3_BIN_IDX], v["iqr_std"][Q3_BIN_IDX])
             )
 
     for m in methods:
