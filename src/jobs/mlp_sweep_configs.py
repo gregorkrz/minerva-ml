@@ -67,9 +67,14 @@ def build_train_cmd(
     grad_accum_steps: int = DEFAULT_GRAD_ACCUM_STEPS,
     event_sampler_seed: int = DEFAULT_EVENT_SAMPLER_SEED,
     num_workers: int = DEFAULT_NUM_WORKERS,
+    predict_baseline: bool = False,
 ) -> str:
     """Return a single ``python -m src.scripts.train ...`` command."""
     name = run_name(cfg, task=task, seed=seed)
+    if predict_baseline:
+        if task != "classifier":
+            raise ValueError("predict_baseline requires task='classifier'.")
+        name = name.replace("_classifier_", "_classifier_predictBaseline_")
     common = (
         f"python -m src.scripts.train -bs {batch_size} "
         f"--d_model {DEFAULT_D_MODEL} --mlp_layers {cfg.mlp_layers} "
@@ -85,7 +90,8 @@ def build_train_cmd(
     if task == "regression":
         return f"{common} --mode regression -E-available-no-muon"
     if task == "classifier":
-        return f"{common} --mode classifier -npi2"
+        baseline_flag = " --predict-baseline" if predict_baseline else ""
+        return f"{common} --mode classifier -npi2{baseline_flag}"
     raise ValueError(f"Unknown task: {task!r}")
 
 

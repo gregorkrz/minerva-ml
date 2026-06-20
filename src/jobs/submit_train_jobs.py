@@ -128,6 +128,7 @@ def generate_cmd(
     binned_loss_var=None,
     binned_loss_signal=None,
     binary_classifier=False,
+    predict_baseline=False,
 ):
     if continue_from:
         base = f"python -m src.scripts.train --resume {continue_from} -name {resume_run_name} --resume-run-id {resume_run_id} --max_steps 1000000"
@@ -242,6 +243,11 @@ def generate_cmd(
         raise ValueError(
             "Both binned_loss_var and binned_loss_signal must be set together."
         )
+    if predict_baseline:
+        if task != "classifier":
+            raise ValueError("predict_baseline requires task='classifier'.")
+        extra += " --predict-baseline "
+        name += "_predictBaseline"
     return base.format(
         bs=bs,
         task=task,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import warnings
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -10,9 +11,14 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from src.eval._constants import plot_model_label
+from src.eval._legend import shared_figure_legend
 
 from ._grouped import _resolve_color_map, _SEED_SEP
-from ._constants import DEFAULT_BASELINE_KEY, SMALL_PAPER_COMPACT_IQR_MPV_FIGSIZE_INCHES
+from ._constants import (
+    DEFAULT_BASELINE_KEY,
+    SMALL_PAPER_COMPACT_IQR_MPV_FIGSIZE_INCHES,
+    SMALL_PAPER_RATIO_HIST_FIG_SCALE,
+)
 from ._load import _build_event_mask, load_eval_data
 from ._titles import _Etrue_bin_title, _q3_bin_title
 
@@ -23,6 +29,32 @@ _SMALL_PAPER_RATIO_LEGEND_FS = 8
 _REGRESSION_AXIS_FS = 12
 _REGRESSION_TITLE_FS = 12
 _REGRESSION_TICK_FS = 12
+
+
+def _model_base(model: str) -> str:
+    return model.split(_SEED_SEP, 1)[0] if _SEED_SEP in model else model
+
+
+def _allowed_model_bases(training_names: dict[str, dict[str, str]]) -> set[str]:
+    allowed: set[str] = set()
+    for models in training_names.values():
+        if isinstance(models, dict):
+            allowed.update(models.keys())
+    return allowed
+
+
+def _ordered_model_bases(training_names: dict[str, dict[str, str]]) -> list[str]:
+    ordered: list[str] = []
+    for models in training_names.values():
+        if isinstance(models, dict):
+            for model in models:
+                if model not in ordered:
+                    ordered.append(model)
+    return ordered
+
+
+def _model_allowed(model: str, allowed: set[str]) -> bool:
+    return _model_base(model) in allowed
 
 
 def plot_residuals_by_energy(
@@ -62,6 +94,7 @@ def plot_residuals_by_energy(
     Enu_filters = data["Enu_filters"]
     mc_E = data["mc_E"]
     dp = dataset_to_plot
+    allowed = _allowed_model_bases(training_names)
 
     has_baselines = (
         dp in Enu_filters
@@ -112,12 +145,14 @@ def plot_residuals_by_energy(
 
         for loss in results:
             for model in results[loss]:
+                if not _model_allowed(model, allowed):
+                    continue
                 if model not in E_pred_dict.get(dp, {}).get(loss, {}):
                     continue
                 if has_baselines:
                     reco = E_pred_dict[dp][loss][model][mask]
                     ratio_model = reco[valid] / true[valid]
-                    mlab = f"{plot_model_label(model)} ({loss})"
+                    mlab = f"{plot_model_label(_model_base(model))} ({loss})"
                     ax[0, i].hist(
                         reco - true,
                         bins=residual_bins_list[i],
@@ -230,6 +265,7 @@ def plot_residuals_by_q3(
     Enu_filters = data["Enu_filters"]
     mc_E = data["mc_E"]
     dp = dataset_to_plot
+    allowed = _allowed_model_bases(training_names)
 
     has_baselines = (
         dp in Enu_filters
@@ -268,17 +304,7 @@ def plot_residuals_by_q3(
     residual_bins = np.linspace(-1, 1, 160)
     ratio_bins = np.linspace(0, 2, 50)
 
-    def _model_color_key(model: str) -> str:
-        return model.split("§", 1)[0] if "§" in model else model
-
-    model_bases_ordered: list[str] = []
-    for loss in results:
-        for model in results[loss]:
-            if model not in E_pred_dict.get(dp, {}).get(loss, {}):
-                continue
-            key = _model_color_key(model)
-            if key not in model_bases_ordered:
-                model_bases_ordered.append(key)
+    model_bases_ordered = _ordered_model_bases(training_names)
     if colors:
         color_by_model_base = _resolve_color_map(model_bases_ordered, colors)
     else:
@@ -329,11 +355,13 @@ def plot_residuals_by_q3(
 
         for loss in results:
             for model in results[loss]:
+                if not _model_allowed(model, allowed):
+                    continue
                 if model not in E_pred_dict.get(dp, {}).get(loss, {}):
                     continue
                 reco = E_pred_dict[dp][loss][model][mask]
                 ratio_model = reco[valid] / true[valid]
-                mlab = _model_color_key(model)
+                mlab = _model_base(model)
                 mcol = color_by_model_base.get(mlab, "tab:gray")
                 mlab_disp = plot_model_label(mlab)
                 ax[0, i].hist(
@@ -428,6 +456,9 @@ def plot_ratio_histogram_q3_two_panels(
     suppress_errors: bool = False,
     *,
     legend_fontsize: float | None = None,
+    label_fn: Callable[[str], str] | None = None,
+    legend_label_order: list[str] | None = None,
+    legend_column_stacks: list[list[str]] | None = None,
 ) -> plt.Figure:
     """Two side-by-side :math:`E_{\\mathrm{reco}}/E_{\\mathrm{true}}` histograms for *q₃* slices.
 
@@ -435,8 +466,8 @@ def plot_ratio_histogram_q3_two_panels(
     normalized to unit area (``density=True``) so the two *q₃* slices are comparable despite
     different event counts. Figure height equals
     :data:`SMALL_PAPER_COMPACT_IQR_MPV_FIGSIZE_INCHES` width; ``wspace`` is small so the
-    panels sit close together; ``set_box_aspect(1)`` keeps each subplot ~square. Legend
-    on the left panel only (``loc="best"``); the right panel has no legend.
+    panels sit close together; ``set_box_aspect(1)`` keeps each subplot ~square. A shared
+    figure legend below the panels uses ``legend_column_stacks`` when provided.
     """
     if data is None:
         data = load_eval_data(
@@ -456,6 +487,7 @@ def plot_ratio_histogram_q3_two_panels(
     Enu_filters = data["Enu_filters"]
     mc_E = data["mc_E"]
     dp = dataset_to_plot
+    allowed = _allowed_model_bases(training_names)
 
     has_baselines = (
         dp in Enu_filters
@@ -478,17 +510,7 @@ def plot_ratio_histogram_q3_two_panels(
     else:
         mask_sel = mc_E[dp] > 0
 
-    def _model_color_key(model: str) -> str:
-        return model.split("§", 1)[0] if "§" in model else model
-
-    model_bases_ordered: list[str] = []
-    for loss in results:
-        for model in results[loss]:
-            if model not in E_pred_dict.get(dp, {}).get(loss, {}):
-                continue
-            key = _model_color_key(model)
-            if key not in model_bases_ordered:
-                model_bases_ordered.append(key)
+    model_bases_ordered = _ordered_model_bases(training_names)
     if colors:
         color_by_model_base = _resolve_color_map(model_bases_ordered, colors)
     else:
@@ -503,6 +525,11 @@ def plot_ratio_histogram_q3_two_panels(
 
     ratio_bins = np.linspace(0, 2, 50)
     baseline_color_kw: Any = "black"
+
+    def _display_label(model_base: str) -> str:
+        if label_fn is not None:
+            return label_fn(model_base)
+        return plot_model_label(model_base)
 
     def _fill_ratio_panel(
         ax: plt.Axes,
@@ -528,14 +555,16 @@ def plot_ratio_histogram_q3_two_panels(
             )
         for loss in results:
             for model in results[loss]:
+                if not _model_allowed(model, allowed):
+                    continue
                 if model not in E_pred_dict.get(dp, {}).get(loss, {}):
                     continue
                 reco = E_pred_dict[dp][loss][model][mask]
                 ratio_model = reco[valid] / true[valid]
-                mlab = _model_color_key(model)
+                mlab = _model_base(model)
                 mcol = color_by_model_base.get(mlab, "tab:gray")
                 lab = (
-                    plot_model_label(mlab) if use_legend_labels else "_nolegend_"
+                    _display_label(mlab) if use_legend_labels else "_nolegend_"
                 )
                 ax.hist(
                     ratio_model,
@@ -556,13 +585,13 @@ def plot_ratio_histogram_q3_two_panels(
         ax.grid(True)
         ax.set_title(panel_title, fontsize=_REGRESSION_TITLE_FS, pad=8)
 
-    _iw = SMALL_PAPER_COMPACT_IQR_MPV_FIGSIZE_INCHES[0]
+    _iw = SMALL_PAPER_COMPACT_IQR_MPV_FIGSIZE_INCHES[0] * SMALL_PAPER_RATIO_HIST_FIG_SCALE
     fig, axes = plt.subplots(
         1,
         2,
-        figsize=(1.78 * _iw, _iw),
+        figsize=(1.78 * _iw, _iw * 1.18),
         sharey=True,
-        constrained_layout=False,
+        constrained_layout=True,
         gridspec_kw={"wspace": 0.08},
     )
     mask_01 = (q3 >= 0.0) & (q3 < 1.0)
@@ -588,35 +617,17 @@ def plot_ratio_histogram_q3_two_panels(
     for ax in axes:
         ax.set_box_aspect(1)
 
-    h0, l0 = axes[0].get_legend_handles_labels()
-    by_label: dict[str, Any] = {}
-    for hi, li in zip(h0, l0):
-        if li and li != "_nolegend_" and li not in by_label:
-            by_label[li] = hi
-    sorted_labs = sorted(by_label.keys())
-    sorted_handles = [by_label[x] for x in sorted_labs]
-    if sorted_handles:
-        leg_fs = (
-            float(legend_fontsize)
-            if legend_fontsize is not None
-            else float(_SMALL_PAPER_RATIO_LEGEND_FS)
-        )
-        axes[0].legend(
-            sorted_handles,
-            sorted_labs,
-            loc="best",
-            fontsize=leg_fs,
-            frameon=True,
-            fancybox=False,
-            edgecolor="0.75",
-            facecolor="1.0",
-            framealpha=0.95,
-            handlelength=1.5,
-            handletextpad=0.45,
-            borderpad=0.35,
-            labelspacing=0.35,
-        )
-
-    fig.tight_layout()
+    leg_fs = (
+        float(legend_fontsize)
+        if legend_fontsize is not None
+        else float(_SMALL_PAPER_RATIO_LEGEND_FS)
+    )
+    shared_figure_legend(
+        fig,
+        tuple(axes),
+        label_order=legend_label_order,
+        column_stack_labels=legend_column_stacks,
+        legend_fontsize=leg_fs,
+    )
 
     return fig

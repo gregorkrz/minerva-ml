@@ -184,6 +184,13 @@ def main(argv: list[str] | None = None) -> None:
         ratio_playlists = sorted(data_first["mc_E"].keys())
     else:
         ratio_playlists = ["1A"]
+    ratio_label_fn = cfg.label_for if cfg is not None else None
+    ratio_legend_order = cfg.legend_labels() if cfg is not None else None
+    ratio_legend_stacks = (
+        [[cfg.label_for(n) for n in stack] for stack in cfg.legend_column_stacks]
+        if cfg is not None and cfg.legend_column_stacks
+        else None
+    )
     for pl in ratio_playlists:
         fig_q = plot_ratio_histogram_q3_two_panels(
             CKPT_DIR=CKPT_DIR,
@@ -195,6 +202,9 @@ def main(argv: list[str] | None = None) -> None:
             colors=clrs,
             suppress_errors=suppress,
             data=data_first,
+            label_fn=ratio_label_fn,
+            legend_label_order=ratio_legend_order,
+            legend_column_stacks=ratio_legend_stacks,
         )
         out_q = small_paper_dir / f"regression_e_ratio_hist_q3_0_1_and_1_2_{pl}.pdf"
         fig_q.savefig(out_q, bbox_inches="tight")

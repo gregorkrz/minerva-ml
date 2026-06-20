@@ -54,6 +54,8 @@ def create_model_from_checkpoint(checkpoint_path, device):
     # Determine number of output classes for classification
     num_classes = None
     task = create_task(args_attrs)
+    # Evaluation always uses MC truth labels, even for models trained with --predict-baseline.
+    task.predict_baseline = False
     if task.type == "classifier":
         num_classes = len(task.class_idx)
     elif task.type == "regression":

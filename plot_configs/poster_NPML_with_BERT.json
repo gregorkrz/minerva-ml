@@ -1,14 +1,16 @@
 {
-  "_comment": "NPML poster subset plus BERT-small baselines. HyperScale uses sky-blue pair; BERT uses violet pair (#6b21a8 / #c084fc).",
+  "_comment": "NPML poster subset plus BERT-small baselines. Transformer-small temporarily disabled (see _disabled_models).",
   "models": [
-    {"name": "MLP",                  "color": "#2ca02c"},
+    {"name": "MLP",                  "color": "#2ca02c", "display_name": "MLP-rw"},
     {"name": "OmniLearned-small",    "color": "#ff7f0e"},
     {"name": "OmniLearned-small-rw", "color": "#e377c2"},
-    {"name": "Transformer-small",    "color": "#17becf"},
     {"name": "BERT-tiny",            "color": "#6b21a8", "display_name": "BERT-small"},
     {"name": "BERT-tiny-rw",         "color": "#c084fc", "display_name": "BERT-small-rw"},
     {"name": "HyperScale-small",     "color": "#0369a1"},
     {"name": "HyperScale-small-rw",  "color": "#60a5fa"}
+  ],
+  "_disabled_models": [
+    {"name": "Transformer-small",    "color": "#17becf", "display_name": "Transformer-small-rw"}
   ],
   "step_cutoff": null,
   "flops_xmin": 14.5
