@@ -30,11 +30,12 @@ def get_dense(keys, master_ana_dev_frame, filter_prongs=False):
     # filter_prongs: bool. If True, filter out prongs with prong_part_pid == -999 or 0
     column_arrays = [master_ana_dev_frame[key].array() for key in keys]
     if filter_prongs:
+        pid_arr = column_arrays[keys.index("prong_part_pid")]
         mask = (
-            (column_arrays[-1] != -999)
-            & (column_arrays[-1] != 0)
+            (pid_arr != -999)
+            & (pid_arr != 0)
             & (column_arrays[1][..., 3] > 1e-6)
-        )  # remove the weird prongs with zero energy
+        )  # Remove the weird prongs with zero energy
         column_arrays = [arr[mask] for arr in column_arrays]
     # Get number of particles per event from mc_part_arrays[0]
     n_per_event = ak.num(column_arrays[0])

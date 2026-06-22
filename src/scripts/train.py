@@ -641,9 +641,10 @@ def parse_args():
     )
     parser.add_argument(
         "--use_amp",
+        "--fp16",
         action="store_true",
         default=False,
-        help="Use automatic mixed precision",
+        help="Use automatic mixed precision (autocast; --fp16 is an alias)",
     )
     parser.add_argument(
         "--max_samples_per_epoch",
