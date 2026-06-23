@@ -24,7 +24,7 @@ echo "======================================"
 
 # ---- Container configuration ----
 IMAGE="{container_image}"
-NAME="minerva_ml"
+NAME="python"
 WORKSPACE="$HOME"
 
 

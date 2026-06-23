@@ -27,8 +27,11 @@ from src.scripts.train import (
     prepare_batch,
     prepare_batch_omnilearned,
     prepare_batch_bert,
+    prepare_batch_hyperscale,
     create_task,
     create_bert_model,
+    create_hyperscale_model,
+    forward_model,
     CondOnlyMLP,
 )
 from src.constants.dataset import GLOBAL_COND_BASE_DIM
@@ -95,6 +98,8 @@ def create_model_from_checkpoint(checkpoint_path, device):
         )
     elif args_dict.get("use_bert", None):
         model = create_bert_model(args_attrs, task)
+    elif args_dict.get("use_hyperscale", None):
+        model = create_hyperscale_model(args_attrs, task)
     elif args_dict.get("cond_only", False):
         e_sum_dim = 6 if args_dict.get("include_E_sum", False) else 0
         model = CondOnlyMLP(
@@ -177,6 +182,8 @@ def evaluate(model, dataloader, device, args_dict, use_amp=False):
     zero_cond_feature = args_dict.get("zero_cond_feature", None)
     use_omnilearned = args_dict.get("use_omnilearned", None)
     use_bert = args_dict.get("use_bert", None)
+    use_hyperscale = args_dict.get("use_hyperscale", None)
+    args_ns = SimpleNamespace(**args_dict)
 
     # Setup loss function
     if mode == "regression":
@@ -210,6 +217,17 @@ def evaluate(model, dataloader, device, args_dict, use_amp=False):
                 zero_cond_feature=zero_cond_feature,
                 energy_order=args_dict.get("bert_energy_order", False),
             )
+        elif use_hyperscale:
+            inputs = prepare_batch_hyperscale(
+                batch,
+                device,
+                use_pid=use_pid,
+                pid_idx=pid_idx,
+                use_cond=use_cond,
+                include_E_sum=include_E_sum,
+                zero_cond_feature=zero_cond_feature,
+                variant=use_hyperscale,
+            )
         else:
             inputs = prepare_batch(
                 batch,
@@ -223,33 +241,7 @@ def evaluate(model, dataloader, device, args_dict, use_amp=False):
             )
         amp_enabled = bool(use_amp and device.type == "cuda")
         with torch.amp.autocast(device_type="cuda", enabled=amp_enabled):
-            if use_omnilearned:
-                outputs = model(
-                    inputs["X"],
-                    inputs["y"],
-                    cond=inputs["cond"],
-                    pid=inputs["pid"],
-                    add_info=inputs["add_info"],
-                )
-                logits = outputs["y_pred"]
-            elif use_bert:
-                logits = model(
-                    inputs["X"],
-                    inputs["attention_mask"],
-                    global_cont=inputs.get("global_cont"),
-                )
-            elif cond_only:
-                logits = model(inputs["global_cont"])
-            else:
-                features = model(
-                    point_cont=inputs["point_cont"],
-                    point_cats=inputs["point_cats"],
-                    pos=inputs["pos"],
-                    global_cont=inputs["global_cont"],
-                    global_cats=inputs["global_cats"],
-                    attn_mask=inputs["attn_mask"],
-                )
-                logits = model.head(features)
+            logits = forward_model(model, inputs, args_ns)
 
             if mode == "regression":
                 loss = criterion(logits.squeeze(-1), inputs["y"])
