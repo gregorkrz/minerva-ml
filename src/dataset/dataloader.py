@@ -12,6 +12,7 @@ import torch._dynamo
 from dataclasses import dataclass, field
 from typing import Iterable
 
+from src.dataset.baseline_labels import load_baseline_pi_labels_v2
 from src.dataset.binned_loss_weights import (
     assign_bin_indices,
     bin_edges_for_var,
@@ -100,6 +101,9 @@ class Task:
     binary_signal_pid_classes: list[int] = field(
         default_factory=list
     )  # Pi_labels_v2 indices treated as signal (e.g. [0, 1] for CCN1pipm)
+    predict_baseline: bool = field(
+        default=False
+    )  # If True, train on cut-based baseline Pi_labels_v2 instead of MC truth
     class_idx: list[int] = field(
         default=None
     )  # List of class indices for the classification task # e.g. [1, 2, 3] means 3 classes: 1, 2, 3
@@ -344,6 +348,27 @@ class HEPTorchDataset(Dataset):
         self.nevts = int(nevts)
         self.max_particles = max_particles
         self.task = task
+        self._baseline_labels_flat: np.ndarray | None = None
+        if task.predict_baseline:
+            if not task.classification_CC1orNPi:
+                raise ValueError(
+                    "predict_baseline requires classification_CC1orNPi (-npi2)."
+                )
+            if data_path is None or dataset_playlist is None or dataset_split is None:
+                raise ValueError(
+                    "predict_baseline requires data_path, dataset_playlist, and "
+                    "dataset_split."
+                )
+            self._baseline_labels_flat = load_baseline_pi_labels_v2(
+                data_path, dataset_playlist, dataset_split
+            )
+            if self._baseline_labels_flat.shape[0] != self._truth_flat.shape[0]:
+                raise ValueError(
+                    f"Baseline labels length {self._baseline_labels_flat.shape[0]} "
+                    f"does not match split size {self._truth_flat.shape[0]} in "
+                    f"{self.folder}."
+                )
+            print("Training targets: cut-based baseline Pi_labels_v2 (not MC truth)")
         self._len_full = int(np.sum(self.files_n_events))
         # Optional filter on GENIE interaction type (truth_labels col 1).
         # self._event_idx_map[logical_idx] -> physical_idx into the flattened arrays.
@@ -372,20 +397,22 @@ class HEPTorchDataset(Dataset):
         if self.nevts <= 0:
             print("Number of events per file", self.files_n_events)
         if self.task.type == "classifier":
-            pid_labels_flat = self._truth_flat[:, self.task.class_label_idx].astype(
-                np.int64
-            )
+            if self.task.predict_baseline:
+                label_source = self._baseline_labels_flat.astype(np.int64)
+            else:
+                label_source = self._truth_flat[:, self.task.class_label_idx].astype(
+                    np.int64
+                )
             if self.task.classification_binary:
                 self.class_counts = binary_class_counts_from_pid_column(
-                    pid_labels_flat,
+                    label_source,
                     self._event_idx_map,
                     self.task.binary_signal_pid_classes,
                 )
             elif self.event_types:
                 # Compute class counts on the filtered subset so class weights reflect training data.
-                labels_flat = pid_labels_flat
                 mapped = np.asarray(
-                    [self.task.class_idx_map[int(l)] for l in labels_flat],
+                    [self.task.class_idx_map[int(l)] for l in label_source],
                     dtype=np.int64,
                 )
                 mapped = mapped[self._event_idx_map]
@@ -396,8 +423,8 @@ class HEPTorchDataset(Dataset):
                 self.class_counts = get_class_counts(
                     self.task.class_idx,
                     self.task.class_idx_map,
-                    self.files_truth_labels,
-                    self.task.class_label_idx,
+                    [label_source.reshape(-1, 1)],
+                    0,
                 )
             self.class_weights = 1 / (self.class_counts / np.sum(self.class_counts))
             print("Class weights", self.class_weights)
@@ -416,9 +443,12 @@ class HEPTorchDataset(Dataset):
                         "Binned loss weighting requires data_path, playlist, and split."
                     )
                 n_phys = self._truth_flat.shape[0]
-                raw_labels = self._truth_flat[:, self.task.class_label_idx].astype(
-                    np.int64
-                )
+                if self.task.predict_baseline:
+                    raw_labels = self._baseline_labels_flat.astype(np.int64)
+                else:
+                    raw_labels = self._truth_flat[:, self.task.class_label_idx].astype(
+                        np.int64
+                    )
                 if self.task.classification_binary:
                     signal_pid = set(self.task.binary_signal_pid_classes)
                     mapped_labels = np.array(
@@ -505,18 +535,23 @@ class HEPTorchDataset(Dataset):
 
         # Labels from pre-flattened arrays (single index)
         if self.task.type == "classifier":
-            pid_class = int(self._truth_flat[idx, self.task.class_label_idx])
+            mc_pid_class = int(self._truth_flat[idx, self.task.class_label_idx])
+            train_pid_class = (
+                int(self._baseline_labels_flat[idx])
+                if self.task.predict_baseline
+                else mc_pid_class
+            )
             if self.task.classification_binary:
                 sample["y"] = torch.tensor(
                     pid_to_binary_label(
-                        pid_class, self.task.binary_signal_pid_classes
+                        train_pid_class, self.task.binary_signal_pid_classes
                     ),
                     dtype=torch.long,
                 )
-                sample["pid_label"] = torch.tensor(pid_class, dtype=torch.long)
+                sample["pid_label"] = torch.tensor(mc_pid_class, dtype=torch.long)
             else:
                 sample["y"] = torch.tensor(
-                    self.task.class_idx_map[pid_class], dtype=torch.long
+                    self.task.class_idx_map[train_pid_class], dtype=torch.long
                 )
             if getattr(self, "use_binned_loss", False):
                 sample["loss_weight"] = torch.tensor(

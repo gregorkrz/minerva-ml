@@ -1,14 +1,6 @@
 {
-  "_comment": "HyperScale + OmniLearned small/medium (incl. -rw) + Transformer baselines.",
+  "_comment": "HyperScale + OmniLearned small/medium (incl. -rw). Transformer-xsmall/small temporarily disabled (see _disabled_models).",
   "models": [
-    {
-      "name": "Transformer-xsmall",
-      "color": "#1d4ed8"
-    },
-    {
-      "name": "Transformer-small",
-      "color": "#0891b2"
-    },
     {
       "name": "OmniLearned-small",
       "color": "#c2410c"
@@ -32,6 +24,16 @@
     {
       "name": "HyperScale-medium-rw",
       "color": "#e879f9"
+    }
+  ],
+  "_disabled_models": [
+    {
+      "name": "Transformer-xsmall",
+      "color": "#1d4ed8"
+    },
+    {
+      "name": "Transformer-small",
+      "color": "#0891b2"
     }
   ],
   "step_cutoff": null

@@ -192,6 +192,16 @@ def main(argv: list[str] | None = None) -> None:
         metavar="PKL",
         help=f"Classification light draw-spec cache (default: …/tmp_results/{_LIGHT_CACHE_NAME})",
     )
+    ap.add_argument(
+        "--skip-classification",
+        action="store_true",
+        help="Skip classification small-paper figures.",
+    )
+    ap.add_argument(
+        "--skip-regression",
+        action="store_true",
+        help="Skip regression small-paper figures.",
+    )
     args = ap.parse_args(argv)
 
     cache_root = repo_output_path(_REPO_ROOT, DEFAULT_CACHE_DIR)
@@ -206,33 +216,42 @@ def main(argv: list[str] | None = None) -> None:
 
     print(f"=== small_paper ({cfg.model_names()}) -> {small_dir} ===")
 
-    with open(reg_cache, "rb") as f:
-        reg = pickle.load(f)
-    _save_regression_q3_compact(
-        reg=reg,
-        cfg=cfg,
-        out_pdf=small_dir / "regression_q3_iqr_mpv_1A_compact.pdf",
-    )
-
-    with open(steps_cache, "rb") as f:
-        steps = pickle.load(f)
-    _save_classification_val_loss_curves(
-        steps=steps,
-        cfg=cfg,
-        out_pdf=small_dir / "classification_val_loss_vs_log10_flops_and_log10_steps.pdf",
-    )
-
-    if light_cache.is_file():
-        with open(light_cache, "rb") as f:
-            light_cached = pickle.load(f)
-        _save_classification_tpr_baseline(
-            light_specs=light_cached["specs"],
+    if not args.skip_regression:
+        with open(reg_cache, "rb") as f:
+            reg = pickle.load(f)
+        _save_regression_q3_compact(
+            reg=reg,
             cfg=cfg,
-            clrs=light_cached["clrs"],
-            out_pdf=small_dir / "classification_tpr_at_fixed_fpr_baseline_1A.pdf",
+            out_pdf=small_dir / "regression_q3_iqr_mpv_1A_compact.pdf",
         )
     else:
-        print(f"Skip classification TPR (light cache missing): {light_cache}")
+        print("Skip regression small-paper figures (--skip-regression).")
+
+    if not args.skip_classification:
+        if steps_cache.is_file():
+            with open(steps_cache, "rb") as f:
+                steps = pickle.load(f)
+            _save_classification_val_loss_curves(
+                steps=steps,
+                cfg=cfg,
+                out_pdf=small_dir / "classification_val_loss_vs_log10_flops_and_log10_steps.pdf",
+            )
+        else:
+            print(f"Skip classification val-loss (steps cache missing): {steps_cache}")
+
+        if light_cache.is_file():
+            with open(light_cache, "rb") as f:
+                light_cached = pickle.load(f)
+            _save_classification_tpr_baseline(
+                light_specs=light_cached["specs"],
+                cfg=cfg,
+                clrs=light_cached["clrs"],
+                out_pdf=small_dir / "classification_tpr_at_fixed_fpr_baseline_1A.pdf",
+            )
+        else:
+            print(f"Skip classification TPR (light cache missing): {light_cache}")
+    else:
+        print("Skip classification small-paper figures (--skip-classification).")
 
 
 if __name__ == "__main__":

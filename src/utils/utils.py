@@ -22,6 +22,16 @@ _BINNED_SIGNAL_TO_PLOT_SUFFIX = {
     "ccnpipm": "WeighCCNpipm",
 }
 
+# ``--predict-baseline`` classifier runs (submit_predict_baseline_ccnpi.py).
+_PREDICT_BASELINE_TRANSFORMER_RE = re.compile(
+    r"_classifier_(Transformer[^_]+)_data_cap_(-?\d+)_seed_(\d+)_predictBaseline",
+    re.IGNORECASE,
+)
+_PREDICT_BASELINE_MLP_RE = re.compile(
+    r"_cond_only_lowLR_(MLP\d+)_classifier_predictBaseline_NR_full_seed(-?\d+)_",
+    re.IGNORECASE,
+)
+
 
 _HYPERSCALE_RUN_RE = re.compile(
     r"_HyperScale_(small|medium)_(?:(rw)_)?(\w+?)_(regression|classifier)_(-?\d+)_",
@@ -64,6 +74,30 @@ def parse_binned_classifier_model_cap(name: str) -> tuple[str, int] | None:
         signal.lower(), f"binned-{signal}"
     )
     return f"{base}-{suffix}", int(cap_s)
+
+
+def parse_predict_baseline_classifier_model_cap(
+    name: str,
+) -> tuple[str, int] | None:
+    """Map a ``--predict-baseline`` classifier run to ``(plot_model_key, data_cap)``.
+
+    Examples::
+
+        Run_1703_classifier_Transformer3NR_data_cap_-1_seed_55_predictBaseline_...
+        -> ("Transformer-small-Baseline", -1)
+
+        Run_cond_only_lowLR_MLP3_classifier_predictBaseline_NR_full_seed55_...
+        -> ("MLP-Baseline", -1)
+    """
+    m = _PREDICT_BASELINE_TRANSFORMER_RE.search(name)
+    if m is not None:
+        raw, cap_s, _seed = m.groups()
+        base = _TRANSFORMER_RAW_TO_PLOT_KEY.get(raw, raw)
+        return f"{base}-Baseline", int(cap_s)
+    m = _PREDICT_BASELINE_MLP_RE.search(name)
+    if m is not None:
+        return "MLP-Baseline", -1
+    return None
 
 
 def fetch_runs_from_wandb(tag: str, project: str = "minerva-models") -> set[str]:
@@ -221,6 +255,9 @@ def get_classification_runs_by_model_and_cap(
       - Binned loss: ``..._classifier_Transformer1_data_cap_<cap>_seed_<N>_binnedW_CCN1pipm_...``
         → ``Transformer-xsmall-Weigh1`` (5-class head; see :func:`parse_binned_classifier_model_cap`).
       - Binned binary CCN1pipm: ``..._binnedW_CCN1pipmBin_...`` → ``Transformer-xsmall-Weigh2``.
+      - Predict baseline (--predict-baseline): ``..._predictBaseline`` on Transformer runs
+        → ``Transformer-small-Baseline`` (etc.); MLP sweep names with
+        ``_classifier_predictBaseline_`` → ``MLP-Baseline``.
       - HyperScale: Run_*_HyperScale_{small|medium}[_rw]_..._classifier_<cap>_... (same keys as regression).
     dataset_cap is -1 for full 6M dataset, or a positive int for smaller caps.
     """
@@ -233,6 +270,11 @@ def get_classification_runs_by_model_and_cap(
         binned = parse_binned_classifier_model_cap(name)
         if binned is not None:
             model, cap = binned
+            result[model][cap].append(name)
+            continue
+        pred_bl = parse_predict_baseline_classifier_model_cap(name)
+        if pred_bl is not None:
+            model, cap = pred_bl
             result[model][cap].append(name)
             continue
         # Match OLS_RW before OLS
@@ -279,6 +321,12 @@ def get_classification_runs_by_model_and_cap(
             parsed = parse_hyperscale_model_cap(name, task="classifier")
             if parsed is not None:
                 model, cap = parsed
+        if model is None:
+            m = re.search(
+                r"_cond_only_lowLR_(MLP\d+)_classifier_NR_full_seed(-?\d+)_", name
+            )
+            if m:
+                model, cap = "MLP", -1
         if model is None:
             m = re.search(r"_cond_only_lowLR_classifier_NR_full_seed(-?\d+)_", name)
             if m:

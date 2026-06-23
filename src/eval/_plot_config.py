@@ -36,6 +36,7 @@ class PlotConfig:
     models: list[ModelEntry] = field(default_factory=list)
     step_cutoff: int | None = None
     flops_xmin: float | None = None
+    legend_column_stacks: list[list[str]] = field(default_factory=list)
 
     # ------------------------------------------------------------------
     # Accessors
@@ -131,8 +132,13 @@ class PlotConfig:
             )
             for m in data.get("models", [])
         ]
+        stacks_raw = data.get("legend_column_stacks")
+        if stacks_raw is None and data.get("legend_column_stack"):
+            stacks_raw = [data["legend_column_stack"]]
+        legend_column_stacks = [list(s) for s in (stacks_raw or [])]
         return cls(
             models=models,
             step_cutoff=data.get("step_cutoff"),
             flops_xmin=data.get("flops_xmin"),
+            legend_column_stacks=legend_column_stacks,
         )

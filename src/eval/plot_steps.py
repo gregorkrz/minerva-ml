@@ -38,6 +38,12 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
+from src.eval._legend import (
+    DEFAULT_LEGEND_FS as _LEGEND_FS,
+    layout_legend_with_column_stacks as _layout_legend_with_column_stacks,
+    order_legend_handles_labels as _order_legend_handles_labels,
+    shared_figure_legend as _shared_figure_legend,
+)
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
@@ -64,7 +70,6 @@ from src.eval._steps_cache import build_steps_cache_from_pickles, save_steps_cac
 
 # Paper-style typography: axis labels 12; legend slightly smaller; ticks 11.
 _LABEL_FS = 12
-_LEGEND_FS = 10
 _TICK_FS = 11
 _TITLE_FS = 13
 
@@ -369,61 +374,6 @@ def _legend_labels_from_cfg(
     return cfg.legend_labels(tail)
 
 
-def _order_legend_handles_labels(
-    handles: list,
-    labels: list[str],
-    label_order: list[str] | None,
-) -> tuple[list, list[str]]:
-    if not label_order:
-        return handles, labels
-    by_label = dict(zip(labels, handles))
-    ordered_labels = [lab for lab in label_order if lab in by_label]
-    ordered_labels.extend(sorted(set(by_label) - set(ordered_labels)))
-    return [by_label[lab] for lab in ordered_labels], ordered_labels
-
-
-def _shared_figure_legend(
-    fig: plt.Figure,
-    axes: tuple[plt.Axes, ...],
-    *,
-    label_order: list[str] | None = None,
-) -> None:
-    """One legend for all *axes*, de-duplicated by model name."""
-    by_label: dict[str, plt.Artist] = {}
-    for ax in axes:
-        h, lab = ax.get_legend_handles_labels()
-        for hi, li in zip(h, lab):
-            by_label.setdefault(li, hi)
-    labels = sorted(by_label.keys())
-    handles = [by_label[k] for k in labels]
-    handles, labels = _order_legend_handles_labels(handles, labels, label_order)
-    if not handles:
-        return
-    n = len(labels)
-    ncol = max(3, min(6, (n + 2) // 3)) if n > 2 else n
-    ncol = min(n, ncol + 1)
-    legend_kw: dict = dict(
-        ncol=ncol,
-        fontsize=_LEGEND_FS,
-        frameon=True,
-        fancybox=True,
-        facecolor="white",
-        edgecolor="0.4",
-        columnspacing=1.0,
-        handletextpad=0.5,
-    )
-    try:
-        fig.legend(handles, labels, loc="outside lower center", **legend_kw)
-    except (TypeError, ValueError):
-        fig.legend(
-            handles,
-            labels,
-            loc="lower center",
-            bbox_to_anchor=(0.5, -0.18),
-            **legend_kw,
-        )
-
-
 def _plot_combined_flops_row(
     lh_c: dict,
     flops_c: dict,
@@ -437,6 +387,7 @@ def _plot_combined_flops_row(
     label_fn: Callable[[str], str] | None = None,
     flops_xmin: float | None = None,
     legend_label_order: list[str] | None = None,
+    legend_column_stacks: list[list[str]] | None = None,
 ) -> None:
     if not lh_c and not lh_r:
         print("Skip (no models):", out_pdf)
@@ -450,7 +401,12 @@ def _plot_combined_flops_row(
     ax1.set_ylabel("")
     for ax in (ax0, ax1):
         ax.grid(True)
-    _shared_figure_legend(fig, (ax0, ax1), label_order=legend_label_order)
+    _shared_figure_legend(
+        fig,
+        (ax0, ax1),
+        label_order=legend_label_order,
+        column_stack_labels=legend_column_stacks,
+    )
     out_pdf.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_pdf, bbox_inches="tight")
     plt.close(fig)
@@ -470,6 +426,7 @@ def _plot_combined_steps_row(
     out_pdf: Path,
     label_fn: Callable[[str], str] | None = None,
     legend_label_order: list[str] | None = None,
+    legend_column_stacks: list[list[str]] | None = None,
 ) -> None:
     if not lh_c and not lh_r:
         print("Skip (no models):", out_pdf)
@@ -488,7 +445,12 @@ def _plot_combined_steps_row(
     ax1.set_ylabel("")
     for ax in (ax0, ax1):
         ax.grid(True)
-    _shared_figure_legend(fig, (ax0, ax1), label_order=legend_label_order)
+    _shared_figure_legend(
+        fig,
+        (ax0, ax1),
+        label_order=legend_label_order,
+        column_stack_labels=legend_column_stacks,
+    )
     out_pdf.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_pdf, bbox_inches="tight")
     plt.close(fig)
@@ -512,6 +474,7 @@ def _plot_variant_bundle(
     flops_xmin: float | None = None,
     label_fn: Callable[[str], str] | None = None,
     legend_label_order: list[str] | None = None,
+    legend_column_stacks: list[list[str]] | None = None,
 ) -> None:
     lh_c_v, flops_c_v, colors_c_v = _subset_for_plot(
         lh_c, flops_c, colors_c, variant.model_filter, variant.colors_override
@@ -533,6 +496,7 @@ def _plot_variant_bundle(
         label_fn,
         flops_xmin=flops_xmin,
         legend_label_order=legend_label_order,
+        legend_column_stacks=legend_column_stacks,
     )
     _plot_combined_steps_row(
         lh_c_v, flops_c_v, colors_c_v, ylim_c, step_cutoff,
@@ -540,6 +504,7 @@ def _plot_variant_bundle(
         combined_out / "log_steps_vs_val_loss.pdf",
         label_fn,
         legend_label_order=legend_label_order,
+        legend_column_stacks=legend_column_stacks,
     )
 
     if lh_c_v:
@@ -739,6 +704,11 @@ def main(argv: list[str] | None = None) -> None:
         variant = StepsPlotVariant("", custom_filter, colors_override)
         label_fn = cfg.label_for
         legend_label_order = _legend_labels_from_cfg(cfg)
+        legend_column_stacks = (
+            [[cfg.label_for(n) for n in stack] for stack in cfg.legend_column_stacks]
+            if cfg.legend_column_stacks
+            else None
+        )
         _plot_variant_bundle(
             variant, lh_c, flops_c, colors_c, ylim_c,
             lh_r, flops_r, colors_r, ylim_r,
@@ -748,6 +718,7 @@ def main(argv: list[str] | None = None) -> None:
             flops_xmin=cfg.flops_xmin,
             label_fn=label_fn,
             legend_label_order=legend_label_order,
+            legend_column_stacks=legend_column_stacks,
         )
     else:
         for variant in STEPS_PLOT_VARIANTS:

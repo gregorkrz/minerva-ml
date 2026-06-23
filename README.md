@@ -249,13 +249,17 @@ After training, group the runs you want to compare in [Weights & Biases](https:/
 
 ### Test evaluation (`eval`)
 
-Generate the `python -m src.scripts.eval ...` commands for checkpoints that still need `test_results` (skipped if an `.npz` for that dataset already exists):
+Run or preview eval for checkpoints that still need `test_results` (skipped if an `.npz` for that dataset already exists). Activate your project Python environment first; child evals use the same interpreter (`sys.executable`).
 
 ```bash
-python -m src.scripts.print_eval_commands --wandb-flag <TAG>
+# Preview commands
+python -m src.scripts.evaluate_single_gpu --wandb-flag <TAG> --dry-run
+
+# Run evals sequentially on the current node (login or single-GPU session)
+python -m src.scripts.evaluate_single_gpu --wandb-flag <TAG>
 ```
 
-`--wandb-flag` only lists runs whose checkpoint folder name matches a wandb run name with that tag; omit it to consider every run under `--ckpt-dir` (default: see `--help`). Run each printed line locally. **Evaluation is very small and fast**—it is fine to run on **login nodes** without a GPU job.
+`--wandb-flag` only considers runs whose checkpoint folder name matches a wandb run name with that tag; omit it to evaluate every run under `--ckpt-dir` (default: see `--help`). **Evaluation is very small and fast**—it is fine to run on **login nodes** when a GPU is available locally.
 
 ### Evaluation plots (`src.eval`)
 
@@ -403,4 +407,85 @@ python -m src.scripts.make_event_displays \
   --output_dir <PATH_TO_OUTPUT_DIR> \
   --n_events 10
 ```
+
+## 7) Small per-bin demo datasets (event viewer + scoring)
+
+A lightweight demo pipeline that carves the ML-ready dataset into small
+per-kinematic-bin samples, renders an interactive HTML event viewer, and scores
+those samples with trained models. Useful for inspecting event displays
+alongside per-model output scores. All three steps below are quick and run on a
+single GPU (scoring) or CPU (extraction / viewer).
+
+### a) Generate the small dataset
+
+`src.scripts.extract_bin_demo_datasets` samples a few signal and background
+events per bin and saves each *(task, bin, signal|background)* as its own `.pb`
+dataset in the **same format** as the main dataset (`data`, `truth_labels`,
+`global_features`; see [DATASET.md](DATASET.md)). Bins match the classification
+plots:
+
+- **CCNπ± (N≥1)** binned in true hadronic *W* (`DEFAULT_W_BIN_EDGES_GEV`),
+- **CC1π±** and **CC1π⁰** binned in true pion energy (equal-frequency edges from
+  the true signal).
+
+Bins with no signal or no background are skipped.
+
+```bash
+python -m src.scripts.extract_bin_demo_datasets \
+  --output-dir /global/cfs/cdirs/m3246/gregork/Minerva/20260326_NEW_DEMO_ONLY
+```
+
+Defaults: `--data-dir /global/cfs/cdirs/m3246/gregork/Minerva/20260326_NEW`,
+`--playlist 1A`, `--split test`, `--n-events 10`, `--n-pion-bins 5`, `--seed 42`.
+Output layout: `<task>/<bin>/<signal|background>/0.pb` (+ a `meta.json` per
+dataset and a top-level `manifest.json`). Each `0.pb` loads directly with
+`HEPTorchDataset(folder=...)`.
+
+### b) Build the interactive event viewer
+
+`src.scripts.make_event_viewer` reads the demo datasets and writes a single
+self-contained HTML page (Plotly from CDN) with selectors for signal
+definition / bin / class and per-event 3D + η–φ displays.
+
+```bash
+python -m src.scripts.make_event_viewer \
+  --input-dir /global/cfs/cdirs/m3246/gregork/Minerva/20260326_NEW_DEMO_ONLY
+```
+
+Defaults: `--input-dir .../20260326_NEW_DEMO_ONLY`, `--output plots/event_viewer.html`.
+The output is a single fully self-contained HTML file (Plotly from CDN): open the
+local `plots/event_viewer.html` in a browser, or view the published copy:
+
+**▶ [Live event viewer](https://d1to0n5578l1po.cloudfront.net/event_viewer.html)**
+
+(`plots/` is gitignored and published to CloudFront via
+[`scripts/publish_plots.sh`](scripts/publish_plots.sh); run that to refresh the
+hosted page after regenerating.) If model scores are present (step **c**), the
+viewer also shows a toggleable per-event score table.
+
+### c) Evaluate models on the small dataset
+
+`src.scripts.eval_demo_datasets` loads **every checkpoint matching a wandb tag**
+and scores **every** demo dataset, writing per-model output scores. Run on a GPU
+session (e.g. `salloc … --gpus 1`) with W&B access (`WANDB_ENTITY` / `wandb login`).
+
+```bash
+python -m src.scripts.eval_demo_datasets \
+  --input-dir /global/cfs/cdirs/m3246/gregork/Minerva/20260326_NEW_DEMO_ONLY \
+  --flag <TAG> --use-amp
+```
+
+Defaults: `--ckpt-dir /global/cfs/cdirs/m3246/gregork/checkpoints`,
+`--batch-size 512`, auto device. Use `--runs <name ...>` to score explicit
+checkpoints instead of resolving from `--flag`.
+
+Outputs:
+
+- `<task>/<bin>/<class>/scores/<run>.npz` next to each `0.pb` — `prediction`
+  (per-class softmax probabilities for classifiers, or regressed energy for
+  regression checkpoints; interpret classifier columns via `class_idx`),
+  `logits`, and MC-truth `pid`. Event order matches `0.pb` / `meta.json`.
+- `<input-dir>/scores.json` — combined index with a `models` section (human-
+  readable model name, seed, mode, `num_classes`, `class_idx`) and
+  `scores[task/bin/class][run].prediction`.
 

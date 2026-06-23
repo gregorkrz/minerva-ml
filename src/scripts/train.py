@@ -598,6 +598,17 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--predict-baseline",
+        action="store_true",
+        default=False,
+        help=(
+            "With -npi2: train to predict cut-based baseline Pi_labels_v2 (reco topology "
+            "cuts from baselines/*.npz) instead of MC truth. Multiclass uses the same "
+            "5-class scheme; with --binary-classifier, baseline classes in --binary-signal "
+            "map to label 1. Eval still compares against MC truth."
+        ),
+    )
+    parser.add_argument(
         "--log_MSE_loss", "-log-mse", action="store_true", help="Use log MSE loss"
     )
     # Training arguments
@@ -630,9 +641,10 @@ def parse_args():
     )
     parser.add_argument(
         "--use_amp",
+        "--fp16",
         action="store_true",
         default=False,
-        help="Use automatic mixed precision",
+        help="Use automatic mixed precision (autocast; --fp16 is an alias)",
     )
     parser.add_argument(
         "--max_samples_per_epoch",
@@ -928,6 +940,7 @@ def create_task(args):
                 and args.classification_CC1orNPi
             ),
             binary_signal_pid_classes=binary_signal_pid,
+            predict_baseline=getattr(args, "predict_baseline", False),
         )
     else:
         raise ValueError("Invalid mode")
@@ -1929,6 +1942,11 @@ def train(args):
             raise ValueError("--binary-classifier requires --mode classifier")
         if not args.classification_CC1orNPi:
             raise ValueError("--binary-classifier requires -npi2 (--classification_CC1orNPi)")
+    if getattr(args, "predict_baseline", False):
+        if args.mode != "classifier":
+            raise ValueError("--predict-baseline requires --mode classifier")
+        if not args.classification_CC1orNPi:
+            raise ValueError("--predict-baseline requires -npi2 (--classification_CC1orNPi)")
     # Set seed
     if args.seed is not None:
         set_seed(args.seed)

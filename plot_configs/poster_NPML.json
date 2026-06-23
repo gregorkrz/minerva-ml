@@ -1,13 +1,19 @@
 {
-  "_comment": "NPML poster / paper subset: MLP + OL-small + Transformer-small baselines, plus HyperScale-small. Colors from CLRS_CLASSIFICATION; HyperScale uses sky blue dark/light pair.",
+  "_comment": "NPML poster / paper subset: MLP + OL-small baselines, plus HyperScale-small. Transformer-small temporarily disabled (see _disabled_models).",
   "models": [
-    {"name": "MLP",                  "color": "#2ca02c"},
     {"name": "OmniLearned-small",    "color": "#ff7f0e"},
     {"name": "OmniLearned-small-rw", "color": "#e377c2"},
-    {"name": "Transformer-small",    "color": "#17becf"},
     {"name": "HyperScale-small",     "color": "#0369a1"},
-    {"name": "HyperScale-small-rw",  "color": "#60a5fa"}
+    {"name": "HyperScale-small-rw",  "color": "#60a5fa"},
+    {"name": "MLP",                  "color": "#2ca02c", "display_name": "MLP-rw"}
+  ],
+  "_disabled_models": [
+    {"name": "Transformer-small",    "color": "#047857", "display_name": "Transformer-small-rw"}
   ],
   "step_cutoff": null,
-  "flops_xmin": 14.5
+  "flops_xmin": 14.5,
+  "legend_column_stacks": [
+    ["OmniLearned-small", "OmniLearned-small-rw"],
+    ["HyperScale-small", "HyperScale-small-rw"]
+  ]
 }

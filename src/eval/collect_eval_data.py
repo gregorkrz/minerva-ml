@@ -62,9 +62,21 @@ def _default_paths(out_dir: Path, flag: str) -> tuple[Path, Path]:
     )
 
 
+def _load_existing_loss_histories(pickle_path: Path | None) -> dict:
+    """Return ``loss_histories`` from an existing eval pickle, or {}."""
+    if pickle_path is None or not pickle_path.is_file():
+        return {}
+    with open(pickle_path, "rb") as f:
+        data = pickle.load(f)
+    return dict(data.get("loss_histories") or {})
+
+
 def collect_classification(
     ckpt_dir: Path,
     wandb_tag: str,
+    *,
+    skip_wandb: bool = False,
+    existing_pickle: Path | None = None,
 ) -> dict:
     from src.eval.classification_plots import (
         add_hadronic_W_to_classification_data,
@@ -94,11 +106,18 @@ def collect_classification(
     }
 
     runs_per_model = classification_runs_per_model(runs_by_model_cap, training_names)
-    loss_histories = collect_histories_for_runs(runs_per_model)
-    print(
-        "  Loss histories (classification, non-empty eval_loss):",
-        ", ".join(sorted(loss_histories.keys())) or "(none)",
-    )
+    if skip_wandb:
+        loss_histories = _load_existing_loss_histories(existing_pickle)
+        print(
+            "  Skipping wandb loss-history download (--skip-wandb); "
+            f"kept {len(loss_histories)} model(s) from existing pickle."
+        )
+    else:
+        loss_histories = collect_histories_for_runs(runs_per_model)
+        print(
+            "  Loss histories (classification, non-empty eval_loss):",
+            ", ".join(sorted(loss_histories.keys())) or "(none)",
+        )
 
     return {
         "schema_version": SCHEMA_VERSION_CLASSIFICATION,
@@ -117,7 +136,14 @@ def collect_classification(
     }
 
 
-def collect_regression(ckpt_dir: Path, wandb_tag: str, suppress_errors: bool) -> dict:
+def collect_regression(
+    ckpt_dir: Path,
+    wandb_tag: str,
+    suppress_errors: bool,
+    *,
+    skip_wandb: bool = False,
+    existing_pickle: Path | None = None,
+) -> dict:
     from src.eval.e_available_plots import load_eval_data, load_eval_data_grouped
     from src.utils.utils import get_runs_by_model_and_cap
 
@@ -158,11 +184,18 @@ def collect_regression(ckpt_dir: Path, wandb_tag: str, suppress_errors: bool) ->
                 training_names_full_first_only[loss][model] = runs
 
     runs_per_model = regression_runs_per_model(runs_by_model_cap, training_names_full)
-    loss_histories = collect_histories_for_runs(runs_per_model)
-    print(
-        "  Loss histories (regression, non-empty eval_loss):",
-        ", ".join(sorted(loss_histories.keys())) or "(none)",
-    )
+    if skip_wandb:
+        loss_histories = _load_existing_loss_histories(existing_pickle)
+        print(
+            "  Skipping wandb loss-history download (--skip-wandb); "
+            f"kept {len(loss_histories)} model(s) from existing pickle."
+        )
+    else:
+        loss_histories = collect_histories_for_runs(runs_per_model)
+        print(
+            "  Loss histories (regression, non-empty eval_loss):",
+            ", ".join(sorted(loss_histories.keys())) or "(none)",
+        )
 
     # Grouped layout for multi-seed models (matches plot_rms_iqr_with_uncertainty).
     grouped_no_rw: dict[str, dict[str, list[str]]] = {"Log1p": {}}
@@ -257,6 +290,12 @@ def main(argv: list[str] | None = None) -> None:
         action="store_true",
         help="Only collect classification eval data and write the classification pickle; skip regression.",
     )
+    p.add_argument(
+        "--skip-wandb",
+        action="store_true",
+        help="Do not download validation loss histories from wandb. Reuses "
+        "loss_histories from an existing pickle for this flag when present.",
+    )
     args = p.parse_args(argv)
 
     out_dir = _REPO_ROOT / (args.out_dir or DEFAULT_OUT_DIR)
@@ -266,7 +305,12 @@ def main(argv: list[str] | None = None) -> None:
 
     if not args.regression_only:
         print("Collecting classification…")
-        clf = collect_classification(args.ckpt_dir, args.flag)
+        clf = collect_classification(
+            args.ckpt_dir,
+            args.flag,
+            skip_wandb=args.skip_wandb,
+            existing_pickle=clf_path if args.skip_wandb else None,
+        )
         with open(clf_path, "wb") as f:
             pickle.dump(clf, f, protocol=pickle.HIGHEST_PROTOCOL)
         print("Wrote", clf_path)
@@ -275,7 +319,13 @@ def main(argv: list[str] | None = None) -> None:
 
     if not args.classification_only:
         print("Collecting regression…")
-        reg = collect_regression(args.ckpt_dir, args.flag, args.suppress_errors)
+        reg = collect_regression(
+            args.ckpt_dir,
+            args.flag,
+            args.suppress_errors,
+            skip_wandb=args.skip_wandb,
+            existing_pickle=reg_path if args.skip_wandb else None,
+        )
         with open(reg_path, "wb") as f:
             pickle.dump(reg, f, protocol=pickle.HIGHEST_PROTOCOL)
         print("Wrote", reg_path)

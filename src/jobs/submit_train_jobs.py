@@ -28,8 +28,12 @@ from datetime import datetime as dt
 # ---------------------------------------------------------------------------
 HYPERSCALE_PRETRAINED_PATHS = {
     "small": (
-        "/global/cfs/cdirs/m3246/jaluus/Hyperscale_V5/Pretrain_Scaling/"
+        "/global/cfs/cdirs/m3246/gregork/Minerva/HyperscaleV5/"
         "emb_6e17_d4_e448_bs512_lr5e-4_run3_normalized"
+    ),
+    "medium": (
+        "/global/cfs/cdirs/m3246/gregork/Minerva/HyperscaleV5/"
+        "emb_1.36e19_d5_e512_bs16384_lr5e-4_run1_normalized"
     ),
 }
 
@@ -128,11 +132,14 @@ def generate_cmd(
     binned_loss_var=None,
     binned_loss_signal=None,
     binary_classifier=False,
+    predict_baseline=False,
+    data_path="/global/cfs/cdirs/m3246/gregork/Minerva/20260326",
+    fp16=False,
 ):
     if continue_from:
         base = f"python -m src.scripts.train --resume {continue_from} -name {resume_run_name} --resume-run-id {resume_run_id} --max_steps 1000000"
         return base.format(continue_from=continue_from)
-    base = "python -m src.scripts.train -bs {bs} --mode {task} {detailed_task} -name {name} --d_model {model_dim} --depth {model_depth} --n_heads {model_n_heads} --dropout {model_dropout} --attn_dropout {model_attn_dropout} {cap} --seed {seed} -seed-event-sampler {seed}  --max_steps {max_steps} --grad_accum_steps {grad_accum_steps} {extra} --data_path /global/cfs/cdirs/m3246/gregork/Minerva/20260326 "
+    base = "python -m src.scripts.train -bs {bs} --mode {task} {detailed_task} -name {name} --d_model {model_dim} --depth {model_depth} --n_heads {model_n_heads} --dropout {model_dropout} --attn_dropout {model_attn_dropout} {cap} --seed {seed} -seed-event-sampler {seed}  --max_steps {max_steps} --grad_accum_steps {grad_accum_steps} {fp16} {extra} --data_path {data_path} "
     # Model options: ... "OLS", "OLS_int", "OLS_RW", "OLM"/"OLM_FB",
     # "BERT-tiny", "BERT-tiny-rw" (BERT tiny arch, random encoder weights),
     # "HyperScale-small[-rw]-{basic|embedding|pool}" (HyperScale ParticleViT;
@@ -242,6 +249,11 @@ def generate_cmd(
         raise ValueError(
             "Both binned_loss_var and binned_loss_signal must be set together."
         )
+    if predict_baseline:
+        if task != "classifier":
+            raise ValueError("predict_baseline requires task='classifier'.")
+        extra += " --predict-baseline "
+        name += "_predictBaseline"
     return base.format(
         bs=bs,
         task=task,
@@ -258,6 +270,8 @@ def generate_cmd(
         model_dropout=model_dropout,
         model_attn_dropout=model_attn_dropout,
         model_n_layers=model_n_layers,
+        fp16=" --fp16 " if fp16 else "",
+        data_path=data_path,
     )
 
 
