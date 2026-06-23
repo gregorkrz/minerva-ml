@@ -453,7 +453,15 @@ python -m src.scripts.make_event_viewer \
 ```
 
 Defaults: `--input-dir .../20260326_NEW_DEMO_ONLY`, `--output plots/event_viewer.html`.
-Open the resulting `plots/event_viewer.html` in a browser.
+The output is a single fully self-contained HTML file (Plotly from CDN): open the
+local `plots/event_viewer.html` in a browser, or view the published copy:
+
+**▶ [Live event viewer](https://d1to0n5578l1po.cloudfront.net/event_viewer.html)**
+
+(`plots/` is gitignored and published to CloudFront via
+[`scripts/publish_plots.sh`](scripts/publish_plots.sh); run that to refresh the
+hosted page after regenerating.) If model scores are present (step **c**), the
+viewer also shows a toggleable per-event score table.
 
 ### c) Evaluate models on the small dataset
 
