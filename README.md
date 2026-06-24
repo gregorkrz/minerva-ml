@@ -489,3 +489,25 @@ Outputs:
   readable model name, seed, mode, `num_classes`, `class_idx`) and
   `scores[task/bin/class][run].prediction`.
 
+## Citation
+
+If you use this code or dataset, please cite:
+
+```bibtex
+@misc{krzmanc2026,
+      title={Cross-Domain Transfer with Particle Physics Foundation Models: From Jets to Neutrino Interactions},
+      author={Gregor Krzmanc and Vinicius Mikuni and Benjamin Nachman and Callum Wilkinson},
+      year={2026},
+      eprint={2604.12364},
+      archivePrefix={arXiv},
+      primaryClass={hep-ex},
+      url={https://arxiv.org/abs/2604.12364},
+}
+```
+
+See also [CITATION.bib](CITATION.bib).
+
+## License
+
+This project is licensed under the MIT License — see [LICENSE](LICENSE).
+
