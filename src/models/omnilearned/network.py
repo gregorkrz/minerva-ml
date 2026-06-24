@@ -12,6 +12,7 @@ from .layers import (
     DynamicTanh,
     InputBlock,
     TokenAttBlock,
+    mask_outer,
 )
 from .diffusion import MPFourier, perturb, get_logsnr_alpha_sigma
 
@@ -606,7 +607,7 @@ class PET_body(nn.Module):
         # Create a new mask based on the updated point cloud with additional tokens
         mask = x[:, :, 2:3] != 0
 
-        attn_mask = mask.float() @ mask.float().transpose(-1, -2)
+        attn_mask = mask_outer(mask)
         attn_mask = ~(attn_mask.bool()).repeat_interleave(self.num_heads, dim=0)
         attn_mask = attn_mask.float() * -1e9
 

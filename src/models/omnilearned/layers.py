@@ -3,6 +3,16 @@ import torch.nn as nn
 import einops
 
 
+def mask_outer(m: torch.Tensor) -> torch.Tensor:
+    """Pairwise mask product ``(B, N, N)`` from ``(B, N, C)`` without batched matmul.
+
+    For ``C == 1`` this matches ``m.float() @ m.float().transpose(-1, -2)`` but
+    avoids ``cublasSgemmStridedBatched`` failures on some CUDA stacks.
+    """
+    mf = m.float()
+    return mf * mf.transpose(-1, -2)
+
+
 class LayerScale(nn.Module):
     def __init__(self, projection_dim, init_values=1e-3, channels_last=True):
         super().__init__()
@@ -196,7 +206,7 @@ class InteractionBlock(nn.Module):
         B, M, C = x.shape
         xi = x.unsqueeze(2).expand(-1, -1, x.shape[1], -1)
         xj = x.unsqueeze(1).expand(-1, x.shape[1], -1, -1)
-        mask_event = (mask.float() @ mask.float().transpose(-1, -2)).unsqueeze(-1)
+        mask_event = mask_outer(mask).unsqueeze(-1)
 
         if self.int_type == "lhc":
             x_int = torch.cat(
@@ -281,19 +291,10 @@ class LocalEmbeddingBlock(nn.Module):
         )
 
     def pairwise_distance(self, points):
-        return torch.cdist(points, points, p=2).pow(2)
-        r = torch.sum(points * points, dim=2, keepdim=True)
-        print("Points shape", points.shape)
-        print("Points dtype", points.dtype)
-        print("Points device", points.device)
-        print("Points requires_grad", points.requires_grad)
-        print("Points grad", points.grad)
-        print("Points grad_fn", points.grad_fn)
-        print("Points grad_fn", points.grad_fn)
-        print("Points min max", points.min(), points.max())
-        m = torch.bmm(points, points.transpose(1, 2))
-        D = r - 2 * m + r.transpose(1, 2)
-        return D
+        # Avoid torch.cdist / batched bmm: strided-batched cuBLAS can fail
+        # (CUBLAS_STATUS_INVALID_VALUE) on shared login GPUs / MPS setups.
+        diff = points.unsqueeze(2) - points.unsqueeze(1)
+        return (diff * diff).sum(dim=-1)
 
     def forward(self, points, features, mask, indices=None):
         batch_size, num_points, num_dims = features.shape
@@ -356,7 +357,7 @@ class LocalEmbeddingBlock(nn.Module):
         mask_neighbors = mask_neighbors.view(batch_size * num_points, self.K, 1)
         local_features = local_features.view(batch_size * num_points, self.K, -1)
 
-        attn_mask = mask_neighbors.float() @ mask_neighbors.float().transpose(-1, -2)
+        attn_mask = mask_outer(mask_neighbors)
         attn_mask = ~(attn_mask.bool()).repeat_interleave(self.num_heads, dim=0)
         attn_mask = attn_mask.float() * -1e9
 
