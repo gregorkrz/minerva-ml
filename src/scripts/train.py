@@ -35,6 +35,9 @@ python -m src.scripts.train -bs 10 --mode regression -E-available-no-muon -name 
 ## BERT with particles sorted by descending log(E) before the encoder:
 python -m src.scripts.train -bs 10 --mode regression -E-available-no-muon -name DEBUG --max_steps 250000 --use-bert tiny --bert-energy-order [-cap {data_cap} -seed-event-sampler {seed} --seed {seed}]
 
+## BERT learned PID embedding is ON by default; disable it with --no-bert-pid-embed:
+python -m src.scripts.train -bs 10 --mode regression -E-available-no-muon -name DEBUG --max_steps 250000 --use-bert tiny --no-bert-pid-embed [-cap {data_cap} -seed-event-sampler {seed} --seed {seed}]
+
 ## HyperScale ParticleViT (basic / embedding / pool variant; same particle features as OmniLearned):
 python -m src.scripts.train -bs 10 --mode regression -E-available-no-muon -name DEBUG --d_model 256 --depth 3 --n_heads 8 --max_steps 250000 --use-hyperscale basic [-cap {data_cap} -seed-event-sampler {seed} --seed {seed}]
 
@@ -227,6 +230,7 @@ class BertBaseline(nn.Module):
         use_cls_token: bool = False,
         bert_random_init: bool = False,
         global_cont_dim: int = 0,
+        pid_dim: int = 0,
     ):
         super().__init__()
         self.use_cls_token = use_cls_token
@@ -238,14 +242,24 @@ class BertBaseline(nn.Module):
         self.global_proj = (
             nn.Linear(global_cont_dim, hidden) if global_cont_dim > 0 else None
         )
+        # Learned PID lookup table, added to the projected per-particle embedding.
+        # pid_dim == 0 disables it (e.g. checkpoints trained before PID embedding).
+        self.pid_embed = nn.Embedding(pid_dim, hidden) if pid_dim > 0 else None
         self.head = nn.Linear(hidden, output_dim)
         if use_cls_token:
             self.cls_token = nn.Parameter(torch.randn(1, 1, hidden) * 0.02)
 
-    def forward(self, x, mask, global_cont=None):
+    def forward(self, x, mask, global_cont=None, pid=None):
         # x: [B, N, input_dim], mask: [B, N] (1 = valid, 0 = pad)
         # global_cont: [B, global_cont_dim] -> projected and prepended as token 0 when enabled
+        # pid: [B, N] integer particle IDs -> embedded and added per particle when enabled
         x = self.proj(x)
+        if self.pid_embed is not None:
+            if pid is None:
+                raise ValueError("BERT PID embedding enabled but pid is missing")
+            # Zero out padded slots so they contribute nothing before pooling.
+            pid_emb = self.pid_embed(pid.long()).to(device=x.device, dtype=x.dtype)
+            x = x + pid_emb * mask.unsqueeze(-1).to(dtype=x.dtype)
         if self.global_proj is not None:
             if global_cont is None:
                 raise ValueError("BERT global token enabled but global_cont is missing")
@@ -759,6 +773,14 @@ def parse_args():
         help="With --use-bert: sort each event's particles by descending log(E) before the encoder "
         "(stable sort; padding stays at the end).",
     )
+    parser.add_argument(
+        "--bert-pid-embed",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="With --use-bert (and --use_pid): add a learned PID lookup embedding (nn.Embedding of "
+        "size --ol-pid-dim) to each particle's projected features instead of discarding PID. "
+        "On by default; disable with --no-bert-pid-embed.",
+    )
     # HyperScale ParticleViT arguments
     parser.add_argument(
         "--use-hyperscale",
@@ -1082,10 +1104,18 @@ def create_bert_model(args, task):
     ri = bool(getattr(args, "bert_random_init", False)) or args.use_bert == "tiny-rw"
     e_sum_dim = 6 if args.include_E_sum else 0
     global_cont_dim = (GLOBAL_COND_BASE_DIM if args.use_cond else 0) + e_sum_dim
+    # Enable the learned PID lookup table only when PID is in use and requested.
+    pid_dim = (
+        args.ol_pid_dim
+        if (args.use_pid and getattr(args, "bert_pid_embed", False))
+        else 0
+    )
     if ri:
         print(
             "BERT encoder: random weight init (config from preset id, no HF checkpoint weights)."
         )
+    if pid_dim > 0:
+        print(f"BERT: learned PID embedding enabled (pid_dim={pid_dim}).")
     return BertBaseline(
         input_dim=_bert_input_dim(args),
         output_dim=num_classes,
@@ -1093,6 +1123,7 @@ def create_bert_model(args, task):
         use_cls_token=bool(getattr(args, "use_cls_token", False)),
         bert_random_init=ri,
         global_cont_dim=global_cont_dim,
+        pid_dim=pid_dim,
     )
 
 
@@ -1205,11 +1236,20 @@ def prepare_batch_bert(
     X = batch["X"].to(device, dtype=torch.float32)
     y = batch["y"].to(device)
     mask = batch["attention_mask"].to(device, dtype=torch.float32)
-    if use_pid and batch.get("pid") is not None:
-        X = torch.cat([X[:, :, :pid_idx], X[:, :, pid_idx + 1 :]], dim=2)
 
+    # Sort before splitting out PID so the returned pid stays aligned with X.
+    # log(E) lives at index BERT_ENERGY_FEATURE_IDX (3), which is before pid_idx (4),
+    # so sorting on the full tensor is equivalent to sorting the PID-stripped one.
     if energy_order:
         X, mask = sort_particles_by_energy(X, mask)
+
+    pid = None
+    if use_pid:
+        # Pull the categorical PID column out (the BERT PID embedding consumes it
+        # when enabled) and drop it from the continuous features fed to the encoder.
+        # Self-contained: does not depend on batch["pid"] being present.
+        pid = X[:, :, pid_idx].long()
+        X = torch.cat([X[:, :, :pid_idx], X[:, :, pid_idx + 1 :]], dim=2)
 
     global_cont = None
     if use_cond and batch.get("cond") is not None:
@@ -1231,7 +1271,13 @@ def prepare_batch_bert(
         for idx in zero_cond_feature:
             global_cont[:, idx] = 0.0
 
-    return {"X": X, "y": y, "attention_mask": mask, "global_cont": global_cont}
+    return {
+        "X": X,
+        "y": y,
+        "attention_mask": mask,
+        "global_cont": global_cont,
+        "pid": pid,
+    }
 
 
 def prepare_batch_omnilearned(
@@ -1516,7 +1562,10 @@ def forward_model(model, inputs, args):
     """Run forward pass for ViT, PET2, BertBaseline, or HyperScaleBaseline; returns logits."""
     if getattr(args, "use_bert", None):
         return model(
-            inputs["X"], inputs["attention_mask"], global_cont=inputs.get("global_cont")
+            inputs["X"],
+            inputs["attention_mask"],
+            global_cont=inputs.get("global_cont"),
+            pid=inputs.get("pid"),
         )
     if getattr(args, "use_hyperscale", None):
         return model(
@@ -1937,6 +1986,8 @@ def train(args):
         raise ValueError("--bert-random-init requires --use-bert")
     elif getattr(args, "bert_energy_order", False):
         raise ValueError("--bert-energy-order requires --use-bert")
+    # Note: --bert-pid-embed is on by default and only consumed by create_bert_model,
+    # so it is intentionally not validated against --use-bert (it's a no-op otherwise).
     if getattr(args, "binary_classifier", False):
         if args.mode != "classifier":
             raise ValueError("--binary-classifier requires --mode classifier")

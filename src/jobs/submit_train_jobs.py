@@ -169,6 +169,7 @@ def generate_cmd(
         extra = " --use-omnilearned medium --use-pretrained pretrain_m --zero-cond-feature 2 "
     elif model == "BERT-tiny":
         name = f"Run_1703_BERT_tiny_{task}_{data_cap}_seed{seed}"
+        # PID embedding is on by default (--bert-pid-embed); use --no-bert-pid-embed to disable.
         extra = " --use-bert tiny --zero-cond-feature 2 "
     elif model == "BERT-tiny-rw":
         name = f"Run_1703_BERT_tiny_rw_{task}_{data_cap}_seed{seed}"

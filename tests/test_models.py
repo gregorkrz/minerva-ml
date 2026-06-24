@@ -685,3 +685,64 @@ class TestSortParticlesByEnergy:
         )
         assert out["X"].shape == (1, 3, 4)
         assert out["X"][0, :, 3].tolist() == [3.0, 2.0, 1.0]
+
+
+class TestBertPidEmbedding:
+    def test_prepare_batch_bert_returns_pid_aligned_with_energy_order(self):
+        from src.scripts.train import prepare_batch_bert
+
+        batch = {
+            "X": torch.tensor(
+                [
+                    [
+                        [0.0, 0.0, 0.0, 1.0, 5.0],
+                        [0.0, 0.0, 0.0, 3.0, 6.0],
+                        [0.0, 0.0, 0.0, 2.0, 7.0],
+                    ]
+                ],
+                dtype=torch.float32,
+            ),
+            "y": torch.tensor([0.0], dtype=torch.float32),
+            "attention_mask": torch.tensor([[1.0, 1.0, 1.0]], dtype=torch.float32),
+        }
+        out = prepare_batch_bert(
+            batch, torch.device("cpu"), use_pid=True, pid_idx=4, energy_order=True
+        )
+        # PID column is stripped from X but returned separately, sorted with energy.
+        assert out["X"].shape == (1, 3, 4)
+        assert out["X"][0, :, 3].tolist() == [3.0, 2.0, 1.0]
+        assert out["pid"].dtype == torch.long
+        assert out["pid"][0].tolist() == [6, 7, 5]
+
+    def test_forward_with_pid_embedding(self):
+        from src.scripts.train import BertBaseline
+
+        model = BertBaseline(
+            input_dim=4,
+            output_dim=1,
+            pretrained_model_name_or_path="prajjwal1/bert-tiny",
+            use_cls_token=False,
+            bert_random_init=True,
+            pid_dim=8,
+        )
+        model.eval()
+        pid = torch.randint(0, 8, (B, N))
+        with torch.no_grad():
+            out = model(torch.randn(B, N, 4), torch.ones(B, N), pid=pid)
+        assert out.shape == (B, 1)
+
+    def test_forward_requires_pid_when_embedding_enabled(self):
+        from src.scripts.train import BertBaseline
+
+        model = BertBaseline(
+            input_dim=4,
+            output_dim=1,
+            pretrained_model_name_or_path="prajjwal1/bert-tiny",
+            use_cls_token=False,
+            bert_random_init=True,
+            pid_dim=8,
+        )
+        model.eval()
+        with pytest.raises(ValueError, match="pid is missing"):
+            with torch.no_grad():
+                _ = model(torch.randn(B, N, 4), torch.ones(B, N))
