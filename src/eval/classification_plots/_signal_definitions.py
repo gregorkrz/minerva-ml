@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 # Pi_labels_v2 pid classes (-npi2 / get_Pi_labels_v2):
-#   0 = CC with exactly one charged pion
+#   0 = CC with exactly one charged pion (pi+ or pi-)
 #   1 = CC with more than one charged pion (CC-Npi)
 #   2 = CC with one pi0 and no charged pions
 #   3 = CC other (CC-Other)

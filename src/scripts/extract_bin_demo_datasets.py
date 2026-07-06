@@ -75,22 +75,11 @@ CC1PI0_CLASSES = [2]
 
 
 def get_pi_labels_v2(truth_labels: np.ndarray) -> np.ndarray:
-    """Pi_labels_v2 per event (mirrors ``dataloader.get_Pi_labels_v2``).
+    """Pi_labels_v2 per event (delegates to ``dataloader.get_Pi_labels_v2``)."""
+    from src.dataset.dataloader import get_Pi_labels_v2
 
-    0 = CC 1 charged pion, 1 = CC >1 charged pion, 2 = CC 1 pi0 / no charged,
-    3 = CC other, 4 = NC.
-    """
     tl = np.asarray(truth_labels)
-    is_cc = tl[:, 3] == 1
-    n_pi_plus = tl[:, 5]
-    n_pi_minus = tl[:, 6]
-    n_pi_zero = tl[:, 10]
-    labels = np.full(len(tl), 4, dtype=np.int64)
-    labels[is_cc & (n_pi_plus == 1) & (n_pi_minus == 0)] = 0
-    labels[is_cc & ((n_pi_plus + n_pi_minus) > 1)] = 1
-    labels[is_cc & ((n_pi_plus + n_pi_minus) == 0)] = 3
-    labels[is_cc & (n_pi_zero == 1) & (n_pi_plus == 0) & (n_pi_minus == 0)] = 2
-    return labels
+    return get_Pi_labels_v2(torch.from_numpy(tl)).numpy()
 
 
 def value_in_bin(x: np.ndarray, edges: np.ndarray, bin_index: int) -> np.ndarray:

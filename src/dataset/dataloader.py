@@ -231,8 +231,8 @@ def get_CC1orNPi_labels(file_truth_labels):
 
 
 def get_Pi_labels_v2(file_truth_labels):
-    # label0 = CC, 1 charged pion, the rest whatever
-    # label1 = CC, N >1charged pion, the rest whatever
+    # label0 = CC, exactly 1 charged pion (pi+ or pi-)
+    # label1 = CC, N >1 charged pion, the rest whatever
     # label2 = CC, 1 pi0, no charged pions
     # label3 = CC, all others
     # label4 = NC
@@ -240,12 +240,13 @@ def get_Pi_labels_v2(file_truth_labels):
     n_pi_plus = file_truth_labels[:, 5]
     n_pi_minus = file_truth_labels[:, 6]
     n_pi_zero = file_truth_labels[:, 10]
+    n_charged = n_pi_plus + n_pi_minus
     labels = (
         torch.ones(len(file_truth_labels), dtype=torch.long) * 4
     )  # 4 is the label for other
-    labels[is_cc & (n_pi_plus == 1) & (n_pi_minus == 0)] = 0
-    labels[is_cc & ((n_pi_plus + n_pi_minus) > 1)] = 1
-    labels[is_cc & ((n_pi_plus + n_pi_minus) == 0)] = 3
+    labels[is_cc & (n_charged == 1)] = 0
+    labels[is_cc & (n_charged > 1)] = 1
+    labels[is_cc & (n_charged == 0)] = 3
     labels[is_cc & (n_pi_zero == 1) & (n_pi_plus == 0) & (n_pi_minus == 0)] = 2
     return labels
 
