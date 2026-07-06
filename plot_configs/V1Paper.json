@@ -1,8 +1,8 @@
 {
   "_comment": "V1 paper models: OmniLearned baselines, no BERT/HyperScale. Transformer-xsmall/small temporarily disabled (see _disabled_models).",
   "models": [
-    {"name": "OmniLearned-small",    "color": "#ff7f0e"},
-    {"name": "OmniLearned-small-rw", "color": "#e377c2"},
+    {"name": "OmniLearned-small",    "color": "#c2410c"},
+    {"name": "OmniLearned-small-rw", "color": "#ff7f0e"},
     {"name": "OmniLearned-medium",   "color": "#9467bd", "display_name": "OL-medium-frozen"}
   ],
   "_disabled_models": [

@@ -1,8 +1,8 @@
 {
   "_comment": "Scaling comparison: poster_NPML_with_xsmall plus OmniLearned-medium-frozen and HyperScale-medium; no MLP. Transformer-xsmall/small temporarily disabled (see _disabled_models).",
   "models": [
-    {"name": "OmniLearned-small",    "color": "#ff7f0e"},
-    {"name": "OmniLearned-small-rw", "color": "#e377c2"},
+    {"name": "OmniLearned-small",    "color": "#c2410c"},
+    {"name": "OmniLearned-small-rw", "color": "#ff7f0e"},
     {"name": "OmniLearned-medium",   "color": "#9467bd", "display_name": "OmniLearned-medium-frozen"},
     {"name": "HyperScale-small",     "color": "#0369a1"},
     {"name": "HyperScale-small-rw",  "color": "#60a5fa"},
