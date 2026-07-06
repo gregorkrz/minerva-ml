@@ -38,17 +38,63 @@ from src.eval._classification_light import (
     _save_single_fig,
     _small_paper_tpr_row_from_spec,
 )
-from src.eval._constants import DEFAULT_CACHE_DIR, repo_output_path
+from src.eval._constants import (
+    CANONICAL_CLASSIFICATION_PICKLE,
+    DEFAULT_CACHE_DIR,
+    DEFAULT_CFS_CACHE_DIR,
+    repo_output_path,
+)
 from src.eval._plot_config import PlotConfig
+from src.eval._plot_split_results import (
+    load_overlay_results,
+    merge_overlay_light_metrics,
+    overlay_model_names,
+)
 from src.eval.e_available_plots import (
     SMALL_PAPER_COMPACT_IQR_MPV_FIGSIZE_INCHES,
     plot_rms_iqr_with_uncertainty,
 )
-from src.eval.plot_steps import write_classification_val_loss_log_flops_steps_pdf
+from src.eval.plot_steps import (
+    _config_horizontal_ref_names,
+    write_classification_val_loss_log_flops_steps_pdf,
+)
 
 _REG_CACHE_NAME = "regression.pkl"
 _STEPS_CACHE_NAME = "steps.pkl"
 _LIGHT_CACHE_NAME = "classification_light.pkl"
+
+
+_SMALL_PAPER_SIGNAL_CLASSES: dict[str, list[int]] = {
+    r"$CC1\pi^\pm$": [0],
+    r"$CC1\pi^0$": [2],
+    r"$CCN\pi^\pm$ ($N \geq 1$)": [0, 1],
+}
+
+
+def _resolve_classification_pickle(explicit: Path | None, cache_root: Path) -> Path | None:
+    if explicit is not None:
+        return explicit
+    candidates = [
+        DEFAULT_CFS_CACHE_DIR / CANONICAL_CLASSIFICATION_PICKLE,
+        cache_root / CANONICAL_CLASSIFICATION_PICKLE,
+    ]
+    for p in candidates:
+        if p.is_file():
+            return p
+    return None
+
+
+def _load_overlay_context(
+    clf_pickle: Path | None,
+    cfg: PlotConfig,
+    playlist: str = "1A",
+) -> tuple[dict, dict, dict]:
+    if clf_pickle is None or not overlay_model_names(cfg):
+        return {}, {}, {}
+    print(f"Loading split overlays for small_paper from {clf_pickle} …")
+    with open(clf_pickle, "rb") as f:
+        clf = pickle.load(f)
+    return load_overlay_results(clf, cfg, playlists=[playlist])
 
 
 def _apply_cfg_regression(reg: dict, cfg: PlotConfig) -> tuple[dict, dict, dict]:
@@ -107,8 +153,15 @@ def _save_classification_tpr_baseline(
     cfg: PlotConfig,
     clrs: dict[str, str],
     out_pdf: Path,
+    overlay_results: dict | None = None,
+    data_by_split: dict | None = None,
+    data_w_by_split: dict | None = None,
+    playlist: str = "1A",
 ) -> None:
     """CC1π± | CC1π⁰ | CCNπ TPR columns; shared model legend, Baseline per panel."""
+    overlay_results = overlay_results or {}
+    data_by_split = data_by_split or {}
+    data_w_by_split = data_w_by_split or {}
     by_name = _light_specs_by_filename(light_specs)
     task_rows: list[tuple[str, dict]] = []
     for task_label, panel, filename in _SMALL_PAPER_TPR_TASKS:
@@ -118,6 +171,19 @@ def _save_classification_tpr_baseline(
             continue
         row = _small_paper_tpr_row_from_spec(spec, panel)
         row["all_metrics"] = cfg.filter_dict_ordered(row["all_metrics"])
+        if overlay_results:
+            sig_classes = _SMALL_PAPER_SIGNAL_CLASSES[task_label]
+            row["all_metrics"] = merge_overlay_light_metrics(
+                row["all_metrics"],
+                panel,
+                sig_classes,
+                row["fixed_fpr"],
+                overlay_results,
+                data_by_split,
+                data_w_by_split,
+                cfg,
+                playlist=playlist,
+            )
         if not row["all_metrics"]:
             print(f"Skip classification TPR row (no models in config): {task_label}")
             continue
@@ -142,17 +208,32 @@ def _save_classification_val_loss_curves(
     cfg: PlotConfig,
     out_pdf: Path,
 ) -> None:
-    lh, flops, clrs = _apply_cfg_steps(steps, cfg)
+    legend_label_order = [
+        cfg.label_for(n)
+        for n in cfg.ordered_model_names(
+            ("BDT", "Transformer-xsmall", "Transformer-small", "MLP")
+        )
+    ]
+    legend_column_stacks = (
+        [[cfg.label_for(n) for n in stack] for stack in cfg.legend_column_stacks]
+        if cfg.legend_column_stacks
+        else None
+    )
     write_classification_val_loss_log_flops_steps_pdf(
-        lh,
-        flops,
-        clrs,
-        (1.075, 1.25),
+        steps["lh_c"],
+        steps["flops_c"],
+        {**steps["colors_c"], **cfg.colors()},
+        None,
         out_pdf,
         model_names=set(cfg.model_names()),
         label_fn=cfg.label_for,
         step_cutoff=cfg.step_cutoff,
         flops_xmin=cfg.flops_xmin,
+        model_curve_cuts=cfg.model_curve_cuts("classification"),
+        legend_label_order=legend_label_order,
+        legend_column_stacks=legend_column_stacks,
+        config_horizontal_refs=_config_horizontal_ref_names(cfg, "classification"),
+        horizontal_ref_models=_config_horizontal_ref_names(cfg, "classification"),
     )
 
 
@@ -193,6 +274,13 @@ def main(argv: list[str] | None = None) -> None:
         help=f"Classification light draw-spec cache (default: …/tmp_results/{_LIGHT_CACHE_NAME})",
     )
     ap.add_argument(
+        "--classification-pickle",
+        type=Path,
+        default=None,
+        metavar="PKL",
+        help="Classification pickle for split overlays (e.g. train-set sanity checks).",
+    )
+    ap.add_argument(
         "--skip-classification",
         action="store_true",
         help="Skip classification small-paper figures.",
@@ -217,13 +305,16 @@ def main(argv: list[str] | None = None) -> None:
     print(f"=== small_paper ({cfg.model_names()}) -> {small_dir} ===")
 
     if not args.skip_regression:
-        with open(reg_cache, "rb") as f:
-            reg = pickle.load(f)
-        _save_regression_q3_compact(
-            reg=reg,
-            cfg=cfg,
-            out_pdf=small_dir / "regression_q3_iqr_mpv_1A_compact.pdf",
-        )
+        if reg_cache.is_file():
+            with open(reg_cache, "rb") as f:
+                reg = pickle.load(f)
+            _save_regression_q3_compact(
+                reg=reg,
+                cfg=cfg,
+                out_pdf=small_dir / "regression_q3_iqr_mpv_1A_compact.pdf",
+            )
+        else:
+            print(f"Skip regression small-paper figures (cache missing): {reg_cache}")
     else:
         print("Skip regression small-paper figures (--skip-regression).")
 
@@ -242,11 +333,20 @@ def main(argv: list[str] | None = None) -> None:
         if light_cache.is_file():
             with open(light_cache, "rb") as f:
                 light_cached = pickle.load(f)
+            clf_pkl = _resolve_classification_pickle(
+                args.classification_pickle, cache_root
+            )
+            overlay_results, data_by_split, data_w_by_split = _load_overlay_context(
+                clf_pkl, cfg, playlist="1A"
+            )
             _save_classification_tpr_baseline(
                 light_specs=light_cached["specs"],
                 cfg=cfg,
                 clrs=light_cached["clrs"],
                 out_pdf=small_dir / "classification_tpr_at_fixed_fpr_baseline_1A.pdf",
+                overlay_results=overlay_results,
+                data_by_split=data_by_split,
+                data_w_by_split=data_w_by_split,
             )
         else:
             print(f"Skip classification TPR (light cache missing): {light_cache}")

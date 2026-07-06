@@ -15,6 +15,7 @@ from pathlib import Path
 from datetime import datetime
 import torch
 import torch.nn as nn
+from torch.utils.data import Subset
 import wandb
 from tqdm import tqdm
 import numpy as np
@@ -33,6 +34,8 @@ from src.scripts.train import (
     create_hyperscale_model,
     forward_model,
     CondOnlyMLP,
+    make_log_loss,
+    _bdt_eval_batch,
 )
 from src.constants.dataset import GLOBAL_COND_BASE_DIM
 from types import SimpleNamespace
@@ -65,6 +68,20 @@ def create_model_from_checkpoint(checkpoint_path, device):
         num_classes = 1
     else:
         raise ValueError("Invalid task type")
+
+    # BDT (sklearn HistGradientBoosting) is not a torch module; load the pickled
+    # estimator saved alongside the checkpoint and return it directly.
+    if args_dict.get("use_bdt", False):
+        import joblib
+
+        bdt_path = os.path.join(os.path.dirname(checkpoint_path), "bdt_model.joblib")
+        if not os.path.exists(bdt_path):
+            raise FileNotFoundError(f"BDT model file not found: {bdt_path}")
+        print(f"Loading BDT model from {bdt_path}...")
+        model = joblib.load(bdt_path)
+        kind = "regressor" if args_dict.get("mode") == "regression" else "classifier"
+        print(f"BDT loaded ({kind}, {type(model).__name__})")
+        return model, args_dict, task
 
     # Reconstruct model
     ol_size = args_dict.get("use_omnilearned", None)
@@ -165,6 +182,48 @@ def make_log1p_loss(criterion):
         return criterion(pred, target).mean()
 
     return loss
+
+
+@torch.no_grad()
+def evaluate_bdt(model, dataloader, device, args_dict, task):
+    """Evaluate a HistGradientBoosting model on cond features.
+
+    Classifiers: ``predict_proba`` → log-probabilities for the classification pipeline.
+    Regressors: ``predict`` → scalar targets for the regression pipeline.
+
+    Validation loss uses the same batched aggregation as :func:`src.scripts.train.evaluate`.
+    """
+    args = SimpleNamespace(**args_dict)
+    use_binned_loss = bool(
+        args_dict.get("binned_loss_var") or args_dict.get("binned_loss_signal")
+    )
+
+    total_loss = 0.0
+    total_samples = 0
+    preds_parts, target_parts, cond_parts, pid_parts = [], [], [], []
+
+    for batch in tqdm(dataloader, desc="Evaluating (BDT)", leave=True):
+        loss, n, extras = _bdt_eval_batch(
+            model, batch, args, task, use_binned_loss=use_binned_loss,
+        )
+        total_loss += loss * n
+        total_samples += n
+        preds_parts.append(extras["predictions"])
+        target_parts.append(extras["targets"])
+        cond_parts.append(extras["cond"])
+        if batch.get("pid_label") is not None:
+            pid_parts.append(batch["pid_label"].numpy())
+
+    avg_loss = total_loss / total_samples if total_samples else float("nan")
+    results = {
+        "metrics": {"loss": float(avg_loss)},
+        "predictions": np.concatenate(preds_parts),
+        "targets": np.concatenate(target_parts),
+        "cond": np.concatenate(cond_parts),
+    }
+    if pid_parts:
+        results["pid_labels"] = np.concatenate(pid_parts)
+    return results
 
 
 @torch.no_grad()
@@ -305,6 +364,12 @@ def parse_args():
         help="Dataset split to evaluate on",
     )
     parser.add_argument(
+        "--nevts",
+        type=int,
+        default=-1,
+        help="Maximum number of events to evaluate (-1 = all)",
+    )
+    parser.add_argument(
         "--batch_size", "-bs", type=int, default=2048, help="Batch size for evaluation"
     )
     parser.add_argument(
@@ -360,6 +425,7 @@ def main():
     use_omnilearned = args_dict.get("use_omnilearned", None)
     use_bert = args_dict.get("use_bert", None)
     concat_additional_info = not (bool(use_omnilearned) or bool(use_bert))
+    tabular_only = args_dict.get("cond_only", False) or args_dict.get("use_bdt", False)
     dataloader, _, _ = load_data(
         dataset_name=dataset_name,
         path=data_path,
@@ -373,13 +439,20 @@ def main():
         shuffle=False,
         max_particles=max_particles,
         task=task,
-        nevts=-1,
+        nevts=args.nevts,
         use_energy_sums=args_dict.get("include_E_sum", False),
         concat_additional_info=concat_additional_info,
+        tabular_only=tabular_only,
     )
 
     print(f"Number of samples: {len(dataloader.dataset)}")
     print(f"Number of batches: {len(dataloader)}")
+
+    ds = dataloader.dataset
+    if isinstance(ds, Subset):
+        eval_indices = np.asarray(ds.indices, dtype=np.int64)
+    else:
+        eval_indices = np.arange(len(ds), dtype=np.int64)
 
     # Create output directory
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -394,20 +467,25 @@ def main():
     print(f"\nResults will be saved to: {output_dir}")
     # Run evaluation
     print(f"\nStarting evaluation...")
-    results = evaluate(
-        model,
-        dataloader,
-        device,
-        args_dict,
-        use_amp=args.use_amp,
-    )
+    if args_dict.get("use_bdt", False):
+        results = evaluate_bdt(model, dataloader, device, args_dict, task)
+    else:
+        results = evaluate(
+            model,
+            dataloader,
+            device,
+            args_dict,
+            use_amp=args.use_amp,
+        )
 
     # Save results
     # results_file = os.path.join(output_dir, "metrics.json")
     # with open(results_file, "w") as f:
     #    json.dump(results["metrics"], f, indent=2)
     # print(f"Metrics saved to: {results_file}")
-    if args_dict.get("log1p_loss", False):
+    # log1p target transform is a regression-only feature; never apply it to
+    # classifier logits/probabilities (otherwise it floors them to ~0).
+    if args_dict.get("log1p_loss", False) and args_dict.get("mode") == "regression":
         results["predictions"] = np.exp(results["predictions"]) - 1
         # set neg predictions to 0
         results["predictions"] = np.maximum(results["predictions"], 0)
@@ -421,6 +499,7 @@ def main():
             else results["targets"]
         ),
         cond=results["cond"],
+        eval_indices=eval_indices,
     )
     print(f"Predictions saved to: {output_file}")
 

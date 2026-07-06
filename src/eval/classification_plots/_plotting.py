@@ -12,18 +12,20 @@ from sklearn.metrics import auc, confusion_matrix, precision_recall_curve
 
 from src.eval._constants import plot_model_label
 
-from ._binning import data_with_signal_pion_bins
+from ._binning import _as_strictly_increasing_bin_edges, data_with_signal_pion_bins
 from ._constants import (
     CLASSIFICATION_PERFORMANCE_LEGEND_TITLE,
     DEFAULT_FIXED_FPR,
     INT_TYPE_COLORS,
     MC_INT_TYPE_MERGED,
+    TRUE_W_XLABEL,
     W_METRICS_XLIM_GEV,
     _LABEL_FS,
     _LEGEND_FS,
     _TICK_FS,
     _baseline_legend_with_global_fpr,
     _default_signal_label,
+    _global_reco_baseline_fpr,
     _global_score_thresholds_at_target_fprs,
     _reco_baseline_fpr_on_mask,
     _tpr_column_title_vs_kinematics,
@@ -41,14 +43,166 @@ from ._metrics_tasks import (
     compute_all_metrics_W,
     compute_signal_baseline,
     compute_signal_baseline_W,
+    metrics_W_by_model_data,
 )
-from ._reco_baseline import compute_reco_baseline_recall_per_bin
+from ._reco_baseline import (
+    compute_reco_baseline_fpr_per_bin,
+    compute_reco_baseline_recall_per_bin,
+)
 
 
 def _set_xlim_w_metrics(ax: plt.Axes) -> None:
     """Set a consistent *W* [GeV] axis span on metric / histogram panels."""
     lo, hi = W_METRICS_XLIM_GEV
     ax.set_xlim(lo, hi)
+
+
+def _autoscale_rate_axis(
+    values: np.ndarray,
+    *,
+    pad_frac: float = 0.12,
+    min_pad: float = 0.005,
+) -> tuple[float, float]:
+    """Tight *y* limits for rate metrics (TPR/FPR) with a little headroom."""
+    vals = np.asarray(values, dtype=float)
+    vals = vals[np.isfinite(vals)]
+    if vals.size == 0:
+        return 0.0, 0.1
+    lo, hi = float(vals.min()), float(vals.max())
+    if hi <= lo:
+        hi = lo + max(min_pad, 0.02)
+    pad = max((hi - lo) * pad_frac, min_pad)
+    y0 = max(0.0, lo - pad)
+    y1 = min(1.0, hi + pad) if hi <= 1.0 else hi + pad
+    if y1 <= y0:
+        y1 = y0 + max(min_pad, 0.02)
+    return y0, y1
+
+
+def _draw_baseline_tpr_fpr_dual_axis(
+    ax: plt.Axes,
+    *,
+    w_mid: np.ndarray,
+    tpr: np.ndarray,
+    fpr: np.ndarray,
+    global_fpr: float,
+    row_title: str | None = None,
+) -> None:
+    """Dual *y* axes: per-bin baseline TPR (left) and FPR (right) vs *W*."""
+    ax_fpr = ax.twinx()
+
+    (tpr_line,) = ax.plot(
+        w_mid, tpr, "o-", color="black", label="Baseline TPR (per bin)", zorder=3
+    )
+    (fpr_line,) = ax_fpr.plot(
+        w_mid, fpr, "s-", color="#dc2626", label="Baseline FPR (per bin)", zorder=2
+    )
+    if np.isfinite(global_fpr):
+        ax_fpr.axhline(
+            global_fpr,
+            color="#dc2626",
+            linestyle=":",
+            linewidth=1.2,
+            alpha=0.85,
+            label=f"Global FPR ({100.0 * global_fpr:.2f}%)",
+            zorder=1,
+        )
+
+    ax.set_xlabel(TRUE_W_XLABEL, fontsize=_LABEL_FS)
+    ax.set_ylabel("Efficiency (TPR)", fontsize=_LABEL_FS, color="black")
+    ax_fpr.set_ylabel("False positive rate", fontsize=_LABEL_FS, color="#dc2626")
+    ax.tick_params(axis="y", labelcolor="black", labelsize=_TICK_FS)
+    ax_fpr.tick_params(axis="y", labelcolor="#dc2626", labelsize=_TICK_FS)
+    ax.tick_params(axis="x", labelsize=_TICK_FS)
+    ax.grid(True, alpha=0.35)
+    _set_xlim_w_metrics(ax)
+    tpr_lo, tpr_hi = _autoscale_rate_axis(tpr)
+    ax.set_ylim(tpr_lo, tpr_hi)
+    fpr_vals = np.concatenate([fpr, [global_fpr]]) if np.isfinite(global_fpr) else fpr
+    fpr_lo, fpr_hi = _autoscale_rate_axis(fpr_vals)
+    ax_fpr.set_ylim(fpr_lo, fpr_hi)
+    if row_title is not None:
+        ax.set_title(row_title, fontsize=_LABEL_FS + 1, pad=8)
+
+    lines = [tpr_line, fpr_line]
+    labels = [ln.get_label() for ln in lines]
+    if np.isfinite(global_fpr):
+        lines = lines + [ax_fpr.lines[-1]]
+        labels = labels + [lines[-1].get_label()]
+    ax.legend(lines, labels, loc="upper right", fontsize=_LEGEND_FS, framealpha=0.92)
+
+
+def plot_baseline_tpr_fpr_vs_W(
+    data: dict,
+    reco_pred: np.ndarray,
+    y_true_binary: np.ndarray,
+    *,
+    title: str,
+    playlist: str = "1A",
+    by_inttype: bool = True,
+) -> plt.Figure:
+    """Per-*W*-bin reconstruction baseline TPR and FPR on dual *y* axes.
+
+    Page 1 (or sole panel): all interaction types combined.
+    When *by_inttype* is True, additional rows split {DIS, RES, Other}.
+    """
+    y_true_binary = np.asarray(y_true_binary, dtype=np.int64)
+    reco_pred = np.asarray(reco_pred, dtype=np.int64)
+    is_signal = y_true_binary == 1
+    w_mid = np.asarray(data["W_bin_mids"], dtype=float)
+    w_gev = np.asarray(data["W_GeV"], dtype=float)
+    w_edges = np.asarray(data["W_bin_edges"], dtype=float)
+    global_fpr = _global_reco_baseline_fpr(reco_pred, y_true_binary)
+
+    tpr_all = compute_reco_baseline_recall_per_bin(
+        reco_pred, is_signal, w_gev, w_edges,
+    )
+    fpr_all = compute_reco_baseline_fpr_per_bin(
+        reco_pred, y_true_binary, w_gev, w_edges,
+    )
+
+    rows: list[tuple[str | None, np.ndarray, np.ndarray, np.ndarray | None]] = [
+        ("All interaction types", tpr_all, fpr_all, None),
+    ]
+    if by_inttype and "int_type_arr" in data:
+        int_type_arr = merge_int_type_arr(data["int_type_arr"])
+        for code, name in MC_INT_TYPE_MERGED.items():
+            mask = int_type_arr == code
+            n_sig = int((is_signal & mask).sum())
+            if n_sig == 0:
+                continue
+            tpr_row = compute_reco_baseline_recall_per_bin(
+                reco_pred, is_signal & mask, w_gev, w_edges,
+            )
+            fpr_row = compute_reco_baseline_fpr_per_bin(
+                reco_pred, y_true_binary, w_gev, w_edges, event_mask=mask,
+            )
+            rows.append((name, tpr_row, fpr_row, mask))
+
+    n_rows = len(rows)
+    fig, axes = plt.subplots(
+        n_rows, 1, figsize=(10.0, 3.6 * n_rows), constrained_layout=True,
+    )
+    if n_rows == 1:
+        axes = [axes]
+
+    for ax, (row_title, tpr, fpr, mask) in zip(axes, rows):
+        row_global_fpr = (
+            global_fpr
+            if mask is None
+            else _reco_baseline_fpr_on_mask(reco_pred, y_true_binary, mask)
+        )
+        _draw_baseline_tpr_fpr_dual_axis(
+            ax,
+            w_mid=w_mid,
+            tpr=tpr,
+            fpr=fpr,
+            global_fpr=row_global_fpr,
+            row_title=row_title,
+        )
+
+    fig.suptitle(title, fontsize=14, y=1.01)
+    return fig
 
 
 _PER_AXES_LEGEND_MARKER = " (FPR "
@@ -485,7 +639,7 @@ def plot_multi_classification_vs_W(
     col_labels = ["AUPRC", "AUROC", "Efficiency (TPR)"]
     for col, metric in enumerate(col_labels):
         ax = axes[col]
-        ax.set_xlabel(r"$W$ [GeV]", fontsize=_LABEL_FS)
+        ax.set_xlabel(TRUE_W_XLABEL, fontsize=_LABEL_FS)
         ax.set_ylabel(metric, fontsize=_LABEL_FS)
         ax.tick_params(axis="both", labelsize=_TICK_FS)
         x_short = r"$W$"
@@ -526,6 +680,7 @@ def plot_binned_by_inttype(
     precomputed_agg: "dict[int, dict] | None" = None,
     precomputed_bl_values: "dict[int, np.ndarray] | None" = None,
     precomputed_y_true_binary: "np.ndarray | None" = None,
+    data_by_model: "dict[str, dict] | None" = None,
 ) -> plt.Figure:
     """One row per merged interaction type (``{DIS, RES, Other}`` by default),
     3 columns: AUPRC, AUROC, TPR (global or per-bin FPR).
@@ -693,16 +848,35 @@ def plot_binned_by_inttype(
                     int_mask,
                     playlist,
                 )
-                all_agg = compute_all_metrics_W(
-                    results,
-                    data,
-                    signal_classes,
-                    threshold,
-                    fixed_fpr,
-                    int_mask,
-                    playlist,
-                    use_global_fpr=use_global_fpr,
-                )
+                if data_by_model:
+                    all_agg = {}
+                    for model_name in sorted(results.keys()):
+                        data_m = data_by_model.get(model_name, data)
+                        int_arr_m = merge_int_type_arr(data_m["int_type_arr"])
+                        mask_m = int_arr_m == int_code
+                        all_agg.update(
+                            compute_all_metrics_W(
+                                {model_name: results[model_name]},
+                                data_m,
+                                signal_classes,
+                                threshold,
+                                fixed_fpr,
+                                mask_m,
+                                playlist,
+                                use_global_fpr=use_global_fpr,
+                            )
+                        )
+                else:
+                    all_agg = compute_all_metrics_W(
+                        results,
+                        data,
+                        signal_classes,
+                        threshold,
+                        fixed_fpr,
+                        int_mask,
+                        playlist,
+                        use_global_fpr=use_global_fpr,
+                    )
             else:
                 bl_values = bl[{"pion_E": "E", "pion_theta": "theta"}[x_var]]
                 all_agg_full = compute_all_metrics(
@@ -1043,6 +1217,9 @@ def plot_composition_vs_kinematic(
     pid: np.ndarray,
     x_var: str,
     playlist: str = "1A",
+    bin_edges: np.ndarray | None = None,
+    *,
+    annotate_counts: bool | None = None,
 ) -> plt.Figure:
     """4-row × 3-col event-composition figure for CC1π±, CC1π⁰, CCNπ±.
 
@@ -1057,12 +1234,18 @@ def plot_composition_vs_kinematic(
     """
     if x_var == "W":
         hist_var = np.asarray(data["W_GeV"])
-        bin_edges = np.asarray(data["W_bin_edges"])
-        xlabel = r"True hadronic $W$ [GeV]"
+        if bin_edges is None:
+            bin_edges = np.asarray(data["W_bin_edges"])
+        else:
+            bin_edges = _as_strictly_increasing_bin_edges(bin_edges, "bin_edges")
+        xlabel = TRUE_W_XLABEL
         x_is_W = True
     elif x_var == "q3":
         hist_var = np.asarray(data["q3_GeV"])
-        bin_edges = np.asarray(data["q3_bin_edges"])
+        if bin_edges is None:
+            bin_edges = np.asarray(data["q3_bin_edges"])
+        else:
+            bin_edges = _as_strictly_increasing_bin_edges(bin_edges, "bin_edges")
         xlabel = r"True $q_3$ [GeV]"
         x_is_W = False
     else:
@@ -1078,8 +1261,12 @@ def plot_composition_vs_kinematic(
     all_mask = np.ones(len(hist_var), dtype=bool)
 
     n_rows = len(signals)
+    n_bins = len(bin_edges) - 1
+    if annotate_counts is None:
+        annotate_counts = n_bins <= 16
+    fig_width = 14.5 if n_bins <= 16 else min(28.0, 14.5 + 0.12 * n_bins)
     fig, axes = plt.subplots(
-        n_rows, 3, figsize=(14.5, 3.2 * n_rows + 1.5), constrained_layout=True
+        n_rows, 3, figsize=(fig_width, 3.2 * n_rows + 1.5), constrained_layout=True
     )
 
     for row_idx, (row_label, classes) in enumerate(signals):
@@ -1096,14 +1283,14 @@ def plot_composition_vs_kinematic(
         n_bkg_tot = sum(counts_bkg.values())
 
         ax_sig = axes[row_idx, 0]
-        _stack_bars_by_inttype(ax_sig, bin_edges, counts_sig)
+        _stack_bars_by_inttype(ax_sig, bin_edges, counts_sig, annotate_total=annotate_counts)
         ax_sig.set_xlabel(xlabel, fontsize=_LABEL_FS)
         ax_sig.set_ylabel(f"{row_label} signal events", fontsize=_LABEL_FS)
         ax_sig.tick_params(axis="both", labelsize=_TICK_FS)
         ax_sig.set_title(rf"{row_label}: signal composition")
 
         ax_bkg = axes[row_idx, 1]
-        _stack_bars_by_inttype(ax_bkg, bin_edges, counts_bkg)
+        _stack_bars_by_inttype(ax_bkg, bin_edges, counts_bkg, annotate_total=annotate_counts)
         ax_bkg.set_xlabel(xlabel, fontsize=_LABEL_FS)
         ax_bkg.set_ylabel(f"{row_label} background events", fontsize=_LABEL_FS)
         ax_bkg.tick_params(axis="both", labelsize=_TICK_FS)

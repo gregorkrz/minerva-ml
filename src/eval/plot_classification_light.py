@@ -35,9 +35,11 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from src.eval._bootstrap import silence_classification_empty_bin_warnings
+from src.eval._cache_additive import light_cache_model_keys, resolve_models_to_add
 from src.eval._classification_light import (
     compute_light_classification_data,
     draw_light_classification_from_cache,
+    update_light_classification_cache,
 )
 from src.eval._constants import (
     CLASSIFICATION_PICKLE_STEM,
@@ -108,6 +110,16 @@ def main(argv: list[str] | None = None) -> None:
         help="Override the plots cache path used by --plots-only or written during "
         "a normal run (default: plots/tmp_results/classification_light.pkl).",
     )
+    ap.add_argument(
+        "--additive",
+        action="store_true",
+        help="Only compute light metrics for models missing from an existing cache.",
+    )
+    ap.add_argument(
+        "--models",
+        default=None,
+        help="Comma-separated model keys to add (default: all missing from source pickle).",
+    )
     args = ap.parse_args(argv)
     if args.plots_dir is None:
         args.plots_dir = Path(args.out_dir or DEFAULT_OUT_DIR) / "plots"
@@ -127,6 +139,14 @@ def main(argv: list[str] | None = None) -> None:
     plots_cache_path = args.plots_cache or (cache_root / _LIGHT_CACHE_NAME)
 
     cfg: PlotConfig | None = PlotConfig.load(args.config) if args.config else None
+
+    def _parse_models(raw: str | None) -> list[str] | None:
+        if raw is None:
+            return None
+        models = [m.strip() for m in raw.split(",") if m.strip()]
+        return models or None
+
+    models_filter = _parse_models(args.models)
 
     if args.plots_only:
         print(f"Loading plots cache from {plots_cache_path} …")
@@ -157,6 +177,33 @@ def main(argv: list[str] | None = None) -> None:
         components = ("q3",)
     else:
         components = ("pion",)
+
+    if args.additive and plots_cache_path.exists():
+        print(f"Loading existing light cache from {plots_cache_path} …")
+        with open(plots_cache_path, "rb") as f:
+            existing_cache = pickle.load(f)
+        new_models = resolve_models_to_add(
+            set(clf["results"]),
+            light_cache_model_keys(existing_cache),
+            models_filter,
+        )
+        if not new_models:
+            print("Light cache already contains all requested models.")
+            cached = existing_cache
+        else:
+            cached = update_light_classification_cache(
+                existing_cache, clf, new_models, components
+            )
+            plots_cache_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(plots_cache_path, "wb") as f:
+                pickle.dump(cached, f, protocol=pickle.HIGHEST_PROTOCOL)
+            print(f"Saved plots cache → {plots_cache_path}")
+        specs = cached["specs"]
+        clrs = dict(cached["clrs"])
+        if cfg is not None:
+            clrs.update(cfg.colors())
+        draw_light_classification_from_cache(specs, clrs, light_dir, cfg=cfg)
+        return
 
     first_model = next(iter(results))
     run0 = results[first_model][0]

@@ -215,13 +215,22 @@ def _compute_reco_pred(
     raise ValueError(n_muons_cond)
 
 
-def build_metrics_cache(clf: dict) -> dict:
+def build_metrics_cache(clf: dict, *, models_only: set[str] | None = None) -> dict:
     """Compute all expensive classification metrics and return the cache dict.
 
     The returned dict is ready to be pickled.  Pass *clf* = the full
     classification pickle dict loaded from ``classification_<flag>.pkl``.
+
+    When *models_only* is set, only those model keys in ``clf["results"]`` are
+    included in per-model sections (for additive cache updates).
     """
     results = clf["results"]
+    if models_only is not None:
+        results = {k: v for k, v in results.items() if k in models_only}
+        if not results:
+            raise ValueError(
+                f"models_only={sorted(models_only)!r} matched no entries in clf['results']"
+            )
     data_by_playlist = clf["data_by_playlist"]
     data_w_by_playlist = clf.get("data_w_by_playlist", {})
     playlists = clf["playlists"]
@@ -591,6 +600,40 @@ def load_metrics_cache(path: Path) -> dict:
     print(f"Loading classification metrics cache from {path} …")
     with open(path, "rb") as f:
         return pickle.load(f)
+
+
+def update_metrics_cache(
+    existing: dict,
+    clf: dict,
+    new_models: list[str],
+) -> dict:
+    """Compute metrics for *new_models* only and merge into *existing* cache."""
+    from src.eval._cache_additive import merge_model_metrics_tree, merge_prc_tree
+
+    print(f"  Additive metrics cache update for: {', '.join(new_models)}")
+    partial = build_metrics_cache(clf, models_only=set(new_models))
+
+    existing.setdefault("confusion_matrices", {})
+    for model in new_models:
+        existing["confusion_matrices"][model] = partial["confusion_matrices"][model]
+
+    merge_model_metrics_tree(existing.setdefault("metrics_q3", {}), partial["metrics_q3"])
+    merge_model_metrics_tree(
+        existing.setdefault("metrics_W_clf", {}), partial["metrics_W_clf"]
+    )
+    merge_model_metrics_tree(
+        existing.setdefault("metrics_W_pion", {}), partial["metrics_W_pion"]
+    )
+    merge_model_metrics_tree(
+        existing.setdefault("metrics_pion", {}), partial["metrics_pion"]
+    )
+    merge_prc_tree(existing.setdefault("prc", {}), partial["prc"])
+
+    existing["clrs_dict_full"] = {
+        **existing.get("clrs_dict_full", {}),
+        **clf.get("clrs_dict_full", {}),
+    }
+    return existing
 
 
 def precomputed_inttype_agg(metrics_by_mask: dict) -> dict:

@@ -37,7 +37,7 @@ def get_Pi_labels_v2_from_baseline(
     labels = np.full(n_muons.shape[0], 4, dtype=np.int64)
     is_cc_reco = n_muons == 1
 
-    cc1pi = is_cc_reco & (n_charged_prongs == 1) & (improved_nmichel == 1)
+    cc1pi = is_cc_reco & (n_charged_prongs == 1) & (improved_nmichel >= 1)
     ccnpi_gt1 = is_cc_reco & (n_charged_prongs >= 2) & (improved_nmichel >= 1)
     cc1pi0 = (
         is_cc_reco

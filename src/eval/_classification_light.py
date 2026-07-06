@@ -40,6 +40,7 @@ from src.eval.classification_plots import (
     _plot_metric_line,
 )
 from src.eval.classification_plots._constants import (
+    TRUE_W_XLABEL,
     _baseline_legend_with_global_fpr,
     _tpr_line_legend_label,
 )
@@ -332,7 +333,7 @@ def _small_paper_tpr_row_from_spec(spec: dict[str, Any], panel: str) -> dict[str
             "reco_baseline_tpr": spec["reco_baseline_tpr"],
             "reco_label": spec["reco_label"],
             "reco_baseline_global_fpr": spec.get("reco_baseline_global_fpr"),
-            "xlabel": spec.get("xlabel", r"True hadronic $W$ [GeV]"),
+            "xlabel": TRUE_W_XLABEL,
             "log_x": spec.get("log_x", False),
             "kinematic": None,
         }
@@ -563,7 +564,7 @@ def _compute_pion_bundle_specs(
             "type": "1x3",
             "all_metrics": metrics_W,
             "x": data_w["W_bin_mids"],
-            "xlabel": r"True hadronic $W$ [GeV]",
+            "xlabel": TRUE_W_XLABEL,
             "baseline_auprc": bl_W,
             "fixed_fpr": fpr,
             "reco_baseline_tpr": reco_W,
@@ -668,7 +669,7 @@ def _compute_q3_bundle_specs(
             "type": "1x3",
             "all_metrics": metrics_W,
             "x": data_w["W_bin_mids"],
-            "xlabel": r"True hadronic $W$ [GeV]",
+            "xlabel": TRUE_W_XLABEL,
             "baseline_auprc": bl_W,
             "fixed_fpr": fpr_n,
             "reco_baseline_tpr": reco_W,
@@ -678,11 +679,6 @@ def _compute_q3_bundle_specs(
             "filename": f"eval_classification_light_ccnpi_W_{playlist}.pdf",
         })
     return specs
-
-
-# ---------------------------------------------------------------------------
-# Public two-stage API
-# ---------------------------------------------------------------------------
 
 
 def compute_light_classification_data(
@@ -791,6 +787,33 @@ def compute_light_classification_data(
     return specs
 
 
+def update_light_classification_cache(
+    existing_cache: dict,
+    clf: dict,
+    new_models: list[str],
+    components: tuple[LightComponent, ...] = ("pion", "q3"),
+) -> dict:
+    """Compute light specs for *new_models* and merge into *existing_cache*."""
+    from src.eval._cache_additive import merge_light_classification_specs
+
+    results = {k: v for k, v in clf["results"].items() if k in new_models}
+    new_specs = compute_light_classification_data(
+        results,
+        clf["data_by_playlist"],
+        clf["playlists"],
+        components,
+        data_w_by_playlist=clf.get("data_w_by_playlist"),
+    )
+    merged_specs = merge_light_classification_specs(
+        existing_cache.get("specs", []),
+        new_specs,
+    )
+    clrs = dict(existing_cache.get("clrs", {}))
+    clrs.update(clf.get("clrs_dict_full", {}))
+    print(f"  Additive light cache update for: {', '.join(new_models)}")
+    return {"specs": merged_specs, "clrs": clrs}
+
+
 def draw_light_classification_from_cache(
     specs: list[dict[str, Any]],
     clrs_dict_full: dict[str, str],
@@ -816,10 +839,13 @@ def draw_light_classification_from_cache(
         out_path = out_dir / spec["filename"]
 
         if spec["type"] == "1x3":
+            xlabel = spec["xlabel"]
+            if "_W_" in spec.get("filename", ""):
+                xlabel = TRUE_W_XLABEL
             fig = _figure_metrics_1x3(
                 all_metrics,
                 spec["x"],
-                spec["xlabel"],
+                xlabel,
                 spec["baseline_auprc"],
                 spec["fixed_fpr"],
                 spec["reco_baseline_tpr"],

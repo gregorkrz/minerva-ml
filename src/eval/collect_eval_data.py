@@ -36,6 +36,7 @@ from src.eval._constants import (
     FLOPS_PER_STEP,
     REGRESSION_PICKLE_STEM,
 )
+from src.eval.baseline_val_loss import RECO_BASELINE_MODEL_KEY
 from src.eval._wandb_loss import (
     classification_runs_per_model,
     collect_histories_for_runs,
@@ -71,11 +72,46 @@ def _load_existing_loss_histories(pickle_path: Path | None) -> dict:
     return dict(data.get("loss_histories") or {})
 
 
+def _strip_reco_baseline(loss_histories: dict) -> None:
+    loss_histories.pop(RECO_BASELINE_MODEL_KEY, None)
+
+
+def _filter_runs_by_eval_npz(
+    runs_by_model_cap: dict[str, dict[int, list[str]]],
+    ckpt_dir: Path,
+    playlists: list[str],
+) -> tuple[dict[str, dict[int, list[str]]], list[str]]:
+    """Drop wandb runs that do not yet have test_results npz for every playlist."""
+    from src.eval.classification_plots._io import run_has_test_results_npz
+
+    skipped: list[str] = []
+    filtered: dict[str, dict[int, list[str]]] = {}
+    for model, caps in runs_by_model_cap.items():
+        kept_caps: dict[int, list[str]] = {}
+        for cap, run_list in caps.items():
+            kept_runs = []
+            for run_name in run_list:
+                if run_has_test_results_npz(ckpt_dir, run_name, playlists):
+                    kept_runs.append(run_name)
+                else:
+                    skipped.append(run_name)
+            if kept_runs:
+                kept_caps[cap] = kept_runs
+        if kept_caps:
+            filtered[model] = kept_caps
+    return filtered, skipped
+
+
+DEFAULT_DATA_PATH = "/global/cfs/cdirs/m3246/gregork/Minerva/20260326_NEW"
+
+
 def collect_classification(
     ckpt_dir: Path,
     wandb_tag: str,
     *,
+    data_path: Path | None = None,
     skip_wandb: bool = False,
+    skip_unevaluated: bool = False,
     existing_pickle: Path | None = None,
 ) -> dict:
     from src.eval.classification_plots import (
@@ -90,11 +126,30 @@ def collect_classification(
         "  Models from wandb (classification):",
         ", ".join(sorted(runs_by_model_cap.keys())) or "(none)",
     )
+    playlists = ["1A", "1B"]
+    if skip_unevaluated:
+        runs_by_model_cap, skipped = _filter_runs_by_eval_npz(
+            runs_by_model_cap, ckpt_dir, playlists
+        )
+        if skipped:
+            print(
+                "  Skipping unevaluated classification run(s) (--skip-unevaluated):",
+                ", ".join(sorted(skipped)),
+            )
+        print(
+            "  Models with eval npz (classification):",
+            ", ".join(sorted(runs_by_model_cap.keys())) or "(none)",
+        )
     training_names = {
         key: value[-1]
         for key, value in sorted(runs_by_model_cap.items(), key=lambda kv: kv[0])
     }
-    playlists = ["1A", "1B"]
+    if not training_names:
+        raise SystemExit(
+            "No evaluated classification runs found. "
+            "Run evaluate_single_gpu first or pass --skip-unevaluated only when "
+            "some runs already have test_results npz."
+        )
     results = load_results(ckpt_dir, training_names, playlists=playlists)
     data_by_playlist = {
         pl: load_truth_and_baselines(ckpt_dir, training_names, playlists=[pl])
@@ -119,6 +174,8 @@ def collect_classification(
             ", ".join(sorted(loss_histories.keys())) or "(none)",
         )
 
+    _strip_reco_baseline(loss_histories)
+
     return {
         "schema_version": SCHEMA_VERSION_CLASSIFICATION,
         "wandb_tag": wandb_tag,
@@ -141,7 +198,9 @@ def collect_regression(
     wandb_tag: str,
     suppress_errors: bool,
     *,
+    data_path: Path | None = None,
     skip_wandb: bool = False,
+    skip_unevaluated: bool = False,
     existing_pickle: Path | None = None,
 ) -> dict:
     from src.eval.e_available_plots import load_eval_data, load_eval_data_grouped
@@ -152,6 +211,20 @@ def collect_regression(
         "  Models from wandb (regression):",
         ", ".join(sorted(runs_by_model_cap.keys())) or "(none)",
     )
+    if skip_unevaluated:
+        runs_by_model_cap, skipped = _filter_runs_by_eval_npz(
+            runs_by_model_cap, ckpt_dir, ["1A", "1B"]
+        )
+        if skipped:
+            print(
+                "  Skipping unevaluated regression run(s) (--skip-unevaluated):",
+                ", ".join(sorted(skipped)),
+            )
+        print(
+            "  Models with eval npz (regression):",
+            ", ".join(sorted(runs_by_model_cap.keys())) or "(none)",
+        )
+        suppress_errors = True
     training_names_full: dict = {"Log1p": {}}
     baseline_run = None
     for model, caps in runs_by_model_cap.items():
@@ -196,6 +269,8 @@ def collect_regression(
             "  Loss histories (regression, non-empty eval_loss):",
             ", ".join(sorted(loss_histories.keys())) or "(none)",
         )
+
+    _strip_reco_baseline(loss_histories)
 
     # Grouped layout for multi-seed models (matches plot_rms_iqr_with_uncertainty).
     grouped_no_rw: dict[str, dict[str, list[str]]] = {"Log1p": {}}
@@ -281,6 +356,13 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--ckpt-dir", type=Path, default=DEFAULT_CKPT_DIR)
     p.add_argument("--suppress-errors", action="store_true")
     p.add_argument(
+        "--skip-unevaluated",
+        action="store_true",
+        help="Skip wandb-tagged runs that do not yet have test_results npz "
+        "files on disk (useful when new runs are tagged but evaluate_single_gpu "
+        "has not finished). Also enables --suppress-errors for regression.",
+    )
+    p.add_argument(
         "--regression-only",
         action="store_true",
         help="Only collect regression eval data and write the regression pickle; skip classification.",
@@ -296,6 +378,12 @@ def main(argv: list[str] | None = None) -> None:
         help="Do not download validation loss histories from wandb. Reuses "
         "loss_histories from an existing pickle for this flag when present.",
     )
+    p.add_argument(
+        "--data-path",
+        type=Path,
+        default=Path(DEFAULT_DATA_PATH),
+        help="Preprocessed dataset root for reco-baseline val CE (default: %(default)s)",
+    )
     args = p.parse_args(argv)
 
     out_dir = _REPO_ROOT / (args.out_dir or DEFAULT_OUT_DIR)
@@ -308,7 +396,9 @@ def main(argv: list[str] | None = None) -> None:
         clf = collect_classification(
             args.ckpt_dir,
             args.flag,
+            data_path=args.data_path,
             skip_wandb=args.skip_wandb,
+            skip_unevaluated=args.skip_unevaluated,
             existing_pickle=clf_path if args.skip_wandb else None,
         )
         with open(clf_path, "wb") as f:
@@ -322,8 +412,10 @@ def main(argv: list[str] | None = None) -> None:
         reg = collect_regression(
             args.ckpt_dir,
             args.flag,
-            args.suppress_errors,
+            args.suppress_errors or args.skip_unevaluated,
+            data_path=args.data_path,
             skip_wandb=args.skip_wandb,
+            skip_unevaluated=args.skip_unevaluated,
             existing_pickle=reg_path if args.skip_wandb else None,
         )
         with open(reg_path, "wb") as f:

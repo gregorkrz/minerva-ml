@@ -20,11 +20,49 @@ def _softmax(logits: np.ndarray) -> np.ndarray:
     return e / e.sum(axis=1, keepdims=True)
 
 
+def eval_npz_paths(
+    ckpt_dir: str | Path,
+    run_name: str,
+    playlist: str,
+    split: str = "test",
+) -> tuple[Path, Path]:
+    """Return the two canonical ``{split}_results`` npz paths for a run/playlist."""
+    ckpt_dir = Path(ckpt_dir)
+    results_dir = f"{split}_results"
+    return (
+        ckpt_dir
+        / run_name
+        / results_dir
+        / f"outputs_{run_name}_minerva_{playlist}_0.npz",
+        ckpt_dir
+        / run_name
+        / results_dir
+        / f"outputs_best_model_minerva_{playlist}_0.npz",
+    )
+
+
+def run_has_test_results_npz(
+    ckpt_dir: str | Path,
+    run_name: str,
+    playlists: list[str] | None = None,
+    split: str = "test",
+) -> bool:
+    """True if every requested playlist has an eval npz on disk for *split*."""
+    if playlists is None:
+        playlists = ["1A"]
+    for playlist in playlists:
+        p1, p2 = eval_npz_paths(ckpt_dir, run_name, playlist, split=split)
+        if not (p1.exists() or p2.exists()):
+            return False
+    return True
+
+
 def load_results(
     ckpt_dir: str | Path,
     training_names: dict[str, list[str]],
     playlists: list[str] | None = None,
     verbose: bool = True,
+    split: str = "test",
 ) -> dict[str, list[dict[str, dict]]]:
     """Load ``.npz`` evaluation results for every model and run.
 
@@ -50,25 +88,14 @@ def load_results(
         for run_name in run_names:
             run_results: dict[str, dict] = {}
             for playlist in playlists:
-                p1 = (
-                    ckpt_dir
-                    / run_name
-                    / "test_results"
-                    / f"outputs_{run_name}_minerva_{playlist}_0.npz"
-                )
-                p2 = (
-                    ckpt_dir
-                    / run_name
-                    / "test_results"
-                    / f"outputs_best_model_minerva_{playlist}_0.npz"
-                )
+                p1, p2 = eval_npz_paths(ckpt_dir, run_name, playlist, split=split)
                 if p1.exists():
                     run_results[playlist] = dict(np.load(p1))
                 elif p2.exists():
                     run_results[playlist] = dict(np.load(p2))
                 else:
                     raise FileNotFoundError(
-                        f"No results for {run_name} playlist {playlist}: "
+                        f"No {split} results for {run_name} playlist {playlist}: "
                         f"tried {p1} and {p2}"
                     )
                 run_results[playlist]["prediction"] = _softmax(
@@ -89,6 +116,8 @@ def load_truth_and_baselines(
     *,
     pion_E_bin_edges: np.ndarray | Sequence[float] | None = None,
     pion_theta_bin_edges: np.ndarray | Sequence[float] | None = None,
+    split: str = "test",
+    event_indices: np.ndarray | None = None,
 ) -> dict[str, Any]:
     """Load truth labels, baselines and derived kinematic arrays.
 
@@ -142,15 +171,22 @@ def load_truth_and_baselines(
     baselines_dict: dict[str, dict] = {}
     test_idx_dict: dict[str, np.ndarray] = {}
 
-    for playlist in playlists:
-        test_idx = split_idx[playlist]["test_idx"]
-        test_idx_dict[playlist] = test_idx
+    split_idx_key = f"{split}_idx"
 
-        truth_labels[playlist] = torch.load(
-            open(data_path / playlist / "test" / "0.pb", "rb"),
+    for playlist in playlists:
+        split_idx_arr = split_idx[playlist][split_idx_key]
+        if event_indices is not None:
+            split_idx_arr = np.asarray(split_idx_arr)[event_indices]
+        test_idx_dict[playlist] = split_idx_arr
+
+        tl = torch.load(
+            open(data_path / playlist / split / "0.pb", "rb"),
             weights_only=False,
             map_location="cpu",
         )["truth_labels"]
+        if event_indices is not None:
+            tl = tl[event_indices]
+        truth_labels[playlist] = tl
 
         baseline_file = f"{playlist}_enu_baselines.npz"
         loaded = False

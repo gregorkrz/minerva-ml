@@ -542,6 +542,33 @@ def parse_args():
         default=3,
         help="Number of residual blocks in CondOnlyMLP (independent of --depth)",
     )
+    # Gradient-boosted-tree (BDT) baseline on the cond/global features.
+    parser.add_argument(
+        "--use-bdt",
+        "--use_bdt",
+        action="store_true",
+        help="Train a HistGradientBoosting (BDT) model on the cond/global features "
+        "instead of a neural net (classifier or regression). Fits on CPU; evaluates "
+        "and plots the same way as the other baselines.",
+    )
+    parser.add_argument(
+        "--bdt-max-iter", type=int, default=400, help="BDT: number of boosting iterations"
+    )
+    parser.add_argument(
+        "--bdt-learning-rate", type=float, default=0.1, help="BDT: learning rate"
+    )
+    parser.add_argument(
+        "--bdt-max-leaf-nodes", type=int, default=63, help="BDT: max leaf nodes per tree"
+    )
+    parser.add_argument(
+        "--bdt-max-depth",
+        type=int,
+        default=None,
+        help="BDT: max tree depth (None = unlimited, controlled by max-leaf-nodes)",
+    )
+    parser.add_argument(
+        "--bdt-l2", type=float, default=0.0, help="BDT: L2 regularization"
+    )
     parser.add_argument(
         "--use_pid", type=bool, default=True, help="Use particle ID information"
     )
@@ -1467,6 +1494,13 @@ def run_calculate_flops(args):
             zero_cond_feature=args.zero_cond_feature,
             variant=args.use_hyperscale,
         )
+    elif args.cond_only:
+        inputs = prepare_batch_cond(
+            dummy_batch,
+            device,
+            include_E_sum=args.include_E_sum,
+            zero_cond_feature=args.zero_cond_feature,
+        )
     else:
         inputs = prepare_batch(
             dummy_batch,
@@ -1592,6 +1626,36 @@ def forward_model(model, inputs, args):
             attn_mask=inputs["attn_mask"],
         )
         return model.head(features)
+
+
+def prepare_batch_cond(
+    batch,
+    device,
+    include_E_sum=False,
+    zero_cond_feature=None,
+):
+    """Prepare tabular cond-only batch (global features + labels)."""
+    y = batch["y"].to(device)
+    global_cont = None
+    if batch.get("cond") is not None:
+        global_cont = batch["cond"].to(device, dtype=torch.float32)
+
+    if include_E_sum:
+        if batch.get("energy_sums") is not None:
+            e_sums = batch["energy_sums"].to(device, dtype=torch.float32)
+            e_sums = torch.log(e_sums + 1e-3)
+            if global_cont is not None:
+                global_cont = torch.cat([global_cont, e_sums], dim=1)
+            else:
+                global_cont = e_sums
+        elif global_cont is not None and global_cont.shape[1] in (10, 13, 16):
+            pass
+
+    if zero_cond_feature is not None and global_cont is not None:
+        for idx in zero_cond_feature:
+            global_cont[:, idx] = 0.0
+
+    return {"global_cont": global_cont, "y": y}
 
 
 def prepare_batch(
@@ -1779,6 +1843,13 @@ def evaluate(
                 zero_cond_feature=args.zero_cond_feature,
                 variant=args.use_hyperscale,
             )
+        elif args.cond_only:
+            inputs = prepare_batch_cond(
+                batch,
+                device,
+                include_E_sum=args.include_E_sum,
+                zero_cond_feature=args.zero_cond_feature,
+            )
         else:
             inputs = prepare_batch(
                 batch,
@@ -1965,6 +2036,31 @@ def train(args):
     args.use_cond = not args.no_use_cond
     if args.cond_only:
         args.use_cond = True
+    if getattr(args, "use_bdt", False):
+        # BDT operates on the same cond/global features as the cond-only MLP.
+        if args.mode not in ("classifier", "regression"):
+            raise ValueError("--use-bdt requires --mode classifier or regression")
+        if args.mode == "regression":
+            if getattr(args, "binned_loss_var", None) or getattr(
+                args, "binned_loss_signal", None
+            ):
+                raise ValueError("--use-bdt regression does not support binned loss")
+            if getattr(args, "predict_baseline", False):
+                raise ValueError(
+                    "--use-bdt regression does not support --predict-baseline"
+                )
+            if getattr(args, "binary_classifier", False):
+                raise ValueError(
+                    "--use-bdt regression does not support --binary-classifier"
+                )
+        if args.use_omnilearned or getattr(args, "use_bert", None) or getattr(
+            args, "use_hyperscale", None
+        ) or args.cond_only:
+            raise ValueError(
+                "--use-bdt is standalone; do not combine with "
+                "--use-omnilearned/--use-bert/--use-hyperscale/--cond-only"
+            )
+        args.use_cond = True
     _maybe_autofill_hyperscale_args(args)
     if getattr(args, "use_bert", None):
         if args.use_omnilearned:
@@ -2036,6 +2132,9 @@ def train(args):
             f"Restricting train+val to GENIE interaction types "
             f"{args.event_types} -> codes {event_type_codes}"
         )
+    tabular_only = args.cond_only or getattr(args, "use_bdt", False)
+    if tabular_only:
+        print("Using tabular cond-only dataloader (no point clouds)")
     train_loader, class_weights, use_binned_loss = load_data(
         dataset_name=args.dataset_name,
         path=args.data_path,
@@ -2058,6 +2157,7 @@ def train(args):
         event_types=event_type_codes,
         binned_loss_var=binned_var,
         binned_loss_signal=binned_signal,
+        tabular_only=tabular_only,
     )
 
     val_loader, _, _ = load_data(
@@ -2080,10 +2180,19 @@ def train(args):
         event_types=event_type_codes,
         binned_loss_var=binned_var,
         binned_loss_signal=binned_signal,
+        tabular_only=tabular_only,
     )
 
     print(f"Train samples: {len(train_loader.dataset)}")
     print(f"Val samples: {len(val_loader.dataset)}")
+
+    task.class_weights = class_weights
+
+    # BDT path: fit a gradient-boosted-tree classifier on cond features and exit
+    # (no torch model / optimizer / training loop).
+    if getattr(args, "use_bdt", False):
+        train_bdt(args, task, train_loader, val_loader, use_binned_loss, run_name_with_timestamp)
+        return
 
     # Create model
     print("Creating model...")
@@ -2129,7 +2238,6 @@ def train(args):
     # Count parameters
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Model parameters: {n_params:,}")
-    task.class_weights = class_weights
     # Setup loss function
     if task.type == "regression":
         if args.log_MSE_loss:
@@ -2249,13 +2357,9 @@ def train(args):
     # --- Cond-only diagnostic: inspect first batch ---
     if args.cond_only:
         diag_batch = next(iter(train_loader))
-        diag_inputs = prepare_batch(
+        diag_inputs = prepare_batch_cond(
             diag_batch,
             device,
-            args.use_cond,
-            args.use_pid,
-            args.coord_dim,
-            args.pid_idx,
             include_E_sum=args.include_E_sum,
             zero_cond_feature=args.zero_cond_feature,
         )
@@ -2356,6 +2460,13 @@ def train(args):
                     include_E_sum=args.include_E_sum,
                     zero_cond_feature=args.zero_cond_feature,
                     variant=args.use_hyperscale,
+                )
+            elif args.cond_only:
+                inputs = prepare_batch_cond(
+                    batch,
+                    device,
+                    include_E_sum=args.include_E_sum,
+                    zero_cond_feature=args.zero_cond_feature,
                 )
             else:
                 inputs = prepare_batch(
@@ -2561,6 +2672,313 @@ def train(args):
 
     if not args.no_wandb:
         wandb.finish()
+
+
+def collect_cond_dataset(loader, args, *, with_weights=False):
+    """Materialize (cond_features, label, pid, [sample_weight]) over a loader.
+
+    Uses :func:`prepare_batch_cond` on CPU so the cond features exactly match what the
+    neural cond-only models see (same ``include_E_sum`` assembly and
+    ``zero_cond_feature`` ablation).
+    """
+    Xs, ys, pids, ws = [], [], [], []
+    for batch in tqdm(loader, desc="Collecting cond features", leave=False):
+        X, y, lw = _bdt_cond_batch(batch, args, with_weights=with_weights)
+        Xs.append(X)
+        ys.append(y)
+        if batch.get("pid_label") is not None:
+            pids.append(batch["pid_label"].numpy())
+        if with_weights:
+            ws.append(
+                lw.numpy()
+                if lw is not None
+                else np.ones(len(y), dtype=np.float32)
+            )
+    X = np.concatenate(Xs).astype(np.float32)
+    if args.mode == "regression":
+        y = np.concatenate(ys).astype(np.float64)
+    else:
+        y = np.concatenate(ys).astype(np.int64)
+    pid = np.concatenate(pids) if pids else None
+    w = np.concatenate(ws).astype(np.float64) if with_weights else None
+    return X, y, pid, w
+
+
+def _bdt_cond_batch(batch, args, *, with_weights=False):
+    """Cond features and labels for one loader batch (matches :func:`prepare_batch_cond`)."""
+    cpu = torch.device("cpu")
+    inputs = prepare_batch_cond(
+        batch,
+        cpu,
+        include_E_sum=args.include_E_sum,
+        zero_cond_feature=args.zero_cond_feature,
+    )
+    gc = inputs["global_cont"]
+    if gc is None:
+        raise RuntimeError(
+            "global_cont is None while collecting BDT features; cond features "
+            "are not being loaded (check --no_use_cond / dataset)."
+        )
+    loss_weight = None
+    if with_weights:
+        loss_weight = batch.get("loss_weight")
+    return gc.numpy(), inputs["y"].numpy(), loss_weight
+
+
+def _bdt_sklearn_kwargs(args) -> dict:
+    return {
+        "max_iter": args.bdt_max_iter,
+        "learning_rate": args.bdt_learning_rate,
+        "max_leaf_nodes": args.bdt_max_leaf_nodes,
+        "max_depth": args.bdt_max_depth,
+        "l2_regularization": args.bdt_l2,
+        "early_stopping": True,
+        "validation_fraction": 0.1,
+        "random_state": args.seed if args.seed is not None else 0,
+        "verbose": 1,
+    }
+
+
+def _save_bdt_artifacts(
+    estimator,
+    args,
+    run_name,
+    eval_loss,
+    n_train,
+    *,
+    extra_ckpt=None,
+    extra_wandb=None,
+):
+    import joblib
+
+    os.makedirs(args.output_dir, exist_ok=True)
+    bdt_path = os.path.join(args.output_dir, "bdt_model.joblib")
+    joblib.dump(estimator, bdt_path)
+    print(f"Saved BDT model -> {bdt_path}")
+
+    ckpt = {
+        "args": vars(args),
+        "step": int(estimator.n_iter_),
+        "best_val_loss": float(eval_loss),
+        "is_bdt": True,
+    }
+    if extra_ckpt:
+        ckpt.update(extra_ckpt)
+    ckpt_path = os.path.join(args.output_dir, "best_model.pt")
+    torch.save(ckpt, ckpt_path)
+    print(f"Saved checkpoint (args only) -> {ckpt_path}")
+
+    if not args.no_wandb:
+        wandb.login()
+        wandb.init(
+            project=args.wandb_project,
+            name=run_name,
+            config=vars(args),
+        )
+        log_dict = {
+            "eval_loss": float(eval_loss),
+            "bdt/n_iter": int(estimator.n_iter_),
+            "bdt/n_train": int(n_train),
+        }
+        if extra_wandb:
+            log_dict.update(extra_wandb)
+        wandb.log(log_dict, step=0)
+        wandb.finish()
+
+
+def train_bdt(args, task, train_loader, val_loader, use_binned_loss, run_name):
+    """Fit a HistGradientBoosting model on cond features; save + log like the NN path."""
+    if task.type == "regression":
+        _train_bdt_regression(args, task, train_loader, val_loader, run_name)
+        return
+    _train_bdt_classifier(args, task, train_loader, val_loader, use_binned_loss, run_name)
+
+
+def _train_bdt_classifier(args, task, train_loader, val_loader, use_binned_loss, run_name):
+    """Fit a HistGradientBoosting classifier on cond features."""
+    from sklearn.ensemble import HistGradientBoostingClassifier
+    from sklearn.metrics import roc_auc_score
+
+    if task.type != "classifier":
+        raise ValueError("internal error: _train_bdt_classifier requires classifier task")
+
+    print("Collecting training cond features for BDT…")
+    Xtr, ytr, _, wtr = collect_cond_dataset(
+        train_loader, args, with_weights=use_binned_loss
+    )
+    print(f"  train: X={Xtr.shape} y-classes={np.unique(ytr).tolist()}")
+
+    clf = HistGradientBoostingClassifier(**_bdt_sklearn_kwargs(args))
+    print("Fitting BDT classifier (HistGradientBoosting)…")
+    if use_binned_loss and wtr is not None:
+        clf.fit(Xtr, ytr, sample_weight=wtr)
+    else:
+        clf.fit(Xtr, ytr)
+    print(f"  done: {clf.n_iter_} iterations, classes_={clf.classes_.tolist()}")
+
+    Xval, yval, pid_val, _ = collect_cond_dataset(val_loader, args)
+    eval_loss = evaluate_bdt_val_loss(
+        clf, val_loader, args, task, use_binned_loss=use_binned_loss,
+    )
+    print(f"  val loss (CE, batched like MLP eval): {eval_loss:.4f}")
+
+    from src.eval.classification_plots._signal_definitions import resolve_signal_classes
+
+    signal_classes = (
+        resolve_signal_classes(args.binned_loss_signal)
+        if getattr(args, "binned_loss_signal", None)
+        else [0, 1]
+    )
+    val_auroc = float("nan")
+    try:
+        if pid_val is not None:
+            num_classes = len(task.class_idx)
+            proba_val = _bdt_proba_full(clf, Xval, num_classes)
+            y_true = np.isin(pid_val, signal_classes).astype(int)
+            p_sig = proba_val[:, signal_classes].sum(axis=1)
+            if len(np.unique(y_true)) > 1:
+                val_auroc = float(roc_auc_score(y_true, p_sig))
+                print(f"  val AUROC (signal {signal_classes} vs MC truth): {val_auroc:.4f}")
+    except Exception as exc:  # noqa: BLE001 - validation metric is best-effort
+        print(f"  (val AUROC skipped: {exc})")
+
+    _save_bdt_artifacts(
+        clf,
+        args,
+        run_name,
+        eval_loss,
+        len(ytr),
+        extra_ckpt={"bdt_classes": clf.classes_.tolist()},
+        extra_wandb={"bdt/val_auroc": val_auroc},
+    )
+    print("BDT classifier training complete.")
+
+
+def _train_bdt_regression(args, task, train_loader, val_loader, run_name):
+    """Fit a HistGradientBoosting regressor on cond features."""
+    from sklearn.ensemble import HistGradientBoostingRegressor
+
+    if task.type != "regression":
+        raise ValueError("internal error: _train_bdt_regression requires regression task")
+
+    print("Collecting training cond features for BDT regression…")
+    Xtr, ytr, _, _ = collect_cond_dataset(train_loader, args)
+    print(f"  train: X={Xtr.shape} y-range=[{ytr.min():.4g}, {ytr.max():.4g}]")
+
+    reg = HistGradientBoostingRegressor(**_bdt_sklearn_kwargs(args))
+    print("Fitting BDT regressor (HistGradientBoosting)…")
+    reg.fit(Xtr, ytr.astype(np.float64))
+    print(f"  done: {reg.n_iter_} iterations")
+
+    eval_loss = evaluate_bdt_val_loss(reg, val_loader, args, task)
+    print(f"  val loss (Huber, batched like MLP eval): {eval_loss:.4f}")
+
+    _save_bdt_artifacts(reg, args, run_name, eval_loss, len(ytr))
+    print("BDT regression training complete.")
+
+
+def _bdt_proba_full(clf, X, num_classes):
+    """predict_proba mapped onto a full ``num_classes``-wide array via ``clf.classes_``."""
+    proba = clf.predict_proba(X)
+    full = np.zeros((X.shape[0], num_classes), dtype=np.float64)
+    for col, cls in enumerate(clf.classes_):
+        if 0 <= int(cls) < num_classes:
+            full[:, int(cls)] = proba[:, col]
+    return full
+
+
+def _bdt_classification_batch_loss(
+    clf, X, y, num_classes, task, use_binned_loss, sample_weights=None, class_weights=None,
+):
+    """Per-batch mean CE, matching one ``evaluate()`` classification step."""
+    proba = _bdt_proba_full(clf, X, num_classes)
+    logits = torch.log(torch.from_numpy(proba).clamp(min=1e-12)).float()
+    y_t = torch.from_numpy(y).long()
+    if use_binned_loss and sample_weights is not None:
+        w_t = torch.from_numpy(sample_weights).float()
+        return compute_weighted_classification_loss(logits, y_t, w_t).item()
+    if class_weights is not None:
+        return F.cross_entropy(logits, y_t, weight=class_weights).item()
+    if task.class_weights is not None:
+        cw = torch.tensor(task.class_weights, dtype=torch.float32)
+        return F.cross_entropy(logits, y_t, weight=cw).item()
+    return F.cross_entropy(logits, y_t).item()
+
+
+def _bdt_regression_batch_loss(pred, y, args):
+    """Per-batch mean regression loss, matching one ``evaluate()`` regression step."""
+    pred_t = torch.from_numpy(pred.astype(np.float32))
+    y_t = torch.from_numpy(y.astype(np.float32))
+    if args.log_MSE_loss:
+        return make_log_loss(nn.MSELoss(reduction="none"))(pred_t, y_t).item()
+    if args.log1p_loss:
+        return make_log1p_loss(nn.HuberLoss(reduction="none"))(pred_t, y_t).item()
+    if args.weighted_regression_loss:
+        return compute_weighted_regression_loss(pred_t, y_t).item()
+    return F.huber_loss(pred_t, y_t).item()
+
+
+def _bdt_eval_batch(estimator, batch, args, task, *, use_binned_loss=False):
+    """One loader batch: per-batch mean loss plus predictions for eval export."""
+    X, y, loss_weight = _bdt_cond_batch(batch, args, with_weights=use_binned_loss)
+    n = int(len(y))
+    if task.type == "regression":
+        pred = estimator.predict(X)
+        loss = _bdt_regression_batch_loss(pred, y, args)
+        return loss, n, {
+            "predictions": pred.astype(np.float64),
+            "targets": y,
+            "cond": X,
+        }
+    num_classes = len(task.class_idx)
+    class_weights = None
+    if not use_binned_loss and task.class_weights is not None:
+        class_weights = torch.tensor(task.class_weights, dtype=torch.float32)
+    sample_weights = None
+    if use_binned_loss:
+        sample_weights = (
+            loss_weight.numpy()
+            if loss_weight is not None
+            else np.ones(n, dtype=np.float32)
+        )
+    loss = _bdt_classification_batch_loss(
+        estimator,
+        X,
+        y,
+        num_classes,
+        task,
+        use_binned_loss,
+        sample_weights,
+        class_weights,
+    )
+    proba = _bdt_proba_full(estimator, X, num_classes)
+    log_proba = np.log(np.clip(proba, 1e-12, 1.0))
+    return loss, n, {
+        "predictions": log_proba,
+        "targets": y,
+        "cond": X,
+    }
+
+
+@torch.no_grad()
+def evaluate_bdt_val_loss(estimator, val_loader, args, task, *, use_binned_loss=False):
+    """Validation loss on *val_loader*, aggregated like :func:`evaluate`.
+
+    Iterates the same loader batches as neural training (typically ``-bs 2048``).
+    Per batch, uses the same per-batch mean loss as ``evaluate()``; the returned
+    value is ``sum_b (mean_b * n_b) / sum_b n_b``.
+    """
+    total_loss = 0.0
+    total_samples = 0
+    for batch in tqdm(val_loader, desc="Evaluating (BDT)", leave=False):
+        loss, n, _ = _bdt_eval_batch(
+            estimator, batch, args, task, use_binned_loss=use_binned_loss,
+        )
+        total_loss += loss * n
+        total_samples += n
+    if total_samples == 0:
+        raise RuntimeError("empty validation loader for BDT eval loss")
+    return total_loss / total_samples
 
 
 def main():

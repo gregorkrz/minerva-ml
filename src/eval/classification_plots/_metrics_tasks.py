@@ -131,6 +131,42 @@ def compute_all_metrics_W(
     return out
 
 
+def metrics_W_by_model_data(
+    results: dict[str, list[dict]],
+    default_data: dict,
+    data_by_model: dict[str, dict] | None,
+    signal_classes: list[int],
+    threshold: float = 0.5,
+    fixed_fpr: list[float] | None = None,
+    event_mask: np.ndarray | None = None,
+    playlist: str = "1A",
+    use_global_fpr: bool = True,
+) -> dict[str, dict]:
+    """W-binned metrics with optional per-model aligned ``data`` dicts."""
+    if fixed_fpr is None:
+        fixed_fpr = DEFAULT_FIXED_FPR
+    out: dict[str, dict] = {}
+    for model_name in sorted(results.keys()):
+        data = (
+            data_by_model.get(model_name, default_data)
+            if data_by_model
+            else default_data
+        )
+        out.update(
+            compute_all_metrics_W(
+                {model_name: results[model_name]},
+                data,
+                signal_classes,
+                threshold=threshold,
+                fixed_fpr=fixed_fpr,
+                event_mask=event_mask,
+                playlist=playlist,
+                use_global_fpr=use_global_fpr,
+            )
+        )
+    return out
+
+
 def compute_signal_baseline(
     results: dict[str, list[dict]],
     data: dict,

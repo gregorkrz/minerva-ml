@@ -31,6 +31,31 @@ _PREDICT_BASELINE_MLP_RE = re.compile(
     r"_cond_only_lowLR_(MLP\d+)_classifier_predictBaseline_NR_full_seed(-?\d+)_",
     re.IGNORECASE,
 )
+# Cond-only MLP: --predict-baseline + kinematic binned loss (see train.py -name suffix).
+_PREDICT_BASELINE_MLP_BINNED_RE = re.compile(
+    r"_cond_only_lowLR_(MLP\d+)_classifier_predictBaseline_binned(W|q3)_([A-Za-z0-9]+)_NR_full_seed(-?\d+)_",
+    re.IGNORECASE,
+)
+_PREDICT_BASELINE_MLP_BINNED_PLOT_KEY = {
+    "w": "MLP-predictBaseline-binnedW",
+    "q3": "MLP-predictBaseline-binnedq3",
+}
+
+# Cond-only MLP: MC-truth labels + kinematic binned loss (no --predict-baseline).
+_MLP_BINNED_RE = re.compile(
+    r"_cond_only_lowLR_(MLP\d+)_classifier_binned(W|q3)_([A-Za-z0-9]+)_NR_full_seed(-?\d+)_",
+    re.IGNORECASE,
+)
+_MLP_BINNED_PLOT_KEY: dict[str, dict[str, str]] = {
+    "w": {
+        "ccn1pipm": "MLP-binnedW",
+        "ccn1pipmbin": "MLP-binnedW-Bin",
+    },
+    "q3": {
+        "ccn1pipm": "MLP-binnedq3",
+        "ccn1pipmbin": "MLP-binnedq3-Bin",
+    },
+}
 
 
 _HYPERSCALE_RUN_RE = re.compile(
@@ -76,6 +101,46 @@ def parse_binned_classifier_model_cap(name: str) -> tuple[str, int] | None:
     return f"{base}-{suffix}", int(cap_s)
 
 
+def parse_binned_mlp_model_cap(name: str) -> tuple[str, int] | None:
+    """Map cond-only MLP binned-loss runs (MC truth) to plot keys.
+
+    Examples::
+
+        Run_cond_only_lowLR_MLP3_classifier_binnedW_CCN1pipm_NR_full_seed55_...
+        -> ("MLP-binnedW", -1)
+
+        Run_..._binnedW_CCN1pipmBin_... -> ("MLP-binnedW-Bin", -1)
+    """
+    m = _MLP_BINNED_RE.search(name)
+    if m is None:
+        return None
+    _mlp_variant, binned_var, signal, _seed = m.groups()
+    plot_key = _MLP_BINNED_PLOT_KEY.get(binned_var.lower(), {}).get(signal.lower())
+    if plot_key is None:
+        return None
+    return plot_key, -1
+
+
+def parse_predict_baseline_binned_mlp_model_cap(
+    name: str,
+) -> tuple[str, int] | None:
+    """Map cond-only MLP ``--predict-baseline`` + binned-loss runs to plot keys.
+
+    Example::
+
+        Run_cond_only_lowLR_MLP3_classifier_predictBaseline_binnedW_CCN1pipmBin_NR_full_seed55_...
+        -> ("MLP-predictBaseline-binnedW", -1)
+    """
+    m = _PREDICT_BASELINE_MLP_BINNED_RE.search(name)
+    if m is None:
+        return None
+    _mlp_variant, binned_var, _signal, _seed = m.groups()
+    plot_key = _PREDICT_BASELINE_MLP_BINNED_PLOT_KEY.get(binned_var.lower())
+    if plot_key is None:
+        return None
+    return plot_key, -1
+
+
 def parse_predict_baseline_classifier_model_cap(
     name: str,
 ) -> tuple[str, int] | None:
@@ -89,6 +154,9 @@ def parse_predict_baseline_classifier_model_cap(
         Run_cond_only_lowLR_MLP3_classifier_predictBaseline_NR_full_seed55_...
         -> ("MLP-Baseline", -1)
     """
+    binned_mlp = parse_predict_baseline_binned_mlp_model_cap(name)
+    if binned_mlp is not None:
+        return binned_mlp
     m = _PREDICT_BASELINE_TRANSFORMER_RE.search(name)
     if m is not None:
         raw, cap_s, _seed = m.groups()
@@ -153,79 +221,91 @@ def get_runs_by_model_and_cap(
           map to model key ``Transformer2-DIS`` (all-events Transformer2 stays ``Transformer2``).
       - HyperScale: Run_*_HyperScale_{small|medium}[_rw]_{basic|embedding|pool}_regression_<cap>_...
           -> ``HyperScale-small``, ``HyperScale-small-rw``, etc. (match ``_rw`` before pretrained).
+      - BDT regression: Run_*_BDT_regression_... → ``BDT`` (cap -1).
     dataset_cap is -1 for full 6M dataset, or a positive int for smaller caps.
     """
     run_names = fetch_runs_from_wandb(tag, project)
     # model_name -> dataset_cap -> list of run names
     result = defaultdict(lambda: defaultdict(list))
     for name in run_names:
-        model, cap = None, None
-        # Match OLS_RW before OLS
-        m = re.search(r"_OLS_RW_regression_(-?\d+)_", name)
-        if m:
-            model, cap = "OmniLearned-small-rw", int(m.group(1))
-        # if model is None:
-        # #   m = re.search(r"_OLS_int_regression_(-?\d+)_", name)
-        #    if m:
-        #        model, cap = "OmniLearned-small-int", int(m.group(1))
-        if model is None:
-            m = re.search(r"_OLS_regression_(-?\d+)_", name)
-            if m:
-                model, cap = "OmniLearned-small", int(m.group(1))
-        if model is None:
-            m = re.search(r"_OLM_FB_regression_(-?\d+)_", name)
-            if m:
-                print("Found regression with OL-medium!")
-                model, cap = "OmniLearned-medium", int(m.group(1))
-        if model is None:
-            m = re.search(r"_regression_(Transformer[^_]+)_data_cap_(-?\d+)_", name)
-            if m:
-                raw, cap = m.group(1), int(m.group(2))
-                if "_DIS_only_" in name and raw == "Transformer2":
-                    model = "Transformer2-DIS"
-                elif raw in ("Transformer1", "Transformer1NR"):
-                    model = "Transformer-xsmall"
-                elif raw == "Transformer3NR":
-                    model = "Transformer-small"
-                else:
-                    model = raw
-        if model is None:
-            m = re.search(r"_BERT_tiny_energy_order_regression_(-?\d+)_", name)
-            if m:
-                model, cap = "BERT-tiny-energy-order", int(m.group(1))
-        if model is None:
-            m = re.search(r"_BERT_tiny_rw_regression_(-?\d+)_", name)
-            if m:
-                model, cap = "BERT-tiny-rw", int(m.group(1))
-        if model is None:
-            m = re.search(r"_BERT_tiny_regression_(-?\d+)_", name)
-            if m:
-                model, cap = "BERT-tiny", int(m.group(1))
-        if model is None:
-            parsed = parse_hyperscale_model_cap(name, task="regression")
-            if parsed is not None:
-                model, cap = parsed
-        if model is None:
-            # Regression NR-full only; do not match _cond_only_lowLR_classifier_NR_full_ (classification).
-            m = re.search(r"_cond_only_lowLR_(?!classifier_)NR_full_seed(-?\d+)_", name)
-            if m:
-                model, cap = "MLP", -1
-        if model is None:
-            m = re.search(r"_cond_only_lowLR_([a-zA-Z0-9]+)_seed(-?\d+)_", name)
-            if m:
-                model = "MLP"
-                dscap = m.group(1)
-                # Determine cap: map "full" to -1, else try to interpret as int if possible
-                if dscap == "full":
-                    cap = -1
-                else:
-                    try:
-                        cap = int(dscap)
-                    except ValueError:
-                        cap = dscap  # If not int, just pass the DSCAP string
-        if model is not None:
+        parsed = regression_model_cap_from_name(name)
+        if parsed is not None:
+            model, cap = parsed
             result[model][cap].append(name)
     return {model: dict(caps) for model, caps in result.items()}
+
+
+def regression_model_cap_from_name(name: str) -> tuple[str, object] | None:
+    """Map a single regression run name to ``(plot_model_key, dataset_cap)``.
+
+    Pure function (no wandb); returns ``None`` when the name is not a recognized
+    regression run. See :func:`get_runs_by_model_and_cap` for the formats.
+    """
+    model, cap = None, None
+    # Match OLS_RW before OLS
+    m = re.search(r"_OLS_RW_regression_(-?\d+)_", name)
+    if m:
+        model, cap = "OmniLearned-small-rw", int(m.group(1))
+    if model is None:
+        m = re.search(r"_OLS_regression_(-?\d+)_", name)
+        if m:
+            model, cap = "OmniLearned-small", int(m.group(1))
+    if model is None:
+        m = re.search(r"_OLM_FB_regression_(-?\d+)_", name)
+        if m:
+            model, cap = "OmniLearned-medium", int(m.group(1))
+    if model is None:
+        m = re.search(r"_regression_(Transformer[^_]+)_data_cap_(-?\d+)_", name)
+        if m:
+            raw, cap = m.group(1), int(m.group(2))
+            if "_DIS_only_" in name and raw == "Transformer2":
+                model = "Transformer2-DIS"
+            elif raw in ("Transformer1", "Transformer1NR"):
+                model = "Transformer-xsmall"
+            elif raw == "Transformer3NR":
+                model = "Transformer-small"
+            else:
+                model = raw
+    if model is None:
+        m = re.search(r"_BERT_tiny_energy_order_regression_(-?\d+)_", name)
+        if m:
+            model, cap = "BERT-tiny-energy-order", int(m.group(1))
+    if model is None:
+        m = re.search(r"_BERT_tiny_rw_regression_(-?\d+)_", name)
+        if m:
+            model, cap = "BERT-tiny-rw", int(m.group(1))
+    if model is None:
+        m = re.search(r"_BERT_tiny_regression_(-?\d+)_", name)
+        if m:
+            model, cap = "BERT-tiny", int(m.group(1))
+    if model is None:
+        parsed = parse_hyperscale_model_cap(name, task="regression")
+        if parsed is not None:
+            model, cap = parsed
+    if model is None:
+        m = re.search(r"_BDT_regression_", name)
+        if m:
+            model, cap = "BDT", -1
+    if model is None:
+        # Regression NR-full only; do not match _cond_only_lowLR_classifier_NR_full_ (classification).
+        m = re.search(r"_cond_only_lowLR_(?!classifier_)NR_full_seed(-?\d+)_", name)
+        if m:
+            model, cap = "MLP", -1
+    if model is None:
+        m = re.search(r"_cond_only_lowLR_([a-zA-Z0-9]+)_seed(-?\d+)_", name)
+        if m:
+            model = "MLP"
+            dscap = m.group(1)
+            if dscap == "full":
+                cap = -1
+            else:
+                try:
+                    cap = int(dscap)
+                except ValueError:
+                    cap = dscap
+    if model is None:
+        return None
+    return model, cap
 
 
 def get_classification_runs_by_model_and_cap(
@@ -258,6 +338,12 @@ def get_classification_runs_by_model_and_cap(
       - Predict baseline (--predict-baseline): ``..._predictBaseline`` on Transformer runs
         → ``Transformer-small-Baseline`` (etc.); MLP sweep names with
         ``_classifier_predictBaseline_`` → ``MLP-Baseline``.
+      - Predict baseline + binned loss (cond-only MLP):
+        ``..._classifier_predictBaseline_binnedW_CCN1pipmBin_NR_full_seed...``
+        → ``MLP-predictBaseline-binnedW`` (``binnedq3`` → ``MLP-predictBaseline-binnedq3``).
+      - Binned loss on MC truth (cond-only MLP):
+        ``..._classifier_binnedW_CCN1pipm_NR_full_seed...`` → ``MLP-binnedW``;
+        ``..._binnedW_CCN1pipmBin_...`` → ``MLP-binnedW-Bin``.
       - HyperScale: Run_*_HyperScale_{small|medium}[_rw]_..._classifier_<cap>_... (same keys as regression).
     dataset_cap is -1 for full 6M dataset, or a positive int for smaller caps.
     """
@@ -266,84 +352,108 @@ def get_classification_runs_by_model_and_cap(
     result = defaultdict(lambda: defaultdict(list))
 
     for name in run_names:
-        model, cap = None, None
-        binned = parse_binned_classifier_model_cap(name)
-        if binned is not None:
-            model, cap = binned
-            result[model][cap].append(name)
-            continue
-        pred_bl = parse_predict_baseline_classifier_model_cap(name)
-        if pred_bl is not None:
-            model, cap = pred_bl
-            result[model][cap].append(name)
-            continue
-        # Match OLS_RW before OLS
-        m = re.search(r"_OLS_RW_classifier_(-?\d+)_", name)
-        if m:
-            model, cap = "OmniLearned-small-rw", int(m.group(1))
-        # if model is None:
-        #    m = re.search(r"_OLS_int_classifier_(-?\d+)_", name)
-        #    if m:
-        #        model, cap = "OmniLearned-small-int", int(m.group(1))
-        if model is None:
-            m = re.search(r"_OLS_classifier_(-?\d+)_", name)
-            if m:
-                model, cap = "OmniLearned-small", int(m.group(1))
-        if model is None:
-            m = re.search(r"_OLM_FB_?classifier_(-?\d+)_", name)
-            if m:
-                model, cap = "OmniLearned-medium", int(m.group(1))
-        if model is None:
-            m = re.search(r"_classifier_(Transformer[^_]+)_data_cap_(-?\d+)_", name)
-            if m:
-                raw, cap = m.group(1), int(m.group(2))
-                if "_DIS_only_" in name and raw == "Transformer2":
-                    model = "Transformer2-DIS"
-                elif raw in ("Transformer1", "Transformer1NR"):
-                    model = "Transformer-xsmall"
-                elif raw == "Transformer3NR":
-                    model = "Transformer-small"
-                else:
-                    model = raw
-        if model is None:
-            m = re.search(r"_BERT_tiny_energy_order_classifier_(-?\d+)_", name)
-            if m:
-                model, cap = "BERT-tiny-energy-order", int(m.group(1))
-        if model is None:
-            m = re.search(r"_BERT_tiny_rw_classifier_(-?\d+)_", name)
-            if m:
-                model, cap = "BERT-tiny-rw", int(m.group(1))
-        if model is None:
-            m = re.search(r"_BERT_tiny_classifier_(-?\d+)_", name)
-            if m:
-                model, cap = "BERT-tiny", int(m.group(1))
-        if model is None:
-            parsed = parse_hyperscale_model_cap(name, task="classifier")
-            if parsed is not None:
-                model, cap = parsed
-        if model is None:
-            m = re.search(
-                r"_cond_only_lowLR_(MLP\d+)_classifier_NR_full_seed(-?\d+)_", name
-            )
-            if m:
-                model, cap = "MLP", -1
-        if model is None:
-            m = re.search(r"_cond_only_lowLR_classifier_NR_full_seed(-?\d+)_", name)
-            if m:
-                model, cap = "MLP", -1
-        if model is None:
-            m = re.search(r"_class_cond_only_lowLR_([a-zA-Z0-9]+)_seed(-?\d+)_", name)
-            if m:
-                model = "MLP"
-                dscap = m.group(1)
-                if dscap == "full":
-                    cap = -1
-                else:
-                    try:
-                        cap = int(dscap)
-                    except ValueError:
-                        cap = dscap
-        if model is not None:
+        parsed = classification_model_cap_from_name(name)
+        if parsed is not None:
+            model, cap = parsed
             result[model][cap].append(name)
 
     return {model: dict(caps) for model, caps in result.items()}
+
+
+def classification_model_cap_from_name(name: str) -> tuple[str, object] | None:
+    """Map a single classification run name to ``(plot_model_key, dataset_cap)``.
+
+    Pure function (no wandb); returns ``None`` when the name is not a recognized
+    classification run. See :func:`get_classification_runs_by_model_and_cap`.
+    """
+    binned = parse_binned_classifier_model_cap(name)
+    if binned is not None:
+        return binned
+    binned_mlp = parse_binned_mlp_model_cap(name)
+    if binned_mlp is not None:
+        return binned_mlp
+    pred_bl = parse_predict_baseline_classifier_model_cap(name)
+    if pred_bl is not None:
+        return pred_bl
+    model, cap = None, None
+    # Match OLS_RW before OLS
+    m = re.search(r"_OLS_RW_classifier_(-?\d+)_", name)
+    if m:
+        model, cap = "OmniLearned-small-rw", int(m.group(1))
+    if model is None:
+        m = re.search(r"_OLS_classifier_(-?\d+)_", name)
+        if m:
+            model, cap = "OmniLearned-small", int(m.group(1))
+    if model is None:
+        m = re.search(r"_OLM_FB_?classifier_(-?\d+)_", name)
+        if m:
+            model, cap = "OmniLearned-medium", int(m.group(1))
+    if model is None:
+        m = re.search(r"_classifier_(Transformer[^_]+)_data_cap_(-?\d+)_", name)
+        if m:
+            raw, cap = m.group(1), int(m.group(2))
+            if "_DIS_only_" in name and raw == "Transformer2":
+                model = "Transformer2-DIS"
+            elif raw in ("Transformer1", "Transformer1NR"):
+                model = "Transformer-xsmall"
+            elif raw == "Transformer3NR":
+                model = "Transformer-small"
+            else:
+                model = raw
+    if model is None:
+        m = re.search(r"_BERT_tiny_energy_order_classifier_(-?\d+)_", name)
+        if m:
+            model, cap = "BERT-tiny-energy-order", int(m.group(1))
+    if model is None:
+        m = re.search(r"_BERT_tiny_rw_classifier_(-?\d+)_", name)
+        if m:
+            model, cap = "BERT-tiny-rw", int(m.group(1))
+    if model is None:
+        m = re.search(r"_BERT_tiny_classifier_(-?\d+)_", name)
+        if m:
+            model, cap = "BERT-tiny", int(m.group(1))
+    if model is None:
+        parsed = parse_hyperscale_model_cap(name, task="classifier")
+        if parsed is not None:
+            model, cap = parsed
+    if model is None:
+        # Cond-only gradient-boosted-tree baseline (train.py --use-bdt).
+        # MC-truth BDT with W-binned loss (name contains "binnedW") → "BDT-binnedW";
+        # plain MC-truth BDT → "BDT". --predict-baseline runs → "BDT-BC" /
+        # "BDT-BC-binnedW".
+        m = re.search(r"_BDT_classifier_", name)
+        if m:
+            if re.search(r"predictBaseline", name, re.IGNORECASE):
+                if re.search(r"binnedW", name, re.IGNORECASE):
+                    model, cap = "BDT-BC-binnedW", -1
+                else:
+                    model, cap = "BDT-BC", -1
+            elif re.search(r"binnedW", name, re.IGNORECASE):
+                model, cap = "BDT-binnedW", -1
+            else:
+                model, cap = "BDT", -1
+    if model is None:
+        m = re.search(
+            r"_cond_only_lowLR_(MLP\d+)_classifier_NR_full_seed(-?\d+)_", name
+        )
+        if m:
+            model, cap = "MLP", -1
+    if model is None:
+        m = re.search(r"_cond_only_lowLR_classifier_NR_full_seed(-?\d+)_", name)
+        if m:
+            model, cap = "MLP", -1
+    if model is None:
+        m = re.search(r"_class_cond_only_lowLR_([a-zA-Z0-9]+)_seed(-?\d+)_", name)
+        if m:
+            model = "MLP"
+            dscap = m.group(1)
+            if dscap == "full":
+                cap = -1
+            else:
+                try:
+                    cap = int(dscap)
+                except ValueError:
+                    cap = dscap
+    if model is None:
+        return None
+    return model, cap

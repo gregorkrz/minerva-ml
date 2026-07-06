@@ -9,7 +9,8 @@ Models (plot keys):
   HyperScale-small, HyperScale-small-rw,
   OmniLearned-small, OmniLearned-small-rw,
   OmniLearned-medium (frozen backbone via OLM_FB),
-  HyperScale-medium, HyperScale-medium-rw
+  HyperScale-medium, HyperScale-medium-rw,
+  BERT-tiny (BERT-small pretrained), BERT-tiny-rw (BERT-small random init)
 
 MLP (MLP3) commands are printed when ``--models`` includes ``MLP`` (local only, no SLURM).
 
@@ -17,6 +18,7 @@ Usage (from repo root):
 
     python src/jobs/submit_new_dataset_jobs.py --seeds 55 56 57 58
     python src/jobs/submit_new_dataset_jobs.py --seeds 55 --models HyperScale-small
+    python src/jobs/submit_new_dataset_jobs.py --seeds 55 60 61 62 --models BERT-tiny BERT-tiny-rw
     python src/jobs/submit_new_dataset_jobs.py --seeds 55 --models HyperScale-small --tasks regression
     python src/jobs/submit_new_dataset_jobs.py --seeds 55 --models MLP
     python src/jobs/submit_new_dataset_jobs.py --seeds 55 --dry-run
@@ -144,6 +146,26 @@ MODEL_SPECS: tuple[ModelSpec, ...] = (
         walltime_regression="04:00:00",
         walltime_classifier="03:00:00",
         fp16=True,
+    ),
+    ModelSpec(
+        plot_key="BERT-tiny",
+        generate_model="BERT-tiny",
+        bs=2048,
+        grad_accum_steps=1,
+        max_steps_regression=500_000,
+        max_steps_classifier=500_000,
+        walltime_regression="04:00:00",
+        walltime_classifier="04:00:00",
+    ),
+    ModelSpec(
+        plot_key="BERT-tiny-rw",
+        generate_model="BERT-tiny-rw",
+        bs=2048,
+        grad_accum_steps=1,
+        max_steps_regression=500_000,
+        max_steps_classifier=500_000,
+        walltime_regression="04:00:00",
+        walltime_classifier="04:00:00",
     ),
 )
 

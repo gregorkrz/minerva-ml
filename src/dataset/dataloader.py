@@ -133,6 +133,19 @@ def _pad_or_truncate(tensor, target_len):
     return torch.cat([tensor, tensor.new_zeros(pad_shape)], dim=0)
 
 
+def collate_tabular_cond(batch):
+    """Collate function for tabular cond-only datasets (no point clouds)."""
+    result = {
+        "cond": torch.stack([item["cond"] for item in batch]),
+        "y": torch.stack([item["y"] for item in batch]),
+    }
+    if all("loss_weight" in item for item in batch):
+        result["loss_weight"] = torch.stack([item["loss_weight"] for item in batch])
+    if all("pid_label" in item for item in batch):
+        result["pid_label"] = torch.stack([item["pid_label"] for item in batch])
+    return result
+
+
 def collate_point_cloud(batch, max_particles=33):
     """
     Collate function for point clouds and labels with truncation performed per batch.
@@ -276,6 +289,7 @@ class HEPTorchDataset(Dataset):
         data_path: str | Path | None = None,
         dataset_playlist: str | None = None,
         dataset_split: str | None = None,
+        tabular_only: bool = False,
     ):
         """
         Args:
@@ -291,6 +305,7 @@ class HEPTorchDataset(Dataset):
         self.use_pid = use_pid
         self.concat_additional_info = concat_additional_info
         self.use_energy_sums = use_energy_sums
+        self.tabular_only = tabular_only
         self.folder = folder
         self.file_paths = sorted(
             list(
@@ -301,31 +316,57 @@ class HEPTorchDataset(Dataset):
                 ]
             )
         )
-        print("Loading files into memory")
-        self.files = [
-            torch.load(file, weights_only=True, mmap=False) for file in self.file_paths
-        ]
-        print("Files loaded into memory")
-        self.files_n_events = np.array(
-            [len(file["data"].offsets()) - 1 for file in self.files]
-        )  # -1 because the last offset is the total number of events
-        self.files_n_events_sum = np.cumsum(self.files_n_events)
-        self.files_values = [file["data"].values() for file in self.files]
-        self.files_offsets = [file["data"].offsets() for file in self.files]
-        # data_feature_dim: 10 = new format (data already has features+additional_info concat), 5 = legacy (data + data_additional_info)
-        self.data_feature_dim = self.files_values[0].shape[1]
-        if "data_additional_info" in self.files[0]:
-            self.files_values_additional_info = [
-                file["data_additional_info"].values() for file in self.files
-            ]
-            self.files_offsets_additional_info = [
-                file["data_additional_info"].offsets() for file in self.files
-            ]
-        else:
+        if tabular_only and not use_cond:
+            raise ValueError("tabular_only requires use_cond=True")
+        if tabular_only:
+            print("Loading tabular features only (no point clouds)")
+            self.files_truth_labels = []
+            self.files_global_features = []
+            files_n_events = []
+            for file in self.file_paths:
+                obj = torch.load(file, weights_only=True, mmap=False)
+                self.files_truth_labels.append(obj["truth_labels"])
+                self.files_global_features.append(obj["global_features"])
+                gf = obj["global_features"]
+                files_n_events.append(
+                    gf.shape[0] if torch.is_tensor(gf) else len(gf)
+                )
+                del obj
+            self.files_n_events = np.array(files_n_events, dtype=np.int64)
+            self.files = None
+            self.files_values = None
+            self.files_offsets = None
             self.files_values_additional_info = None
             self.files_offsets_additional_info = None
-        # truth_labels and global_features are regular tensors, not nested
-        self.files_truth_labels = [file["truth_labels"] for file in self.files]
+            self.data_feature_dim = None
+        else:
+            print("Loading files into memory")
+            self.files = [
+                torch.load(file, weights_only=True, mmap=False)
+                for file in self.file_paths
+            ]
+            print("Files loaded into memory")
+            self.files_n_events = np.array(
+                [len(file["data"].offsets()) - 1 for file in self.files]
+            )  # -1 because the last offset is the total number of events
+            self.files_values = [file["data"].values() for file in self.files]
+            self.files_offsets = [file["data"].offsets() for file in self.files]
+            # data_feature_dim: 10 = new format (data already has features+additional_info concat), 5 = legacy (data + data_additional_info)
+            self.data_feature_dim = self.files_values[0].shape[1]
+            if "data_additional_info" in self.files[0]:
+                self.files_values_additional_info = [
+                    file["data_additional_info"].values() for file in self.files
+                ]
+                self.files_offsets_additional_info = [
+                    file["data_additional_info"].offsets() for file in self.files
+                ]
+            else:
+                self.files_values_additional_info = None
+                self.files_offsets_additional_info = None
+            # truth_labels and global_features are regular tensors, not nested
+            self.files_truth_labels = [file["truth_labels"] for file in self.files]
+            self.files_global_features = [file["global_features"] for file in self.files]
+        self.files_n_events_sum = np.cumsum(self.files_n_events)
         # add a column with CC1orNPi labels
         if task.classification_CC1orNPi:
             self.files_truth_labels = [
@@ -338,7 +379,6 @@ class HEPTorchDataset(Dataset):
                 )
                 for file_truth_labels in self.files_truth_labels
             ]
-        self.files_global_features = [file["global_features"] for file in self.files]
         self.global_feature_dim = self.files_global_features[0].shape[1]
         # Flatten truth and global features for single-index access (faster __getitem__)
         self._truth_flat = np.vstack(
@@ -521,16 +561,7 @@ class HEPTorchDataset(Dataset):
     def __getitem__(self, idx):
         # Remap logical idx -> physical idx in the flattened/concatenated ordering.
         phys_idx = int(self._event_idx_map[idx])
-        file_idx = np.searchsorted(self.files_n_events_sum, phys_idx, side="right")
-        if file_idx > 0:
-            sample_idx = phys_idx - self.files_n_events_sum[file_idx - 1]
-        else:
-            sample_idx = phys_idx
         idx = phys_idx
-        off = self.files_offsets[file_idx]
-        start, end = off[sample_idx].item(), off[sample_idx + 1].item()
-        data = self.files_values[file_idx][start:end]
-        n_pt = data.shape[0]
         sample = {}
 
         # Labels from pre-flattened arrays (single index)
@@ -568,6 +599,19 @@ class HEPTorchDataset(Dataset):
 
         if self.use_cond:
             sample["cond"] = self._global_flat[idx].float()
+
+        if self.tabular_only:
+            return sample
+
+        file_idx = np.searchsorted(self.files_n_events_sum, phys_idx, side="right")
+        if file_idx > 0:
+            sample_idx = phys_idx - self.files_n_events_sum[file_idx - 1]
+        else:
+            sample_idx = phys_idx
+        off = self.files_offsets[file_idx]
+        start, end = off[sample_idx].item(), off[sample_idx + 1].item()
+        data = self.files_values[file_idx][start:end]
+        n_pt = data.shape[0]
 
         if self.use_pid:
             sample["pid"] = data[:, self.pid_idx].int()
@@ -630,6 +674,7 @@ def load_data(
     event_types: list[int] | None = None,
     binned_loss_var: str | None = None,
     binned_loss_signal: str | None = None,
+    tabular_only: bool = False,
 ):
     supported_datasets = [
         "minerva_1A",
@@ -670,6 +715,7 @@ def load_data(
             data_path=path,
             dataset_playlist=dataset_playlist,
             dataset_split=dataset_type,
+            tabular_only=tabular_only,
         )
         if nevts > 0 and nevts < len(data):
             print(f"Using a subset of the data: {nevts} events out of {len(data)}")
@@ -684,9 +730,13 @@ def load_data(
             sampler=None,
             num_workers=num_workers,
             drop_last=False,
-            collate_fn=lambda x: collate_point_cloud(x, max_particles=max_particles),
-            prefetch_factor=4 if distributed else None,
-            persistent_workers=distributed,
+            collate_fn=(
+                collate_tabular_cond
+                if tabular_only
+                else lambda x: collate_point_cloud(x, max_particles=max_particles)
+            ),
+            prefetch_factor=4 if distributed and num_workers > 0 else None,
+            persistent_workers=distributed and num_workers > 0,
         )
         if task.type == "classifier":
             base_ds = data.dataset if isinstance(data, Subset) else data

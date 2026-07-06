@@ -27,6 +27,20 @@ def test_baseline_labels_ccnpi_gt1():
     assert labels[0] == 1
 
 
+def test_baseline_labels_cc1pi_multi_michel():
+    # 1 charged prong with >=2 Michel electrons is still CC-1-charged-pion (class 0),
+    # matching the CCNpi+- cut (n_charged_prongs>=1 & improved_nmichel>=1).
+    labels = get_Pi_labels_v2_from_baseline(
+        n_muons=np.array([1, 1]),
+        n_charged_prongs=np.array([1, 1]),
+        improved_nmichel=np.array([2, 3]),
+        is_pizero_signal=np.array([0, 0]),
+        two_gamma_inv_mass=np.array([-1.0, -1.0]),
+    )
+    assert labels[0] == 0
+    assert labels[1] == 0
+
+
 def test_baseline_labels_cc1pi0():
     labels = get_Pi_labels_v2_from_baseline(
         n_muons=np.array([1]),

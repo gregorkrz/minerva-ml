@@ -8,15 +8,21 @@ from typing import Any
 
 import numpy as np
 
-from ._constants import FLOPS_PER_STEP
+from ._constants import FLOPS_PER_STEP, is_bdt_model
 
 
 def get_validation_loss_history(
     run_name: str,
     project: str = "minerva-models",
     with_steps: bool = False,
+    *,
+    model_name: str | None = None,
 ) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
-    """Return logged ``eval_loss`` for a run (every 1000 steps, from wandb history)."""
+    """Return logged ``eval_loss`` for a run (from wandb history).
+
+    Neural runs: points at every 1000 steps. BDT baselines: final ``eval_loss``
+    (typically logged once at step 0).
+    """
     import wandb
 
     api = wandb.Api(timeout=60)
@@ -38,7 +44,10 @@ def get_validation_loss_history(
     steps = np.asarray(hist["_step"], dtype=float)[mask]
     losses = np.asarray(hist["eval_loss"].dropna(), dtype=float)
     step_int = np.round(steps).astype(int)
-    keep = (step_int >= 1000) & (step_int % 1000 == 0)
+    if model_name is not None and is_bdt_model(model_name):
+        keep = np.ones(len(steps), dtype=bool)
+    else:
+        keep = (step_int >= 1000) & (step_int % 1000 == 0)
     steps, losses = steps[keep], losses[keep]
     order = np.argsort(steps)
     steps, losses = steps[order], losses[order]
@@ -94,7 +103,9 @@ def collect_histories_for_runs(
     for model, run_names in runs_per_model.items():
         series: list[tuple[np.ndarray, np.ndarray]] = []
         for rn in run_names:
-            st, lo = get_validation_loss_history(rn, with_steps=True)
+            st, lo = get_validation_loss_history(
+                rn, with_steps=True, model_name=model,
+            )
             if len(st) > 0 and len(lo) > 0:
                 series.append((st, lo))
         if series:

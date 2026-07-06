@@ -135,8 +135,22 @@ def _align_per_event_array(
             return rebuilt
 
     test_idx = _resolve_test_idx(data, playlist)
+    # Split-local arrays (length == len(test_idx)) are already aligned to
+    # predictions; test_idx entries are global baseline indices, not positions.
+    if len(arr) == len(test_idx):
+        if len(test_idx) == n_pred:
+            return arr
+        raise ValueError(
+            f"Per-event array length {len(arr)} matches test_idx length "
+            f"{len(test_idx)} but not prediction count {n_pred}."
+        )
     if len(arr) > n_pred and len(test_idx) == n_pred:
-        return arr[test_idx]
+        if int(np.max(test_idx)) < len(arr):
+            return arr[test_idx]
+        raise ValueError(
+            f"Per-event array length {len(arr)} does not match prediction count "
+            f"{n_pred}; test_idx max {int(np.max(test_idx))} exceeds array length."
+        )
     raise ValueError(
         f"Per-event array length {len(arr)} does not match prediction count "
         f"{n_pred} (test_idx length {len(test_idx)})."

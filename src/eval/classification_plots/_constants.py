@@ -162,13 +162,25 @@ def _global_score_thresholds_at_target_fprs(
 DEFAULT_N_BINS = 5
 DEFAULT_Q3_BIN_EDGES = np.array([0, 2.5, 5, 7.5, 10, 12.5, 15, 20, 25])
 
-# Hadronic invariant mass W (GeV bin edges for classification plots).
+# True MC invariant mass W (GeV bin edges for classification plots).
 DEFAULT_W_BIN_EDGES_GEV = np.array([0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0])
+# Axis label for classification figures binned in true MC *W* (always hadronic here).
+TRUE_W_XLABEL = r"True $W$ [GeV]"
 # Fixed x-axis [GeV] for every figure that plots metrics or counts vs *W* (not data-driven).
 W_METRICS_XLIM_GEV: tuple[float, float] = (
     float(DEFAULT_W_BIN_EDGES_GEV[0]),
     float(DEFAULT_W_BIN_EDGES_GEV[-1]),
 )
+
+
+def w_bin_edges_finer(factor: int = 10) -> np.ndarray:
+    """Uniform W bin edges ``factor``× finer than :data:`DEFAULT_W_BIN_EDGES_GEV`."""
+    n_coarse = len(DEFAULT_W_BIN_EDGES_GEV) - 1
+    return np.linspace(
+        float(DEFAULT_W_BIN_EDGES_GEV[0]),
+        float(DEFAULT_W_BIN_EDGES_GEV[-1]),
+        n_coarse * factor + 1,
+    )
 
 # PDG-like masses for W² (MeV), consistent with ``extract_baselines.py``.
 PROTON_MASS_MEV = 938.2720813

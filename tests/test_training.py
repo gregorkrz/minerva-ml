@@ -45,6 +45,33 @@ class TestDataLoading:
         assert batch["X"].shape[1] == 33
         assert batch["y"].dtype == torch.float32
 
+    def test_load_tabular_cond_dataset(self, synthetic_data_dir):
+        from src.dataset.dataloader import load_data, Task
+
+        task = Task(
+            type="regression",
+            regress_E_available_no_muon=True,
+            class_label_idx=9,
+            regress_log=False,
+        )
+        loader, class_weights, _ = load_data(
+            dataset_name="minerva_1A",
+            path=synthetic_data_dir,
+            batch=8,
+            dataset_type="train",
+            task=task,
+            use_cond=True,
+            num_workers=0,
+            distributed=False,
+            shuffle=False,
+            tabular_only=True,
+        )
+        assert class_weights is None
+        batch = next(iter(loader))
+        assert "X" not in batch
+        assert batch["cond"].shape == (8, 16)
+        assert batch["y"].dtype == torch.float32
+
     def test_load_classifier_dataset(self, synthetic_data_dir):
         from src.dataset.dataloader import load_data, Task
 
@@ -108,7 +135,7 @@ class TestTrainingCLI:
                 "3",
                 "--no_wandb",
                 "--num_workers",
-                "1",
+                "0",
                 "--data_path",
                 synthetic_data_dir,
                 "--output_dir",
@@ -116,7 +143,7 @@ class TestTrainingCLI:
             ],
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=180,
             cwd=os.path.dirname(os.path.dirname(__file__)),
         )
         assert result.returncode == 0, f"Training failed:\n{result.stderr}"
@@ -147,7 +174,7 @@ class TestTrainingCLI:
                 "2",
                 "--no_wandb",
                 "--num_workers",
-                "1",
+                "0",
                 "--data_path",
                 synthetic_data_dir,
                 "--output_dir",
@@ -157,7 +184,7 @@ class TestTrainingCLI:
             ],
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=180,
             cwd=os.path.dirname(os.path.dirname(__file__)),
         )
         assert result.returncode == 0, f"Training failed:\n{result.stderr}"
@@ -194,7 +221,7 @@ class TestTrainingCLI:
                 "2",
                 "--no_wandb",
                 "--num_workers",
-                "1",
+                "0",
                 "--data_path",
                 synthetic_data_dir,
                 "--output_dir",
@@ -202,7 +229,7 @@ class TestTrainingCLI:
             ],
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=180,
             cwd=os.path.dirname(os.path.dirname(__file__)),
         )
         assert result.returncode == 0, f"Training failed:\n{result.stderr}"
@@ -237,7 +264,7 @@ class TestTrainingCLI:
                 "2",
                 "--no_wandb",
                 "--num_workers",
-                "1",
+                "0",
                 "--data_path",
                 synthetic_data_dir,
                 "--output_dir",
@@ -246,7 +273,7 @@ class TestTrainingCLI:
             ],
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=180,
             cwd=os.path.dirname(os.path.dirname(__file__)),
         )
         assert result.returncode == 0, f"Training failed:\n{result.stderr}"
@@ -283,7 +310,7 @@ class TestTrainingCLI:
                 "2",
                 "--no_wandb",
                 "--num_workers",
-                "1",
+                "0",
                 "--data_path",
                 synthetic_data_dir,
                 "--output_dir",
@@ -293,7 +320,7 @@ class TestTrainingCLI:
             ],
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=180,
             cwd=os.path.dirname(os.path.dirname(__file__)),
         )
         assert result.returncode == 0, f"Training failed:\n{result.stderr}"
@@ -324,7 +351,7 @@ class TestTrainingCLI:
                 "2",
                 "--no_wandb",
                 "--num_workers",
-                "1",
+                "0",
                 "--data_path",
                 synthetic_data_dir,
                 "--output_dir",

@@ -261,6 +261,20 @@ python -m src.scripts.evaluate_single_gpu --wandb-flag <TAG>
 
 `--wandb-flag` only considers runs whose checkpoint folder name matches a wandb run name with that tag; omit it to evaluate every run under `--ckpt-dir` (default: see `--help`). **Evaluation is very small and fast**—it is fine to run on **login nodes** when a GPU is available locally.
 
+#### Multi-GPU evaluation (`--num-gpus`)
+
+On a multi-GPU node, pass `--num-gpus N` (alias `-n N`) to spread the eval jobs across `N` GPUs. One job runs per GPU concurrently, each pinned via `CUDA_VISIBLE_DEVICES`, and idle GPUs immediately pick up the next pending job. Eval jobs are deduplicated the same way as the single-GPU path (a `(folder, dataset)` is skipped if its `.npz` already exists), so the GPUs never repeat work.
+
+```bash
+# Request a 4-GPU interactive node (note: --gpus 4)
+salloc --nodes 1 --qos interactive --time 04:00:00 --constraint gpu --gpus 4 --account m3246
+
+# Distribute eval jobs across all 4 GPUs
+python -m src.scripts.evaluate_single_gpu --wandb-flag <TAG> --num-gpus 4
+```
+
+When `CUDA_VISIBLE_DEVICES` is already set (as SLURM does on an allocation), the script only schedules onto those allocated GPUs and caps `--num-gpus` to the number visible (warning if you ask for more). `--num-gpus 1` (the default) keeps the original sequential behavior.
+
 ### Evaluation plots (`src.eval`)
 
 Offline plotting reads cached pickles and writes PDFs under `plots/`. Run from the repository root with your project Python environment activated (see section 0).

@@ -53,6 +53,17 @@ FLOPS_PER_STEP: dict[str, float] = {
     "OmniLearned-small-int": 1769 * 1e9,
     "MLP": 2.6 * 1e9,
     "MLP-Baseline": 2.6 * 1e9,
+    "MLP-predictBaseline-binnedW": 2.6 * 1e9,
+    "MLP-predictBaseline-binnedq3": 2.6 * 1e9,
+    "MLP-binnedW": 2.6 * 1e9,
+    "MLP-binnedW-Bin": 2.6 * 1e9,
+    "MLP-binnedq3": 2.6 * 1e9,
+    "MLP-binnedq3-Bin": 2.6 * 1e9,
+    "BDT": 2.6 * 1e9,
+    "BDT-BC": 2.6 * 1e9,
+    "BDT-binnedW": 2.6 * 1e9,
+    "BDT-BC-binnedW": 2.6 * 1e9,
+    "Reco-baseline": 0.0,
     "OmniLearned-medium": 8035 * 1e9,
     "OmniLearned-small-rw": 1769 * 1e9,
     "Transformer2": 6236 * 1e9,
@@ -77,13 +88,24 @@ CLRS_CLASSIFICATION: dict[str, str] = {
     "Transformer-xsmall-Weigh1": "#2563eb",
     "Transformer-xsmall-Weigh2": "#1d4ed8",
     "Transformer-small-Baseline": "#0891b2",
-    "OmniLearned-small": "#ff7f0e",
+    "OmniLearned-small": "#c2410c",
     "OmniLearned-small-int": "#66c2a5",
     "Transformer-small": "#17becf",
     "MLP": "#2ca02c",
     "MLP-Baseline": "#15803d",
+    "MLP-predictBaseline-binnedW": "#166534",
+    "MLP-predictBaseline-binnedq3": "#14532d",
+    "MLP-binnedW": "#22c55e",
+    "MLP-binnedW-Bin": "#16a34a",
+    "MLP-binnedq3": "#4ade80",
+    "MLP-binnedq3-Bin": "#15803d",
+    "BDT": "#b91c1c",
+    "BDT-BC": "#ef4444",
+    "BDT-binnedW": "#7f1d1d",
+    "BDT-BC-binnedW": "#7f1d1d",
+    "Reco-baseline": "#64748b",
     "OmniLearned-medium": "#9467bd",
-    "OmniLearned-small-rw": "#e377c2",
+    "OmniLearned-small-rw": "#ff7f0e",
     "Transformer2": "#d62728",
     "Transformer2-DIS": "#f59e0b",  # amber — distinct from full-data Transformer2 (red)
     "HyperScale-small": "#0284c7",  # sky-600
@@ -99,6 +121,24 @@ def is_bert_model(name: str) -> bool:
 
 def is_hyperscale_model(name: str) -> bool:
     return name.startswith("HyperScale-")
+
+
+def is_bdt_model(name: str) -> bool:
+    """Gradient-boosted-tree baselines (horizontal reference on FLOPs plots)."""
+    return name.startswith("BDT")
+
+
+def is_horizontal_reference_model(name: str) -> bool:
+    """Models drawn as horizontal val-loss references (no training curve)."""
+    return is_bdt_model(name)
+
+
+STEPS_PLOT_EXCLUDED_MODELS: frozenset[str] = frozenset({"Reco-baseline"})
+
+
+def is_steps_plot_excluded_model(name: str) -> bool:
+    """Models never drawn on steps / FLOPs validation-loss panels."""
+    return name in STEPS_PLOT_EXCLUDED_MODELS
 
 
 def is_base_steps_model(name: str) -> bool:
@@ -124,7 +164,7 @@ STEPS_SMALL_MODEL_COLORS: dict[str, str] = {
     "HyperScale-medium": "#86198f",  # fuchsia-800
     "HyperScale-medium-rw": "#e879f9",  # fuchsia-400
     "OmniLearned-small": "#c2410c",  # orange-700
-    "OmniLearned-small-rw": "#fdba74",  # orange-300
+    "OmniLearned-small-rw": "#ff7f0e",  # orange-300
     "BERT-tiny": "#0f766e",  # teal-700
     "BERT-tiny-rw": "#5eead4",  # teal-300
 }
@@ -147,6 +187,8 @@ def plot_model_label(name: str) -> str:
         return "BERT-small-energy-order" + name[len("BERT-tiny-energy-order") :]
     if name.startswith("BERT-tiny"):
         return "BERT-small" + name[len("BERT-tiny") :]
+    if name == "Reco-baseline":
+        return "Cut baseline"
     return name
 
 
@@ -166,11 +208,13 @@ CLRS_REGRESSION: dict[str, str] = {
     "Transformer-small": "#17becf",
     "Transformer2": "#d62728",
     "Transformer2-DIS": "#f59e0b",  # amber
-    "OmniLearned-small": "#ff7f0e",
+    "OmniLearned-small": "#c2410c",
     "OmniLearned-small-int": "#66c2a5",
     "MLP": "#2ca02c",
+    "BDT": "#b91c1c",
+    "Reco-baseline": "#64748b",
     "OmniLearned-medium": "#9467bd",
-    "OmniLearned-small-rw": "#e377c2",
+    "OmniLearned-small-rw": "#ff7f0e",
     "HyperScale-small": "#0284c7",
     "HyperScale-small-rw": "#38bdf8",
     "HyperScale-medium": "#c026d3",
