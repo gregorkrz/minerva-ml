@@ -63,7 +63,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-
 TaskName = Literal["classification", "regression"]
 
 
@@ -167,9 +166,7 @@ class ModelCurveCuts:
         legacy_global = (
             cfg.curve_end is not None and cfg.curve_end.policy == "min_val_loss"
         )
-        legacy_match = (
-            dict(cfg.curve_end.match) if cfg.curve_end is not None else {}
-        )
+        legacy_match = dict(cfg.curve_end.match) if cfg.curve_end is not None else {}
         return cls(
             step_cut=step_cut,
             flop_cut=flop_cut,
@@ -184,7 +181,7 @@ class ModelCurveCuts:
     def is_active(self) -> bool:
         return bool(
             self.step_cut
-            or             self.flop_cut
+            or self.flop_cut
             or self.flop_xmin
             or self.log_step_cut
             or self.step_cut_policy
@@ -280,7 +277,9 @@ class PlotConfig:
         out: dict[str, Any] = {}
         for loss, inner in filtered.items():
             if isinstance(inner, dict):
-                keys = sorted(inner.keys(), key=lambda k: order_idx.get(k, len(order_idx)))
+                keys = sorted(
+                    inner.keys(), key=lambda k: order_idx.get(k, len(order_idx))
+                )
                 out[loss] = {k: inner[k] for k in keys}
             else:
                 out[loss] = inner
@@ -306,7 +305,9 @@ class PlotConfig:
 
         names: set[str] = set()
         for m in self.models:
-            if is_horizontal_reference_model(m.name) and not is_steps_plot_excluded_model(m.name):
+            if is_horizontal_reference_model(
+                m.name
+            ) and not is_steps_plot_excluded_model(m.name):
                 names.add(m.name)
             elif task == "classification" and m.classification_horizontal_ref:
                 names.add(m.name)

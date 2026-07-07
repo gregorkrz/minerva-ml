@@ -71,7 +71,10 @@ def test_apply_flop_cut_step_mask_matches_flops_cap():
     steps = np.array([1000.0, 50_000.0, 40_000_000.0, 60_000_000.0])
     loss = np.array([1.2, 1.1, 1.0, 0.95])
     steps_out, loss_out = _apply_flop_cut_step_mask(
-        steps, loss, flops_per_step=flops, max_log10_flop=16.7,
+        steps,
+        loss,
+        flops_per_step=flops,
+        max_log10_flop=16.7,
     )
     log10_flops = np.log10(steps_out * flops + 1.0)
     assert np.all(log10_flops <= 16.7)
@@ -99,16 +102,14 @@ def test_task_scoped_cut_scalar_applies_to_both_tasks():
 
 def test_plot_config_loads_per_model_cuts(tmp_path):
     cfg_path = tmp_path / "cfg.json"
-    cfg_path.write_text(
-        """
+    cfg_path.write_text("""
         {
           "models": [
             {"name": "A", "color": "#000", "step_cut": 1000, "flop_cut": 16.5, "log_step_cut": 4.55},
             {"name": "B", "color": "#111", "step_cut_match": "A"}
           ]
         }
-        """
-    )
+        """)
     cfg = PlotConfig.load(cfg_path)
     cuts = cfg.model_curve_cuts("classification")
     assert cuts.step_cut["A"] == 1000.0
@@ -119,8 +120,7 @@ def test_plot_config_loads_per_model_cuts(tmp_path):
 
 def test_plot_config_loads_task_scoped_flop_and_step_cuts(tmp_path):
     cfg_path = tmp_path / "cfg.json"
-    cfg_path.write_text(
-        """
+    cfg_path.write_text("""
         {
           "models": [
             {
@@ -131,8 +131,7 @@ def test_plot_config_loads_task_scoped_flop_and_step_cuts(tmp_path):
             }
           ]
         }
-        """
-    )
+        """)
     cfg = PlotConfig.load(cfg_path)
     clf = cfg.model_curve_cuts("classification")
     reg = cfg.model_curve_cuts("regression")

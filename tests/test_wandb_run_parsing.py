@@ -14,9 +14,7 @@ from src.utils.utils import (
 
 
 def test_hyperscale_pretrained_regression():
-    name = (
-        "Run_0601_HyperScale_small_embedding_regression_-1_seed55_20260601_120000"
-    )
+    name = "Run_0601_HyperScale_small_embedding_regression_-1_seed55_20260601_120000"
     assert parse_hyperscale_model_cap(name, task="regression") == (
         "HyperScale-small",
         -1,
@@ -129,9 +127,7 @@ def test_binned_mlp_does_not_match_predict_baseline_binned():
 
 
 def test_binned_mlp_does_not_match_plain_mlp():
-    name = (
-        "Run_cond_only_lowLR_MLP3_classifier_NR_full_seed55_20260625_120000"
-    )
+    name = "Run_cond_only_lowLR_MLP3_classifier_NR_full_seed55_20260625_120000"
     assert parse_binned_mlp_model_cap(name) is None
 
 
@@ -149,9 +145,7 @@ def test_predict_baseline_plain_transformer_small_not_matched():
 
 
 def test_bdt_mc_truth_binned_w_maps_to_bdt_binned_w():
-    name = (
-        "Run_BDT_classifier_binnedW_CCN1pipm_seed55_20260630_120000"
-    )
+    name = "Run_BDT_classifier_binnedW_CCN1pipm_seed55_20260630_120000"
     assert classification_model_cap_from_name(name) == ("BDT-binnedW", -1)
 
 

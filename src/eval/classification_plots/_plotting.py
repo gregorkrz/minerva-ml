@@ -155,10 +155,16 @@ def plot_baseline_tpr_fpr_vs_W(
     global_fpr = _global_reco_baseline_fpr(reco_pred, y_true_binary)
 
     tpr_all = compute_reco_baseline_recall_per_bin(
-        reco_pred, is_signal, w_gev, w_edges,
+        reco_pred,
+        is_signal,
+        w_gev,
+        w_edges,
     )
     fpr_all = compute_reco_baseline_fpr_per_bin(
-        reco_pred, y_true_binary, w_gev, w_edges,
+        reco_pred,
+        y_true_binary,
+        w_gev,
+        w_edges,
     )
 
     rows: list[tuple[str | None, np.ndarray, np.ndarray, np.ndarray | None]] = [
@@ -172,16 +178,26 @@ def plot_baseline_tpr_fpr_vs_W(
             if n_sig == 0:
                 continue
             tpr_row = compute_reco_baseline_recall_per_bin(
-                reco_pred, is_signal & mask, w_gev, w_edges,
+                reco_pred,
+                is_signal & mask,
+                w_gev,
+                w_edges,
             )
             fpr_row = compute_reco_baseline_fpr_per_bin(
-                reco_pred, y_true_binary, w_gev, w_edges, event_mask=mask,
+                reco_pred,
+                y_true_binary,
+                w_gev,
+                w_edges,
+                event_mask=mask,
             )
             rows.append((name, tpr_row, fpr_row, mask))
 
     n_rows = len(rows)
     fig, axes = plt.subplots(
-        n_rows, 1, figsize=(10.0, 3.6 * n_rows), constrained_layout=True,
+        n_rows,
+        1,
+        figsize=(10.0, 3.6 * n_rows),
+        constrained_layout=True,
     )
     if n_rows == 1:
         axes = [axes]
@@ -533,10 +549,20 @@ def plot_multi_pion_vs_q3(
     for model_name, agg in sorted(all_metrics_q3.items(), key=lambda kv: kv[0]):
         clr = {} if colors is None else {"color": colors.get(model_name)}
         _plot_metric_line(
-            axes[0], q3_mid, agg["auprc"], plot_model_label(model_name), uncertainties, **clr
+            axes[0],
+            q3_mid,
+            agg["auprc"],
+            plot_model_label(model_name),
+            uncertainties,
+            **clr,
         )
         _plot_metric_line(
-            axes[1], q3_mid, agg["auroc"], plot_model_label(model_name), uncertainties, **clr
+            axes[1],
+            q3_mid,
+            agg["auroc"],
+            plot_model_label(model_name),
+            uncertainties,
+            **clr,
         )
         for fpr_val in fixed_fpr:
             key = f"tpr@{fpr_val}"
@@ -614,10 +640,20 @@ def plot_multi_classification_vs_W(
     for model_name, agg in sorted(all_metrics_W.items(), key=lambda kv: kv[0]):
         clr = {} if colors is None else {"color": colors.get(model_name)}
         _plot_metric_line(
-            axes[0], w_mid, agg["auprc"], plot_model_label(model_name), uncertainties, **clr
+            axes[0],
+            w_mid,
+            agg["auprc"],
+            plot_model_label(model_name),
+            uncertainties,
+            **clr,
         )
         _plot_metric_line(
-            axes[1], w_mid, agg["auroc"], plot_model_label(model_name), uncertainties, **clr
+            axes[1],
+            w_mid,
+            agg["auroc"],
+            plot_model_label(model_name),
+            uncertainties,
+            **clr,
         )
         for fpr_val in fixed_fpr:
             key = f"tpr@{fpr_val}"
@@ -1118,15 +1154,19 @@ def _sb_stairs_plot(
     n_bkg = np.asarray(n_bkg, dtype=float)
     sb = np.divide(n_sig, n_bkg, out=np.full_like(n_sig, np.nan), where=n_bkg > 0)
     sb_plot = ma.masked_invalid(sb)
-    ax.stairs(sb_plot, np.asarray(bin_edges, dtype=float), color="#2ca02c", linewidth=1.8, label=r"$S/B$")
+    ax.stairs(
+        sb_plot,
+        np.asarray(bin_edges, dtype=float),
+        color="#2ca02c",
+        linewidth=1.8,
+        label=r"$S/B$",
+    )
     ax.grid(True, alpha=0.35)
     if log_x:
         ax.set_xscale("log")
 
 
-def _pion_signal_bins(
-    data: dict, pid: np.ndarray, signal_classes: list[int]
-) -> dict:
+def _pion_signal_bins(data: dict, pid: np.ndarray, signal_classes: list[int]) -> dict:
     """Shallow copy of *data* with equal-frequency pion-E/θ edges on signal."""
     return data_with_signal_pion_bins(
         data,
@@ -1283,14 +1323,18 @@ def plot_composition_vs_kinematic(
         n_bkg_tot = sum(counts_bkg.values())
 
         ax_sig = axes[row_idx, 0]
-        _stack_bars_by_inttype(ax_sig, bin_edges, counts_sig, annotate_total=annotate_counts)
+        _stack_bars_by_inttype(
+            ax_sig, bin_edges, counts_sig, annotate_total=annotate_counts
+        )
         ax_sig.set_xlabel(xlabel, fontsize=_LABEL_FS)
         ax_sig.set_ylabel(f"{row_label} signal events", fontsize=_LABEL_FS)
         ax_sig.tick_params(axis="both", labelsize=_TICK_FS)
         ax_sig.set_title(rf"{row_label}: signal composition")
 
         ax_bkg = axes[row_idx, 1]
-        _stack_bars_by_inttype(ax_bkg, bin_edges, counts_bkg, annotate_total=annotate_counts)
+        _stack_bars_by_inttype(
+            ax_bkg, bin_edges, counts_bkg, annotate_total=annotate_counts
+        )
         ax_bkg.set_xlabel(xlabel, fontsize=_LABEL_FS)
         ax_bkg.set_ylabel(f"{row_label} background events", fontsize=_LABEL_FS)
         ax_bkg.tick_params(axis="both", labelsize=_TICK_FS)
@@ -1398,7 +1442,9 @@ def plot_prc_curves(
 
     if signal_frac is None:
         first_model = next(iter(results))
-        sig = get_signal_probabilities(results[first_model][0], signal_classes, playlist)
+        sig = get_signal_probabilities(
+            results[first_model][0], signal_classes, playlist
+        )
         signal_frac = sig["ytrue"].mean()
 
     fig, axes = plt.subplots(1, 2, figsize=(16, 7), constrained_layout=True)
@@ -1419,7 +1465,9 @@ def plot_prc_curves(
         auprc_m = c["auprc_mean"]
         auprc_s = c["auprc_std"]
         if uncertainties and auprc_s > 0:
-            label = f"{plot_model_label(model_name)} (AUPRC={auprc_m:.3f}±{auprc_s:.3f})"
+            label = (
+                f"{plot_model_label(model_name)} (AUPRC={auprc_m:.3f}±{auprc_s:.3f})"
+            )
         else:
             label = f"{plot_model_label(model_name)} (AUPRC={auprc_m:.3f})"
         clr = {} if colors is None else {"color": colors.get(model_name)}
@@ -1508,9 +1556,7 @@ def _model_binary_pred_at_baseline_fpr(
     m = np.asarray(bin_mask, dtype=bool) & valid
     if m.sum() == 0:
         return y_true, np.zeros_like(y_true, dtype=int)
-    thr_map = _global_score_thresholds_at_target_fprs(
-        y_true[m], probs[m], [target_fpr]
-    )
+    thr_map = _global_score_thresholds_at_target_fprs(y_true[m], probs[m], [target_fpr])
     t_cut = thr_map.get(target_fpr, float("nan"))
     if not np.isfinite(t_cut):
         y_pred = np.zeros_like(y_true, dtype=int)
@@ -1623,9 +1669,7 @@ def plot_confusion_matrices_at_threshold_W(
                 f"predictions ({n_pred})."
             )
 
-    w = _align_per_event_array(
-        data["W_GeV"], data, playlist, n_pred, key="W_GeV"
-    )
+    w = _align_per_event_array(data["W_GeV"], data, playlist, n_pred, key="W_GeV")
     edges = np.asarray(data["W_bin_edges"], dtype=float)
     n_bins = len(edges) - 1
 
@@ -1662,9 +1706,7 @@ def plot_confusion_matrices_at_threshold_W(
             thr_map = _global_score_thresholds_at_target_fprs(
                 sig["ytrue"][valid], sig["ypred"][valid], [baseline_fpr]
             )
-            global_thr_by_model[model_name] = thr_map.get(
-                baseline_fpr, float("nan")
-            )
+            global_thr_by_model[model_name] = thr_map.get(baseline_fpr, float("nan"))
 
     fpr_tag = "global FPR cut" if use_global_fpr else "per-bin FPR cut"
     bl_lbl = _baseline_legend_with_global_fpr("Baseline", baseline_fpr)

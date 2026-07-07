@@ -30,7 +30,8 @@ def _npi2_task() -> Task:
 
 
 def _class_weights_from_train_counts(
-    data_path: Path, playlists: tuple[str, ...],
+    data_path: Path,
+    playlists: tuple[str, ...],
 ) -> torch.Tensor:
     """Inverse-frequency class weights from the train split (same recipe as ``HEPTorchDataset``)."""
     task = _npi2_task()
@@ -50,7 +51,10 @@ def _mc_pi_labels_v2_val(data_path: Path, playlist: str) -> np.ndarray:
     task = _npi2_task()
     val_dir = data_path / playlist / "val"
     ds = HEPTorchDataset(
-        folder=str(val_dir), task=task, data_path=data_path, dataset_playlist=playlist,
+        folder=str(val_dir),
+        task=task,
+        data_path=data_path,
+        dataset_playlist=playlist,
     )
     return ds._truth_flat[:, task.class_label_idx].astype(np.int64)
 
@@ -116,7 +120,9 @@ def _regression_e_available_no_muon_task() -> Task:
 
 
 def _blob_recoil_baseline_val_gev(
-    data_path: Path, playlist: str, val_global: np.ndarray,
+    data_path: Path,
+    playlist: str,
+    val_global: np.ndarray,
 ) -> np.ndarray:
     bl_path = data_path / "baselines" / f"{playlist}_enu_baselines.npz"
     if not bl_path.exists():
@@ -151,7 +157,10 @@ def compute_reco_baseline_regression_val_loss(
             raise KeyError(f"Playlist {playlist!r} not in {result_path}")
         val_dir = data_path / playlist / "val"
         ds = HEPTorchDataset(
-            folder=str(val_dir), task=task, data_path=data_path, dataset_playlist=playlist,
+            folder=str(val_dir),
+            task=task,
+            data_path=data_path,
+            dataset_playlist=playlist,
         )
         targets = ds._truth_flat[:, task.class_label_idx].astype(np.float64) / 1000.0
         val_global = np.asarray(split_idx[playlist]["val_idx"], dtype=np.int64)
@@ -179,7 +188,9 @@ def inject_reco_baseline_regression_loss_history(
     try:
         val_loss = compute_reco_baseline_regression_val_loss(data_path, playlists)
     except Exception as exc:
-        print(f"  Warning: skipped {RECO_BASELINE_MODEL_KEY} regression val loss: {exc}")
+        print(
+            f"  Warning: skipped {RECO_BASELINE_MODEL_KEY} regression val loss: {exc}"
+        )
         return
     loss_histories[RECO_BASELINE_MODEL_KEY] = reco_baseline_loss_series(val_loss)
     print(

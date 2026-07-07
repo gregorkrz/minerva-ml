@@ -85,7 +85,10 @@ def test_validation_loss_y_limits_respects_global_flops_xmin():
     loss = np.array([0.5, 0.03])
     curve = OrderedDict({"M": [(steps, loss)]})
     _, ymax_full = _validation_loss_y_limits(
-        curve, OrderedDict(), ylim=None, flops_per_step={"M": flops},
+        curve,
+        OrderedDict(),
+        ylim=None,
+        flops_per_step={"M": flops},
     )
     _, ymax_win = _validation_loss_y_limits(
         curve,
@@ -102,7 +105,10 @@ def test_loss_values_in_log_steps_window():
     steps = np.array([1e3, 1.5e4, 2e4, 1e5])
     losses = np.array([0.05, 0.04, 0.035, 0.03])
     win = _loss_values_in_log_steps_window(
-        steps, losses, log_steps_xmin=4.0, log_steps_xmax=5.0,
+        steps,
+        losses,
+        log_steps_xmin=4.0,
+        log_steps_xmax=5.0,
     )
     assert len(win) == 2
     assert win.tolist() == [0.04, 0.035]

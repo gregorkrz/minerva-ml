@@ -193,8 +193,10 @@ def process_task(
         "bins": [],
     }
     print(f"\n=== {task_name}: {title} ===")
-    print(f"    bin edges ({bin_unit.strip()}): "
-          + ", ".join(f"{e:.3f}" for e in bin_edges))
+    print(
+        f"    bin edges ({bin_unit.strip()}): "
+        + ", ".join(f"{e:.3f}" for e in bin_edges)
+    )
 
     for i in range(n_bins):
         lo, hi = float(bin_edges[i]), float(bin_edges[i + 1])
@@ -257,19 +259,40 @@ def process_task(
 
 
 def main(argv: list[str] | None = None) -> None:
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--data-dir", type=Path, default=DEFAULT_DATA_DIR,
-                    help=f"Dataset root (default: {DEFAULT_DATA_DIR})")
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    ap.add_argument(
+        "--data-dir",
+        type=Path,
+        default=DEFAULT_DATA_DIR,
+        help=f"Dataset root (default: {DEFAULT_DATA_DIR})",
+    )
     ap.add_argument("--playlist", default="1A", help="Playlist (default: 1A)")
-    ap.add_argument("--split", default="test", choices=["train", "val", "test"],
-                    help="Which split to sample from (default: test)")
-    ap.add_argument("--output-dir", type=Path, required=True,
-                    help="Where to write the per-bin sample datasets")
-    ap.add_argument("--n-events", type=int, default=10,
-                    help="Max events per (bin, signal|background) (default: 10)")
-    ap.add_argument("--n-pion-bins", type=int, default=DEFAULT_N_PION_BINS,
-                    help=f"Pion-energy bins (default: {DEFAULT_N_PION_BINS})")
+    ap.add_argument(
+        "--split",
+        default="test",
+        choices=["train", "val", "test"],
+        help="Which split to sample from (default: test)",
+    )
+    ap.add_argument(
+        "--output-dir",
+        type=Path,
+        required=True,
+        help="Where to write the per-bin sample datasets",
+    )
+    ap.add_argument(
+        "--n-events",
+        type=int,
+        default=10,
+        help="Max events per (bin, signal|background) (default: 10)",
+    )
+    ap.add_argument(
+        "--n-pion-bins",
+        type=int,
+        default=DEFAULT_N_PION_BINS,
+        help=f"Pion-energy bins (default: {DEFAULT_N_PION_BINS})",
+    )
     ap.add_argument("--seed", type=int, default=42, help="Sampling seed (default: 42)")
     args = ap.parse_args(argv)
 
@@ -277,7 +300,9 @@ def main(argv: list[str] | None = None) -> None:
     out_root = args.output_dir
     out_root.mkdir(parents=True, exist_ok=True)
 
-    print(f"Loading {args.split} split for playlist {args.playlist} from {args.data_dir}")
+    print(
+        f"Loading {args.split} split for playlist {args.playlist} from {args.data_dir}"
+    )
     per_event, truth, glob, split_idx, baselines = load_split(
         args.data_dir, args.playlist, args.split
     )
@@ -292,8 +317,10 @@ def main(argv: list[str] | None = None) -> None:
 
     # Diagnostic: overall pid composition.
     pid_unique, pid_counts = np.unique(pid, return_counts=True)
-    print("pid composition: "
-          + ", ".join(f"{int(c)}:{int(n)}" for c, n in zip(pid_unique, pid_counts)))
+    print(
+        "pid composition: "
+        + ", ".join(f"{int(c)}:{int(n)}" for c, n in zip(pid_unique, pid_counts))
+    )
 
     manifest: dict = {
         "data_dir": str(args.data_dir),

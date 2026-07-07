@@ -6,6 +6,7 @@ Usage (from repo root):
 
 Prints one ``sbatch <path>`` per line (does not submit).
 """
+
 import glob
 import os
 import re
@@ -128,7 +129,9 @@ def extract_train_cmd(slurm_path):
 
 
 def main():
-    os.chdir(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+    os.chdir(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    )
     env_vars = get_env_vars()
     ts = dt.now().strftime("%Y%m%d_%H%M%S")
     os.makedirs(SLURM_DIR, exist_ok=True)
@@ -154,10 +157,14 @@ def main():
 
         old_base = os.path.basename(old_slurms[-1]).replace(".slurm", "")
         if old_base in active_jobs:
-            print(f"# {i:2d}  {init:10s}  {task:12s}  seed{seed}  {state:10s}  SKIP (still in queue)")
+            print(
+                f"# {i:2d}  {init:10s}  {task:12s}  seed{seed}  {state:10s}  SKIP (still in queue)"
+            )
             continue
         if state == "COMPLETED":
-            print(f"# {i:2d}  {init:10s}  {task:12s}  seed{seed}  {state:10s}  SKIP (completed)")
+            print(
+                f"# {i:2d}  {init:10s}  {task:12s}  seed{seed}  {state:10s}  SKIP (completed)"
+            )
             continue
 
         job_name = f"run_{i}_resubmit_{ts}"

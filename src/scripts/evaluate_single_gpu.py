@@ -209,19 +209,24 @@ def print_check_report(ckpt_dir: str, folders: List[str]) -> None:
 
     def _fmt(seeds) -> str:
         return (
-            "[" + ", ".join(str(s) if s is not None else "?" for s in sorted(
-                seeds, key=lambda x: (x is None, x)
-            )) + "]"
+            "["
+            + ", ".join(
+                str(s) if s is not None else "?"
+                for s in sorted(seeds, key=lambda x: (x is None, x))
+            )
+            + "]"
         )
 
     print(f"\n=== Checkpoint / eval status ({len(folders)} folder(s)) ===")
     print(f"    datasets required for 'evaluated': {', '.join(DATASETS)}\n")
-    for (task, model_key) in sorted(status.keys()):
+    for task, model_key in sorted(status.keys()):
         seed_map = status[(task, model_key)]
         trained = set(seed_map.keys())
         full = {s for s, dss in seed_map.items() if set(DATASETS) <= dss}
         partial = {
-            s: seed_map[s] for s in seed_map if seed_map[s] and not set(DATASETS) <= seed_map[s]
+            s: seed_map[s]
+            for s in seed_map
+            if seed_map[s] and not set(DATASETS) <= seed_map[s]
         }
         not_eval = trained - full - set(partial.keys())
         print(f"[{task}] {model_key}")
@@ -230,7 +235,9 @@ def print_check_report(ckpt_dir: str, folders: List[str]) -> None:
         if partial:
             detail = ", ".join(
                 f"{s if s is not None else '?'}({'+'.join(sorted(dss))})"
-                for s, dss in sorted(partial.items(), key=lambda kv: (kv[0] is None, kv[0]))
+                for s, dss in sorted(
+                    partial.items(), key=lambda kv: (kv[0] is None, kv[0])
+                )
             )
             print(f"    partial-eval  {len(partial):>2}: {detail}")
         if not_eval:
@@ -298,8 +305,7 @@ def _run_eval_jobs_sequential(jobs: List[List[str]], *, gpu_id: str) -> int:
     env = os.environ.copy()
     env["CUDA_VISIBLE_DEVICES"] = gpu_id
     print(
-        f"Running {len(jobs)} eval job(s) with {sys.executable!r} "
-        f"on GPU {gpu_id} …"
+        f"Running {len(jobs)} eval job(s) with {sys.executable!r} " f"on GPU {gpu_id} …"
     )
     for i, argv in enumerate(jobs, start=1):
         print(f"\n[{i}/{len(jobs)}] {format_argv(argv)}")
@@ -443,9 +449,7 @@ def main() -> None:
         return
 
     jobs = collect_eval_jobs(args.ckpt_dir, folders)
-    raise SystemExit(
-        run_eval_jobs(jobs, dry_run=args.dry_run, num_gpus=args.num_gpus)
-    )
+    raise SystemExit(run_eval_jobs(jobs, dry_run=args.dry_run, num_gpus=args.num_gpus))
 
 
 if __name__ == "__main__":

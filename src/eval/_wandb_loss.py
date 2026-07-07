@@ -104,7 +104,9 @@ def collect_histories_for_runs(
         series: list[tuple[np.ndarray, np.ndarray]] = []
         for rn in run_names:
             st, lo = get_validation_loss_history(
-                rn, with_steps=True, model_name=model,
+                rn,
+                with_steps=True,
+                model_name=model,
             )
             if len(st) > 0 and len(lo) > 0:
                 series.append((st, lo))

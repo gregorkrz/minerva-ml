@@ -155,7 +155,9 @@ def main(argv: list[str] | None = None) -> None:
     if cfg is not None:
         clrs = {**clrs, **cfg.colors()}
         training_names_full_no_rw = cfg.filter_nested(training_names_full_no_rw)
-        training_names_full_first_only = cfg.filter_nested(training_names_full_first_only)
+        training_names_full_first_only = cfg.filter_nested(
+            training_names_full_first_only
+        )
         config_model_names = set(cfg.model_names())
         runs_by_model_cap = {
             k: v for k, v in runs_by_model_cap.items() if k in config_model_names
@@ -428,7 +430,11 @@ def main(argv: list[str] | None = None) -> None:
             continue
         for cfg_label, v in values[loss].items():
             methods.setdefault(_method(cfg_label), []).append(
-                (_n_samples(cfg_label), v["iqr_mean"][Q3_BIN_IDX], v["iqr_std"][Q3_BIN_IDX])
+                (
+                    _n_samples(cfg_label),
+                    v["iqr_mean"][Q3_BIN_IDX],
+                    v["iqr_std"][Q3_BIN_IDX],
+                )
             )
 
     for m in methods:

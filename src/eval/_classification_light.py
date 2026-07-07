@@ -60,8 +60,16 @@ _COL_LABELS = ("AUPRC", "AUROC", "Efficiency (TPR)")
 
 # ``classification_tpr_at_fixed_fpr_baseline_1A.pdf`` — TPR vs kinematic per task.
 _SMALL_PAPER_TPR_TASKS: tuple[tuple[str, str, str], ...] = (
-    (r"$CC1\pi^\pm$", "pion_E", "eval_classification_light_cc1pi_pion_kinematics_1A.pdf"),
-    (r"$CC1\pi^0$", "pion_E", "eval_classification_light_cc1pi0_pion_kinematics_1A.pdf"),
+    (
+        r"$CC1\pi^\pm$",
+        "pion_E",
+        "eval_classification_light_cc1pi_pion_kinematics_1A.pdf",
+    ),
+    (
+        r"$CC1\pi^0$",
+        "pion_E",
+        "eval_classification_light_cc1pi0_pion_kinematics_1A.pdf",
+    ),
     (r"$CCN\pi^\pm$ ($N \geq 1$)", "w", "eval_classification_light_ccnpi_W_1A.pdf"),
 )
 _TPR_YLABEL = "Efficiency (TPR)"
@@ -300,11 +308,7 @@ def _figure_metrics_3tasks_q3_baseline(
 
 
 def _light_specs_by_filename(specs: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    return {
-        spec["filename"]: spec
-        for spec in specs
-        if spec.get("filename")
-    }
+    return {spec["filename"]: spec for spec in specs if spec.get("filename")}
 
 
 def _small_paper_tpr_row_from_spec(spec: dict[str, Any], panel: str) -> dict[str, Any]:
@@ -363,7 +367,9 @@ def _draw_tpr_only_on_axis(
             _plot_metric_line(ax, x, inner[key], label_fn(model_name), True, **clr)
 
     bl_lbl = (
-        _baseline_legend_with_global_fpr(row["reco_label"], row["reco_baseline_global_fpr"])
+        _baseline_legend_with_global_fpr(
+            row["reco_label"], row["reco_baseline_global_fpr"]
+        )
         if row.get("reco_baseline_global_fpr") is not None
         and np.isfinite(row["reco_baseline_global_fpr"])
         else row["reco_label"]
@@ -412,12 +418,17 @@ def _figure_metrics_3tasks_tpr_baseline(
             title_fs=_SMALL_PAPER_TPR_TITLE_FS,
         )
     _shared_light_legend(
-        fig, axes, legend_fs=_SMALL_PAPER_TPR_LEGEND_FS, label_order=legend_label_order,
+        fig,
+        axes,
+        legend_fs=_SMALL_PAPER_TPR_LEGEND_FS,
+        label_order=legend_label_order,
     )
     return fig
 
 
-def _light_q3_specs_by_filename(specs: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+def _light_q3_specs_by_filename(
+    specs: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
     return {
         spec["filename"]: spec
         for spec in specs
@@ -458,10 +469,20 @@ def _figure_metrics_2x3_pion(
             axes[0, 1], x_E, agg_E["auroc"], plot_model_label(model_name), True, **clr
         )
         _plot_metric_line(
-            axes[1, 0], x_theta, agg_th["auprc"], plot_model_label(model_name), True, **clr
+            axes[1, 0],
+            x_theta,
+            agg_th["auprc"],
+            plot_model_label(model_name),
+            True,
+            **clr,
         )
         _plot_metric_line(
-            axes[1, 1], x_theta, agg_th["auroc"], plot_model_label(model_name), True, **clr
+            axes[1, 1],
+            x_theta,
+            agg_th["auroc"],
+            plot_model_label(model_name),
+            True,
+            **clr,
         )
         for fpr_val in fixed_fpr:
             key = f"tpr@{fpr_val}"
@@ -523,16 +544,26 @@ def _compute_pion_bundle_specs(
         pion_bin_edge_method="equal_frequency",
     )
     metrics_q3 = compute_all_metrics_q3(
-        results, data, signal_classes=signal_classes, fixed_fpr=fpr, playlist=playlist,
+        results,
+        data,
+        signal_classes=signal_classes,
+        fixed_fpr=fpr,
+        playlist=playlist,
     )
     bl_q3 = compute_signal_baseline(
-        results, data, signal_classes=signal_classes, playlist=playlist,
+        results,
+        data,
+        signal_classes=signal_classes,
+        playlist=playlist,
         pion_bins_require_has_pion=False,
     )["q3"]
     y_true = np.isin(pid, signal_classes).astype(int)
     is_signal = y_true == 1
     reco_q3 = compute_reco_baseline_recall_per_bin(
-        y_pred, is_signal, data["q3_GeV"], data["q3_bin_edges"],
+        y_pred,
+        is_signal,
+        data["q3_GeV"],
+        data["q3_bin_edges"],
     )
     specs: list[dict[str, Any]] = [
         {
@@ -551,57 +582,86 @@ def _compute_pion_bundle_specs(
     ]
     if data_w is not None:
         metrics_W = compute_all_metrics_W(
-            results, data_w, signal_classes=signal_classes, fixed_fpr=fpr,
-            playlist=playlist, use_global_fpr=True,
+            results,
+            data_w,
+            signal_classes=signal_classes,
+            fixed_fpr=fpr,
+            playlist=playlist,
+            use_global_fpr=True,
         )
         bl_W = compute_signal_baseline_W(
-            results, data_w, signal_classes=signal_classes, playlist=playlist,
+            results,
+            data_w,
+            signal_classes=signal_classes,
+            playlist=playlist,
         )
         reco_W = compute_reco_baseline_recall_per_bin(
-            y_pred, is_signal, data_w["W_GeV"], data_w["W_bin_edges"],
+            y_pred,
+            is_signal,
+            data_w["W_GeV"],
+            data_w["W_bin_edges"],
         )
-        specs.append({
-            "type": "1x3",
-            "all_metrics": metrics_W,
-            "x": data_w["W_bin_mids"],
-            "xlabel": TRUE_W_XLABEL,
-            "baseline_auprc": bl_W,
-            "fixed_fpr": fpr,
-            "reco_baseline_tpr": reco_W,
-            "reco_label": "Baseline",
-            "log_x": False,
-            "reco_baseline_global_fpr": baseline_fpr,
-            "filename": f"eval_classification_light_{tag}_W_{playlist}.pdf",
-        })
+        specs.append(
+            {
+                "type": "1x3",
+                "all_metrics": metrics_W,
+                "x": data_w["W_bin_mids"],
+                "xlabel": TRUE_W_XLABEL,
+                "baseline_auprc": bl_W,
+                "fixed_fpr": fpr,
+                "reco_baseline_tpr": reco_W,
+                "reco_label": "Baseline",
+                "log_x": False,
+                "reco_baseline_global_fpr": baseline_fpr,
+                "filename": f"eval_classification_light_{tag}_W_{playlist}.pdf",
+            }
+        )
     metrics_pion = compute_all_metrics(
-        results, data_sp, signal_classes=signal_classes, fixed_fpr=fpr,
-        playlist=playlist, pion_bins_require_has_pion=False,
+        results,
+        data_sp,
+        signal_classes=signal_classes,
+        fixed_fpr=fpr,
+        playlist=playlist,
+        pion_bins_require_has_pion=False,
     )
     bl = compute_signal_baseline(
-        results, data_sp, signal_classes=signal_classes, playlist=playlist,
+        results,
+        data_sp,
+        signal_classes=signal_classes,
+        playlist=playlist,
         pion_bins_require_has_pion=False,
     )
     reco_E = compute_reco_baseline_recall_per_bin(
-        y_pred, is_signal, data_sp["pion_E_MC"], data_sp["pion_E_MC_bins"], has_pion=None,
+        y_pred,
+        is_signal,
+        data_sp["pion_E_MC"],
+        data_sp["pion_E_MC_bins"],
+        has_pion=None,
     )
     reco_th = compute_reco_baseline_recall_per_bin(
-        y_pred, is_signal, data_sp["pion_theta_MC"], data_sp["pion_theta_MC_bins"],
-        has_pion=None, finite_bin_var=True,
+        y_pred,
+        is_signal,
+        data_sp["pion_theta_MC"],
+        data_sp["pion_theta_MC_bins"],
+        has_pion=None,
+        finite_bin_var=True,
     )
-    specs.append({
-        "type": "2x3_pion",
-        "all_metrics": metrics_pion,
-        "x_E": data_sp["pion_E_MC_bins_mid"],
-        "x_theta": data_sp["pion_theta_MC_bins_mid"],
-        "baseline_E": bl["E"],
-        "baseline_theta": bl["theta"],
-        "fixed_fpr": fpr,
-        "reco_tpr_E": reco_E,
-        "reco_tpr_theta": reco_th,
-        "reco_label": "Baseline",
-        "reco_baseline_global_fpr": baseline_fpr,
-        "filename": f"eval_classification_light_{tag}_pion_kinematics_{playlist}.pdf",
-    })
+    specs.append(
+        {
+            "type": "2x3_pion",
+            "all_metrics": metrics_pion,
+            "x_E": data_sp["pion_E_MC_bins_mid"],
+            "x_theta": data_sp["pion_theta_MC_bins_mid"],
+            "baseline_E": bl["E"],
+            "baseline_theta": bl["theta"],
+            "fixed_fpr": fpr,
+            "reco_tpr_E": reco_E,
+            "reco_tpr_theta": reco_th,
+            "reco_label": "Baseline",
+            "reco_baseline_global_fpr": baseline_fpr,
+            "filename": f"eval_classification_light_{tag}_pion_kinematics_{playlist}.pdf",
+        }
+    )
     return specs
 
 
@@ -629,15 +689,25 @@ def _compute_q3_bundle_specs(
         return []
     fpr_n = [baseline_fpr_ccnpi]
     metrics_q3 = compute_all_metrics_q3(
-        results, data, signal_classes=multi_pi_classes, fixed_fpr=fpr_n, playlist=playlist,
+        results,
+        data,
+        signal_classes=multi_pi_classes,
+        fixed_fpr=fpr_n,
+        playlist=playlist,
     )
     bl_q3 = compute_signal_baseline(
-        results, data, signal_classes=multi_pi_classes, playlist=playlist,
+        results,
+        data,
+        signal_classes=multi_pi_classes,
+        playlist=playlist,
         pion_bins_require_has_pion=False,
     )["q3"]
     is_signal_ccnpi = y_true_ccnpi == 1
     reco_q3 = compute_reco_baseline_recall_per_bin(
-        y_pred_ccnpi, is_signal_ccnpi, data["q3_GeV"], data["q3_bin_edges"],
+        y_pred_ccnpi,
+        is_signal_ccnpi,
+        data["q3_GeV"],
+        data["q3_bin_edges"],
     )
     specs: list[dict[str, Any]] = [
         {
@@ -656,28 +726,40 @@ def _compute_q3_bundle_specs(
     ]
     if data_w is not None:
         metrics_W = compute_all_metrics_W(
-            results, data_w, signal_classes=multi_pi_classes, fixed_fpr=fpr_n,
-            playlist=playlist, use_global_fpr=True,
+            results,
+            data_w,
+            signal_classes=multi_pi_classes,
+            fixed_fpr=fpr_n,
+            playlist=playlist,
+            use_global_fpr=True,
         )
         bl_W = compute_signal_baseline_W(
-            results, data_w, signal_classes=multi_pi_classes, playlist=playlist,
+            results,
+            data_w,
+            signal_classes=multi_pi_classes,
+            playlist=playlist,
         )
         reco_W = compute_reco_baseline_recall_per_bin(
-            y_pred_ccnpi, is_signal_ccnpi, data_w["W_GeV"], data_w["W_bin_edges"],
+            y_pred_ccnpi,
+            is_signal_ccnpi,
+            data_w["W_GeV"],
+            data_w["W_bin_edges"],
         )
-        specs.append({
-            "type": "1x3",
-            "all_metrics": metrics_W,
-            "x": data_w["W_bin_mids"],
-            "xlabel": TRUE_W_XLABEL,
-            "baseline_auprc": bl_W,
-            "fixed_fpr": fpr_n,
-            "reco_baseline_tpr": reco_W,
-            "reco_label": "Baseline",
-            "log_x": False,
-            "reco_baseline_global_fpr": baseline_fpr_ccnpi,
-            "filename": f"eval_classification_light_ccnpi_W_{playlist}.pdf",
-        })
+        specs.append(
+            {
+                "type": "1x3",
+                "all_metrics": metrics_W,
+                "x": data_w["W_bin_mids"],
+                "xlabel": TRUE_W_XLABEL,
+                "baseline_auprc": bl_W,
+                "fixed_fpr": fpr_n,
+                "reco_baseline_tpr": reco_W,
+                "reco_label": "Baseline",
+                "log_x": False,
+                "reco_baseline_global_fpr": baseline_fpr_ccnpi,
+                "filename": f"eval_classification_light_ccnpi_W_{playlist}.pdf",
+            }
+        )
     return specs
 
 

@@ -46,7 +46,9 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-DEFAULT_INPUT_DIR = Path("/global/cfs/cdirs/m3246/gregork/Minerva/20260326_NEW_DEMO_ONLY")
+DEFAULT_INPUT_DIR = Path(
+    "/global/cfs/cdirs/m3246/gregork/Minerva/20260326_NEW_DEMO_ONLY"
+)
 DEFAULT_OUTPUT = _REPO_ROOT / "plots" / "event_viewer.html"
 
 PID_NAMES = {
@@ -113,17 +115,19 @@ def event_to_particles(feat: np.ndarray) -> list[list]:
         x = _to_float(row[6]) * 1e4
         y = _to_float(row[7]) * 1e4
         z = _to_float(row[8]) * 1e4
-        particles.append([
-            pid,
-            round(eta, 4),
-            round(phi, 4),
-            round(max(pt, 0.0), 3),
-            round(max(E, 0.0), 3),
-            round(x, 2),
-            round(y, 2),
-            round(z, 2),
-            dedx,
-        ])
+        particles.append(
+            [
+                pid,
+                round(eta, 4),
+                round(phi, 4),
+                round(max(pt, 0.0), 3),
+                round(max(E, 0.0), 3),
+                round(x, 2),
+                round(y, 2),
+                round(z, 2),
+                dedx,
+            ]
+        )
     return particles
 
 
@@ -182,13 +186,15 @@ def mc_particles_from_truth(tl_row: np.ndarray) -> list[dict]:
     eta = 0.5 * math.log(max((p + pz), 1e-9) / max((p - pz), 1e-9))
     eta = max(-10.0, min(10.0, eta))
     phi = math.atan2(py, px)
-    return [{
-        "label": "π (MC truth)",
-        "eta": round(eta, 4),
-        "phi": round(phi, 4),
-        "E": round(max(E, 0.0), 3),
-        "dir": [round(px / p, 5), round(py / p, 5), round(pz / p, 5)],
-    }]
+    return [
+        {
+            "label": "π (MC truth)",
+            "eta": round(eta, 4),
+            "phi": round(phi, 4),
+            "E": round(max(E, 0.0), 3),
+            "dir": [round(px / p, 5), round(py / p, 5), round(pz / p, 5)],
+        }
+    ]
 
 
 def load_dataset_events(pb_path: Path, meta_path: Path | None) -> list[dict]:
@@ -216,13 +222,15 @@ def load_dataset_events(pb_path: Path, meta_path: Path | None) -> list[dict]:
             if truth_np is not None and i < len(truth_np)
             else []
         )
-        events.append({
-            "pid_class": int(pid_classes[i]) if i < len(pid_classes) else -1,
-            "bin_value": _to_float(bin_values[i]) if i < len(bin_values) else None,
-            "global_index": int(global_idx[i]) if i < len(global_idx) else None,
-            "particles": event_to_particles(arr),
-            "mc": mc,
-        })
+        events.append(
+            {
+                "pid_class": int(pid_classes[i]) if i < len(pid_classes) else -1,
+                "bin_value": _to_float(bin_values[i]) if i < len(bin_values) else None,
+                "global_index": int(global_idx[i]) if i < len(global_idx) else None,
+                "particles": event_to_particles(arr),
+                "mc": mc,
+            }
+        )
     return events
 
 
@@ -260,11 +268,13 @@ def build_payload(input_dir: Path) -> dict:
     if manifest_path.exists():
         with open(manifest_path) as f:
             manifest = json.load(f)
-        payload_meta.update({
-            "playlist": manifest.get("playlist"),
-            "split": manifest.get("split"),
-            "n_events_per_bin_class": manifest.get("n_events_per_bin_class"),
-        })
+        payload_meta.update(
+            {
+                "playlist": manifest.get("playlist"),
+                "split": manifest.get("split"),
+                "n_events_per_bin_class": manifest.get("n_events_per_bin_class"),
+            }
+        )
         task_items = manifest.get("tasks", {}).items()
         for task_name, task in task_items:
             bins_out = []
@@ -282,23 +292,29 @@ def build_payload(input_dir: Path) -> dict:
                     events = load_dataset_events(pb, ds_dir / "meta.json")
                     attach_scores(events, rel)
                     classes_out[cls] = events
-                    print(f"  {task_name}/{bin_entry['label']}/{cls}: "
-                          f"{len(events)} events")
+                    print(
+                        f"  {task_name}/{bin_entry['label']}/{cls}: "
+                        f"{len(events)} events"
+                    )
                 if classes_out:
-                    bins_out.append({
-                        "label": bin_entry["label"],
-                        "lo": bin_entry.get("lo"),
-                        "hi": bin_entry.get("hi"),
-                        "classes": classes_out,
-                    })
+                    bins_out.append(
+                        {
+                            "label": bin_entry["label"],
+                            "lo": bin_entry.get("lo"),
+                            "hi": bin_entry.get("hi"),
+                            "classes": classes_out,
+                        }
+                    )
             if bins_out:
-                tasks_out.append({
-                    "name": task_name,
-                    "title": task.get("title", task_name),
-                    "bin_unit": task.get("bin_variable", ""),
-                    "signal_pid_classes": task.get("signal_pid_classes", []),
-                    "bins": bins_out,
-                })
+                tasks_out.append(
+                    {
+                        "name": task_name,
+                        "title": task.get("title", task_name),
+                        "bin_unit": task.get("bin_variable", ""),
+                        "signal_pid_classes": task.get("signal_pid_classes", []),
+                        "bins": bins_out,
+                    }
+                )
     else:
         print(f"No manifest.json in {input_dir}; globbing for 0.pb files…")
         for pb in sorted(input_dir.glob("*/*/*/0.pb")):
@@ -307,8 +323,13 @@ def build_payload(input_dir: Path) -> dict:
             task_name = pb.parent.parent.parent.name
             task = next((t for t in tasks_out if t["name"] == task_name), None)
             if task is None:
-                task = {"name": task_name, "title": task_name, "bin_unit": "",
-                        "signal_pid_classes": [], "bins": []}
+                task = {
+                    "name": task_name,
+                    "title": task_name,
+                    "bin_unit": "",
+                    "signal_pid_classes": [],
+                    "bins": [],
+                }
                 tasks_out.append(task)
             b = next((bb for bb in task["bins"] if bb["label"] == bin_label), None)
             if b is None:
@@ -322,16 +343,18 @@ def build_payload(input_dir: Path) -> dict:
     models_out = []
     for run in runs_order:
         m = models_meta.get(run, {})
-        models_out.append({
-            "run": run,
-            "label": m.get("label") or _label_from_run(run),
-            "model": m.get("model"),
-            "seed": m.get("seed"),
-            "mode": m.get("mode", "classifier"),
-            "num_classes": m.get("num_classes"),
-            "class_idx": m.get("class_idx"),
-            "binary_signal_pid_classes": m.get("binary_signal_pid_classes"),
-        })
+        models_out.append(
+            {
+                "run": run,
+                "label": m.get("label") or _label_from_run(run),
+                "model": m.get("model"),
+                "seed": m.get("seed"),
+                "mode": m.get("mode", "classifier"),
+                "num_classes": m.get("num_classes"),
+                "class_idx": m.get("class_idx"),
+                "binary_signal_pid_classes": m.get("binary_signal_pid_classes"),
+            }
+        )
     # Disambiguate models that resolve to the same human-readable label
     # (e.g. repeated runs of the same model+seed) by appending the run timestamp.
     label_counts: dict[str, int] = {}
@@ -340,7 +363,11 @@ def build_payload(input_dir: Path) -> dict:
     for mo in models_out:
         if label_counts[mo["label"]] > 1:
             ts = re.search(r"(\d{8}_\d{6})", mo["run"])
-            mo["label"] = f"{mo['label']} [{ts.group(1)}]" if ts else f"{mo['label']} [{mo['run']}]"
+            mo["label"] = (
+                f"{mo['label']} [{ts.group(1)}]"
+                if ts
+                else f"{mo['label']} [{mo['run']}]"
+            )
 
     return {
         "meta": payload_meta,
@@ -826,10 +853,18 @@ def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    ap.add_argument("--input-dir", type=Path, default=DEFAULT_INPUT_DIR,
-                    help=f"Demo datasets dir (default: {DEFAULT_INPUT_DIR})")
-    ap.add_argument("--output", type=Path, default=DEFAULT_OUTPUT,
-                    help=f"Output HTML (default: {DEFAULT_OUTPUT})")
+    ap.add_argument(
+        "--input-dir",
+        type=Path,
+        default=DEFAULT_INPUT_DIR,
+        help=f"Demo datasets dir (default: {DEFAULT_INPUT_DIR})",
+    )
+    ap.add_argument(
+        "--output",
+        type=Path,
+        default=DEFAULT_OUTPUT,
+        help=f"Output HTML (default: {DEFAULT_OUTPUT})",
+    )
     args = ap.parse_args(argv)
 
     if not args.input_dir.exists():

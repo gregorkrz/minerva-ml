@@ -31,7 +31,9 @@ class AttentionPool(nn.Module):
 
         self.query = nn.Parameter(torch.empty(1, 1, embedding_dim))
         self.q_proj = nn.Linear(embedding_dim, embedding_dim, bias=False, **factory)
-        self.kv_proj = nn.Linear(embedding_dim, 2 * embedding_dim, bias=False, **factory)
+        self.kv_proj = nn.Linear(
+            embedding_dim, 2 * embedding_dim, bias=False, **factory
+        )
         self.q_norm = nn.RMSNorm(self.head_dim, **factory)
         self.k_norm = nn.RMSNorm(self.head_dim, **factory)
         self.out_proj = nn.Linear(embedding_dim, embedding_dim, bias=False, **factory)

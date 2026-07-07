@@ -177,6 +177,7 @@ def main(argv: list[str] | None = None) -> None:
             y_true = run0["pid"]
             y_pred = run0["prediction"].argmax(axis=1)
             from sklearn.metrics import confusion_matrix
+
             cm = confusion_matrix(y_true, y_pred)
             sns.heatmap(
                 cm,
@@ -421,8 +422,13 @@ def _run_plots_only(
         for ax, model_name in zip(axes, model_names):
             cm = confusion_matrices[model_name][playlist]
             sns.heatmap(
-                cm, annot=True, fmt="d", cmap="Blues", ax=ax,
-                xticklabels=class_names, yticklabels=class_names,
+                cm,
+                annot=True,
+                fmt="d",
+                cmap="Blues",
+                ax=ax,
+                xticklabels=class_names,
+                yticklabels=class_names,
             )
             ax.set_xlabel(r"Predicted class")
             ax.set_ylabel(r"True class")
@@ -451,13 +457,18 @@ def _run_plots_only(
         y_true_binary = np.isin(cache["pid"][playlist], _CC1PI_CLASSES).astype(int)
 
         fig = plot_multi_pion_vs_q3(
-            metrics_q3_cc1pi, data, baseline_q3_cc1pi,
-            fixed_fpr=[baseline_fpr_cc1pi], uncertainties=True,
-            reco_baseline_tpr_q3=reco_tpr, colors=clrs,
+            metrics_q3_cc1pi,
+            data,
+            baseline_q3_cc1pi,
+            fixed_fpr=[baseline_fpr_cc1pi],
+            uncertainties=True,
+            reco_baseline_tpr_q3=reco_tpr,
+            colors=clrs,
             title=rf"$CC1\pi^\pm$ tagging - MINERvA Open Data Playlist {playlist}",
             playlist=playlist,
         )
-        figs.append(fig); plt.close(fig)
+        figs.append(fig)
+        plt.close(fig)
 
         pre_agg = precomputed_inttype_agg(cache["metrics_q3"]["cc1pi"][playlist])
         if cfg is not None:
@@ -466,15 +477,23 @@ def _run_plots_only(
             cache["signal_baseline_inttype"], "cc1pi", playlist, "q3"
         )
         fig = plot_binned_by_inttype(
-            {}, data, _CC1PI_CLASSES, x_var="q3",
+            {},
+            data,
+            _CC1PI_CLASSES,
+            x_var="q3",
             xlabel=r"True $q_3$ [GeV]",
             title=rf"$CC1\pi^\pm$ tagging - MINERvA Open Data Playlist {playlist} - by interaction type",
-            uncertainties=True, fixed_fpr=[baseline_fpr_cc1pi],
-            reco_baseline_pred=reco_pred, playlist=playlist, colors=clrs,
-            precomputed_agg=pre_agg, precomputed_bl_values=pre_bl,
+            uncertainties=True,
+            fixed_fpr=[baseline_fpr_cc1pi],
+            reco_baseline_pred=reco_pred,
+            playlist=playlist,
+            colors=clrs,
+            precomputed_agg=pre_agg,
+            precomputed_bl_values=pre_bl,
             precomputed_y_true_binary=y_true_binary,
         )
-        figs.append(fig); plt.close(fig)
+        figs.append(fig)
+        plt.close(fig)
         save_figures_to_pdf(figs, out_dir / f"eval_cc1pi_tagging_q3_{playlist}.pdf")
         print("Saved:", out_dir / f"eval_cc1pi_tagging_q3_{playlist}.pdf")
 
@@ -494,22 +513,35 @@ def _run_plots_only(
         y_true_binary = np.isin(cache["pid"][playlist], _CCNPI_GE1_CLASSES).astype(int)
 
         fig = plot_multi_pion_vs_q3(
-            metrics_q3_ccnpi, data, baseline_q3_ccnpi,
-            fixed_fpr=[baseline_fpr_ccnpi], uncertainties=True,
-            reco_baseline_tpr_q3=reco_tpr, colors=clrs,
+            metrics_q3_ccnpi,
+            data,
+            baseline_q3_ccnpi,
+            fixed_fpr=[baseline_fpr_ccnpi],
+            uncertainties=True,
+            reco_baseline_tpr_q3=reco_tpr,
+            colors=clrs,
             title=rf"$CCN\pi^\pm$ tagging ($N \geq 1$) - MINERvA Open Data Playlist {playlist}",
             playlist=playlist,
         )
-        figs.append(fig); plt.close(fig)
+        figs.append(fig)
+        plt.close(fig)
 
         fig = plot_prc_curves(
-            {}, _CCNPI_GE1_CLASSES,
+            {},
+            _CCNPI_GE1_CLASSES,
             title=rf"PRC — $CCN\pi^\pm$ tagging ($N \geq 1$) - MINERvA Open Data Playlist {playlist}",
-            playlist=playlist, uncertainties=True, colors=clrs,
-            precomputed_curves=cfg.filter_dict(cache["prc"]["ccnpi_ge1"][playlist]) if cfg else cache["prc"]["ccnpi_ge1"][playlist],
+            playlist=playlist,
+            uncertainties=True,
+            colors=clrs,
+            precomputed_curves=(
+                cfg.filter_dict(cache["prc"]["ccnpi_ge1"][playlist])
+                if cfg
+                else cache["prc"]["ccnpi_ge1"][playlist]
+            ),
             signal_frac=cache["signal_frac"]["ccnpi_ge1"][playlist],
         )
-        figs.append(fig); plt.close(fig)
+        figs.append(fig)
+        plt.close(fig)
 
         pre_agg = precomputed_inttype_agg(cache["metrics_q3"]["ccnpi_ge1"][playlist])
         if cfg is not None:
@@ -518,15 +550,23 @@ def _run_plots_only(
             cache["signal_baseline_inttype"], "ccnpi_ge1", playlist, "q3"
         )
         fig = plot_binned_by_inttype(
-            {}, data, _CCNPI_GE1_CLASSES, x_var="q3",
+            {},
+            data,
+            _CCNPI_GE1_CLASSES,
+            x_var="q3",
             xlabel=r"True $q_3$ [GeV]",
             title=rf"$CCN\pi^\pm$ tagging ($N \geq 1$) - MINERvA Open Data Playlist {playlist} - by interaction type",
-            uncertainties=True, fixed_fpr=[baseline_fpr_ccnpi],
-            reco_baseline_pred=reco_pred, playlist=playlist, colors=clrs,
-            precomputed_agg=pre_agg, precomputed_bl_values=pre_bl,
+            uncertainties=True,
+            fixed_fpr=[baseline_fpr_ccnpi],
+            reco_baseline_pred=reco_pred,
+            playlist=playlist,
+            colors=clrs,
+            precomputed_agg=pre_agg,
+            precomputed_bl_values=pre_bl,
             precomputed_y_true_binary=y_true_binary,
         )
-        figs.append(fig); plt.close(fig)
+        figs.append(fig)
+        plt.close(fig)
         save_figures_to_pdf(figs, out_dir / f"eval_Npi_tagging_{playlist}.pdf")
         print("Saved:", out_dir / f"eval_Npi_tagging_{playlist}.pdf")
 
@@ -535,7 +575,10 @@ def _run_plots_only(
         data = data_by_playlist[playlist]
         pid = cache["pid"][playlist]
         fig_comp = plot_composition_vs_kinematic(
-            data=data, pid=pid, x_var="q3", playlist=playlist,
+            data=data,
+            pid=pid,
+            x_var="q3",
+            playlist=playlist,
         )
         fp = out_dir / f"event_composition_q3_{playlist}.pdf"
         fig_comp.savefig(fp, bbox_inches="tight")
@@ -546,7 +589,9 @@ def _run_plots_only(
     light_cache_path = args.plots_cache or (cache_root / _LIGHT_CACHE_NAME)
     with open(light_cache_path, "rb") as f:
         light_cached = pickle.load(f)
-    draw_light_classification_from_cache(light_cached["specs"], clrs, light_dir, cfg=cfg)
+    draw_light_classification_from_cache(
+        light_cached["specs"], clrs, light_dir, cfg=cfg
+    )
 
 
 if __name__ == "__main__":

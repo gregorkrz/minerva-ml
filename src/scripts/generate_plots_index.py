@@ -131,11 +131,12 @@ def collect_pdfs(directory: Path, prefix: Path) -> list[PlotFile]:
 
 
 def build_category_section(category_dir: Path, slug: str, prefix: Path) -> PlotSection:
-    section = PlotSection(slug=slug, title=CATEGORY_LABELS.get(slug, slug.replace("_", " ").title()))
+    section = PlotSection(
+        slug=slug, title=CATEGORY_LABELS.get(slug, slug.replace("_", " ").title())
+    )
 
     subdirs = [
-        d for d in category_dir.iterdir()
-        if d.is_dir() and d.name not in SKIP_DIRS
+        d for d in category_dir.iterdir() if d.is_dir() and d.name not in SKIP_DIRS
     ]
     pdf_subdirs = [d for d in subdirs if any(d.glob("*.pdf"))]
     direct_pdfs = collect_pdfs(category_dir, prefix)
@@ -151,7 +152,9 @@ def build_category_section(category_dir: Path, slug: str, prefix: Path) -> PlotS
             section.subsections.append(
                 PlotSection(
                     slug=sub_slug,
-                    title=SUBCATEGORY_LABELS.get(sub_slug, sub_slug.replace("_", " ").title()),
+                    title=SUBCATEGORY_LABELS.get(
+                        sub_slug, sub_slug.replace("_", " ").title()
+                    ),
                     plots=plots,
                 )
             )
@@ -248,7 +251,9 @@ def discover_configs(plots_root: Path) -> list[PlotConfig]:
             if section.plot_count:
                 sections.append(section)
         if sections and not any(c.slug == "default" for c in configs):
-            configs.insert(0, PlotConfig(slug="default", root=plots_root, sections=sections))
+            configs.insert(
+                0, PlotConfig(slug="default", root=plots_root, sections=sections)
+            )
 
     return configs
 
@@ -424,18 +429,24 @@ def render_page(
 """
 
 
-def render_root_index(configs: list[PlotConfig], base_url: str, generated_at: str) -> str:
+def render_root_index(
+    configs: list[PlotConfig], base_url: str, generated_at: str
+) -> str:
     cards = []
     for cfg in configs:
-        desc = CONFIG_DESCRIPTIONS.get(cfg.slug, "Evaluation figures for this configuration.")
-        href = url_join(base_url, cfg.slug, "index.html") if base_url else f"{cfg.slug}/index.html"
-        cards.append(
-            f"""<article class="card">
+        desc = CONFIG_DESCRIPTIONS.get(
+            cfg.slug, "Evaluation figures for this configuration."
+        )
+        href = (
+            url_join(base_url, cfg.slug, "index.html")
+            if base_url
+            else f"{cfg.slug}/index.html"
+        )
+        cards.append(f"""<article class="card">
   <span class="badge">{cfg.plot_count} plots</span>
   <h2><a class="stretch" href="{html.escape(href)}">{html.escape(cfg.slug)}</a></h2>
   <p>{html.escape(desc)}</p>
-</article>"""
-        )
+</article>""")
     body = f"""
     <section class="block">
       <h2>Plot configurations</h2>
@@ -456,12 +467,10 @@ def render_section(section: PlotSection, config_slug: str, base_url: str) -> str
         items = []
         for plot in section.plots:
             href = plot_href(base_url, config_slug, plot.rel_path)
-            items.append(
-                f"""<li>
+            items.append(f"""<li>
   <a href="{html.escape(href)}">{html.escape(plot.display_name)}</a>
   <span class="path">{html.escape(plot.rel_path.as_posix())}</span>
-</li>"""
-            )
+</li>""")
         chunks.append(f'<ul class="plot-list">{"".join(items)}</ul>')
 
     for sub in section.subsections:
@@ -507,12 +516,16 @@ def write_indexes(plots_root: Path, base_url: str) -> list[Path]:
     written: list[Path] = []
 
     root_index = plots_root / "index.html"
-    root_index.write_text(render_root_index(configs, base_url, generated_at), encoding="utf-8")
+    root_index.write_text(
+        render_root_index(configs, base_url, generated_at), encoding="utf-8"
+    )
     written.append(root_index)
 
     for cfg in configs:
         out = cfg.root / "index.html"
-        out.write_text(render_config_index(cfg, base_url, generated_at), encoding="utf-8")
+        out.write_text(
+            render_config_index(cfg, base_url, generated_at), encoding="utf-8"
+        )
         written.append(out)
 
     return written

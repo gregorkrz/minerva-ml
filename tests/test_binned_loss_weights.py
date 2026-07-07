@@ -83,8 +83,6 @@ def test_per_event_loss_weights_invalid_bin_uses_global():
     weight_table = np.array([[2.0, 4.0, 6.0, 8.0, 10.0]])
     global_weights = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
 
-    out = per_event_loss_weights(
-        labels, bin_indices, weight_table, global_weights
-    )
+    out = per_event_loss_weights(labels, bin_indices, weight_table, global_weights)
     assert out[0] == pytest.approx(1.0)
     assert out[1] == pytest.approx(4.0)

@@ -23,7 +23,6 @@ from src.dataset.binned_loss_weights import (
 )
 from src.eval.classification_plots._signal_definitions import resolve_signal_classes
 
-
 # GENIE interaction-type codes stored in truth_labels[:, 1] (see DATASET.md).
 INT_TYPE_NAME_TO_CODE: dict[str, int] = {
     "QE": 1,
@@ -329,9 +328,7 @@ class HEPTorchDataset(Dataset):
                 self.files_truth_labels.append(obj["truth_labels"])
                 self.files_global_features.append(obj["global_features"])
                 gf = obj["global_features"]
-                files_n_events.append(
-                    gf.shape[0] if torch.is_tensor(gf) else len(gf)
-                )
+                files_n_events.append(gf.shape[0] if torch.is_tensor(gf) else len(gf))
                 del obj
             self.files_n_events = np.array(files_n_events, dtype=np.int64)
             self.files = None
@@ -366,7 +363,9 @@ class HEPTorchDataset(Dataset):
                 self.files_offsets_additional_info = None
             # truth_labels and global_features are regular tensors, not nested
             self.files_truth_labels = [file["truth_labels"] for file in self.files]
-            self.files_global_features = [file["global_features"] for file in self.files]
+            self.files_global_features = [
+                file["global_features"] for file in self.files
+            ]
         self.files_n_events_sum = np.cumsum(self.files_n_events)
         # add a column with CC1orNPi labels
         if task.classification_CC1orNPi:
@@ -479,7 +478,11 @@ class HEPTorchDataset(Dataset):
                         "Binned loss weighting requires --classification_CC1orNPi "
                         "(signal tags map to pid classes 0-4)."
                     )
-                if data_path is None or dataset_playlist is None or dataset_split is None:
+                if (
+                    data_path is None
+                    or dataset_playlist is None
+                    or dataset_split is None
+                ):
                     raise ValueError(
                         "Binned loss weighting requires data_path, playlist, and split."
                     )
@@ -741,7 +744,11 @@ def load_data(
         )
         if task.type == "classifier":
             base_ds = data.dataset if isinstance(data, Subset) else data
-            return loader, base_ds.class_weights, getattr(base_ds, "use_binned_loss", False)
+            return (
+                loader,
+                base_ds.class_weights,
+                getattr(base_ds, "use_binned_loss", False),
+            )
         else:
             return loader, None, False
     else:

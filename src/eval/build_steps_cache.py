@@ -51,7 +51,9 @@ def main(argv: list[str] | None = None) -> None:
         metavar="PKL",
         help="Override output path (default: plots/tmp_results/steps.pkl).",
     )
-    ap.add_argument("--force", action="store_true", help="Rebuild even if cache exists.")
+    ap.add_argument(
+        "--force", action="store_true", help="Rebuild even if cache exists."
+    )
     ap.add_argument(
         "--additive",
         action="store_true",
@@ -82,9 +84,7 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.additive and not args.force:
         if not steps_cache_path.exists():
-            print(
-                f"No existing steps cache at {steps_cache_path}; running full build."
-            )
+            print(f"No existing steps cache at {steps_cache_path}; running full build.")
         else:
             import pickle
 

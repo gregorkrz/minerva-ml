@@ -4,7 +4,6 @@ import functools
 import os
 from datetime import datetime as dt
 
-
 # ---------------------------------------------------------------------------
 # HyperScale presets.
 #

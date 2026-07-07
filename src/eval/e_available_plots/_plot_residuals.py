@@ -404,7 +404,7 @@ def plot_residuals_by_q3(
             lo, hi = ax[row, i].get_ylim()
             ax[row, i].set_ylim(lo, hi * 1.10)
 
-    #fig.suptitle(title_text, fontsize=11, y=0.995)
+    # fig.suptitle(title_text, fontsize=11, y=0.995)
 
     # Reserve lower margin for a shared fig.legend (same idea as ``plot_residuals_by_energy``).
     fig.tight_layout(rect=(0.0, 0.08, 1.0, 1.0))
@@ -563,9 +563,7 @@ def plot_ratio_histogram_q3_two_panels(
                 ratio_model = reco[valid] / true[valid]
                 mlab = _model_base(model)
                 mcol = color_by_model_base.get(mlab, "tab:gray")
-                lab = (
-                    _display_label(mlab) if use_legend_labels else "_nolegend_"
-                )
+                lab = _display_label(mlab) if use_legend_labels else "_nolegend_"
                 ax.hist(
                     ratio_model,
                     bins=ratio_bins,
@@ -585,7 +583,9 @@ def plot_ratio_histogram_q3_two_panels(
         ax.grid(True)
         ax.set_title(panel_title, fontsize=_REGRESSION_TITLE_FS, pad=8)
 
-    _iw = SMALL_PAPER_COMPACT_IQR_MPV_FIGSIZE_INCHES[0] * SMALL_PAPER_RATIO_HIST_FIG_SCALE
+    _iw = (
+        SMALL_PAPER_COMPACT_IQR_MPV_FIGSIZE_INCHES[0] * SMALL_PAPER_RATIO_HIST_FIG_SCALE
+    )
     fig, axes = plt.subplots(
         1,
         2,

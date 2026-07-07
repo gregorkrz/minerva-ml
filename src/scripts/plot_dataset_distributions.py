@@ -278,9 +278,7 @@ def _subsample_from_nested(folder, max_events, seed):
             if remaining <= 0:
                 break
             if remaining < n_ev:
-                event_indices = np.sort(
-                    rng.choice(n_ev, size=remaining, replace=False)
-                )
+                event_indices = np.sort(rng.choice(n_ev, size=remaining, replace=False))
 
         for i in event_indices:
             start = int(offsets[i].item())
@@ -353,9 +351,7 @@ def _load_preprocessed_h5_file(
     with h5py.File(path, "r") as f:
         data = np.asarray(f["data"], dtype=np.float64)
         mask = np.asarray(f["mask"], dtype=bool) if "mask" in f else None
-        global_f = (
-            np.asarray(f["global"], dtype=np.float64) if "global" in f else None
-        )
+        global_f = np.asarray(f["global"], dtype=np.float64) if "global" in f else None
 
     pmask = _particle_mask(data, mask)
     log_e = data[:, :, PREPROCESSED_LOG_E_COL]
@@ -1042,9 +1038,7 @@ def _resolve_particles_and_n_per_event(
     return particles, n_per_event
 
 
-def _resolve_blob_prong_multiplicity_bins(
-    minerva_cache: dict, args
-) -> dict | None:
+def _resolve_blob_prong_multiplicity_bins(minerva_cache: dict, args) -> dict | None:
     if "blob_prong_multiplicity" in minerva_cache:
         return minerva_cache["blob_prong_multiplicity"]
     particles, n_per_event = _resolve_particles_and_n_per_event(minerva_cache, args)
@@ -1667,9 +1661,7 @@ def _plot_joint_tokens_per_event_v2(
         plt.close(fig)
 
 
-def _plot_joint_reference_energy(
-    joint_bins: dict, out_path: Path
-):
+def _plot_joint_reference_energy(joint_bins: dict, out_path: Path):
     """Overlay MINERvA incoming-neutrino and JetClass-II jet-energy distributions."""
     edges = joint_bins["bin_edges"]
     with plt.rc_context(_poster_style()):
@@ -1791,7 +1783,9 @@ def _write_joint_poster_v2_plots(
     incoming_gev = _resolve_incoming_e_gev(minerva_cache, args)
     jet_energy_gev = _resolve_jet_energy_gev(jetclass2_cache, args)
     if jet_energy_gev is None:
-        print("Skipping joint energy plot (poster_v2): JetClass-II jet energy unavailable.")
+        print(
+            "Skipping joint energy plot (poster_v2): JetClass-II jet energy unavailable."
+        )
         return
     joint_energy = _build_joint_reference_energy_bins(incoming_gev, jet_energy_gev)
     _plot_joint_reference_energy_v2(
@@ -1819,7 +1813,9 @@ def _plot_pid_by_type(particles: np.ndarray, out_path: Path):
         n = int(mask.sum())
         ax.set_title(f"PID {p} ({pid_names.get(p, '?')}), n={n:,}", fontsize=9)
         if n == 0:
-            ax.text(0.5, 0.5, "no entries", ha="center", va="center", transform=ax.transAxes)
+            ax.text(
+                0.5, 0.5, "no entries", ha="center", va="center", transform=ax.transAxes
+            )
             ax.axis("off")
             continue
         log_e = particles[mask, 3]
@@ -1855,7 +1851,9 @@ def main():
             _write_jetclass2_poster_v2_plots(jc_cache, poster_v2_dir)
             _write_joint_poster_plots(cache, jc_cache, poster_dir, tag, args)
             _write_joint_poster_v2_plots(cache, jc_cache, poster_v2_dir, tag, args)
-        print(f"Wrote poster plots to {poster_dir} (joint plots in {poster_dir / 'joint'})")
+        print(
+            f"Wrote poster plots to {poster_dir} (joint plots in {poster_dir / 'joint'})"
+        )
         print(
             f"Wrote poster_v2 plots to {poster_v2_dir} "
             f"(joint plots in {poster_v2_dir / 'joint'})"
@@ -1942,9 +1940,7 @@ def main():
     jc_cache_path = None
     jc_cache = None
     if not args.no_jetclass2:
-        jc_cache, jc_cache_path = _load_or_build_jetclass2_poster(
-            args, poster_dir, tag
-        )
+        jc_cache, jc_cache_path = _load_or_build_jetclass2_poster(args, poster_dir, tag)
         if jc_cache is not None:
             jetclass2_payload = jc_cache["meta"]
             _write_jetclass2_poster_plots(jc_cache, poster_dir)
@@ -1987,9 +1983,7 @@ def main():
         "E_available_with_muon_MeV": _summary(
             truth_labels[:, E_AVAILABLE_WITH_MUON_COL]
         ),
-        "E_available_no_muon_MeV": _summary(
-            truth_labels[:, E_AVAILABLE_NO_MUON_COL]
-        ),
+        "E_available_no_muon_MeV": _summary(truth_labels[:, E_AVAILABLE_NO_MUON_COL]),
     }
     if jetclass2_payload is not None and jc_cache_path is not None:
         summaries["poster"]["jetclass2"] = {

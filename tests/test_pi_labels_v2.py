@@ -41,5 +41,7 @@ def test_cc_other_zero_charged_is_class_3():
 
 
 def test_nc_is_class_4():
-    labels = get_Pi_labels_v2(torch.from_numpy(_truth_row(current=2, n_pi_plus=1)[None]))
+    labels = get_Pi_labels_v2(
+        torch.from_numpy(_truth_row(current=2, n_pi_plus=1)[None])
+    )
     assert labels.item() == 4

@@ -355,7 +355,11 @@ def plot_rms_iqr_with_uncertainty(
             }
 
             color = color_map[config_label]
-            lbl = label_fn(config_label) if label_fn is not None else plot_model_label(config_label)
+            lbl = (
+                label_fn(config_label)
+                if label_fn is not None
+                else plot_model_label(config_label)
+            )
 
             with np.errstate(divide="ignore", invalid="ignore"):
                 rms_over_mpv = mean_rms / mean_mpv
@@ -436,9 +440,7 @@ def plot_rms_iqr_with_uncertainty(
 
     # Legend placement; optional *text* is used as legend title if provided.
     legend_fs = (
-        SMALL_PAPER_COMPACT_IQR_MPV_LEGEND_FS
-        if (iqr_only and compact_style)
-        else 9
+        SMALL_PAPER_COMPACT_IQR_MPV_LEGEND_FS if (iqr_only and compact_style) else 9
     )
     legend_kwargs: dict[str, Any] = {"fontsize": legend_fs, "loc": "upper right"}
     if text:

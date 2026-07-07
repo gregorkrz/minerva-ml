@@ -63,7 +63,9 @@ from src.scripts.train import (
     prepare_batch_omnilearned,
 )
 
-DEFAULT_INPUT_DIR = Path("/global/cfs/cdirs/m3246/gregork/Minerva/20260326_NEW_DEMO_ONLY")
+DEFAULT_INPUT_DIR = Path(
+    "/global/cfs/cdirs/m3246/gregork/Minerva/20260326_NEW_DEMO_ONLY"
+)
 DEFAULT_CKPT_DIR = Path("/global/cfs/cdirs/m3246/gregork/checkpoints")
 DEFAULT_FLAG = "Run_2306"
 
@@ -186,7 +188,9 @@ def enumerate_datasets(input_dir: Path) -> list[tuple[str, Path]]:
     return out
 
 
-def build_loader(folder: Path, args_dict: dict, task, batch_size: int, max_particles: int):
+def build_loader(
+    folder: Path, args_dict: dict, task, batch_size: int, max_particles: int
+):
     """Mirror ``load_data``'s HEPTorchDataset/DataLoader build for an arbitrary folder."""
     use_omnilearned = args_dict.get("use_omnilearned", None)
     use_bert = args_dict.get("use_bert", None)
@@ -237,20 +241,36 @@ def run_inference(model, loader, device, args_dict, use_amp: bool) -> np.ndarray
             )
         elif use_bert:
             inputs = prepare_batch_bert(
-                batch, device, use_pid=use_pid, pid_idx=pid_idx, use_cond=use_cond,
-                include_E_sum=include_E_sum, zero_cond_feature=zero_cond_feature,
+                batch,
+                device,
+                use_pid=use_pid,
+                pid_idx=pid_idx,
+                use_cond=use_cond,
+                include_E_sum=include_E_sum,
+                zero_cond_feature=zero_cond_feature,
                 energy_order=args_dict.get("bert_energy_order", False),
             )
         elif use_hyperscale:
             inputs = prepare_batch_hyperscale(
-                batch, device, use_pid=use_pid, pid_idx=pid_idx, use_cond=use_cond,
-                include_E_sum=include_E_sum, zero_cond_feature=zero_cond_feature,
+                batch,
+                device,
+                use_pid=use_pid,
+                pid_idx=pid_idx,
+                use_cond=use_cond,
+                include_E_sum=include_E_sum,
+                zero_cond_feature=zero_cond_feature,
                 variant=use_hyperscale,
             )
         else:
             inputs = prepare_batch(
-                batch, device, use_cond, use_pid, coord_dim, pid_idx,
-                include_E_sum=include_E_sum, zero_cond_feature=zero_cond_feature,
+                batch,
+                device,
+                use_cond,
+                use_pid,
+                coord_dim,
+                pid_idx,
+                include_E_sum=include_E_sum,
+                zero_cond_feature=zero_cond_feature,
             )
         amp_enabled = bool(use_amp and device.type == "cuda")
         with torch.amp.autocast(device_type="cuda", enabled=amp_enabled):
@@ -294,17 +314,34 @@ def main(argv: list[str] | None = None) -> None:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    ap.add_argument("--input-dir", type=Path, default=DEFAULT_INPUT_DIR,
-                    help=f"Demo datasets dir (default: {DEFAULT_INPUT_DIR})")
-    ap.add_argument("--flag", "-f", default=DEFAULT_FLAG,
-                    help=f"wandb tag selecting runs (default: {DEFAULT_FLAG})")
-    ap.add_argument("--ckpt-dir", type=Path, default=DEFAULT_CKPT_DIR,
-                    help=f"Checkpoint root (default: {DEFAULT_CKPT_DIR})")
-    ap.add_argument("--runs", nargs="+", default=None,
-                    help="Explicit run names to use instead of resolving from --flag.")
+    ap.add_argument(
+        "--input-dir",
+        type=Path,
+        default=DEFAULT_INPUT_DIR,
+        help=f"Demo datasets dir (default: {DEFAULT_INPUT_DIR})",
+    )
+    ap.add_argument(
+        "--flag",
+        "-f",
+        default=DEFAULT_FLAG,
+        help=f"wandb tag selecting runs (default: {DEFAULT_FLAG})",
+    )
+    ap.add_argument(
+        "--ckpt-dir",
+        type=Path,
+        default=DEFAULT_CKPT_DIR,
+        help=f"Checkpoint root (default: {DEFAULT_CKPT_DIR})",
+    )
+    ap.add_argument(
+        "--runs",
+        nargs="+",
+        default=None,
+        help="Explicit run names to use instead of resolving from --flag.",
+    )
     ap.add_argument("--batch-size", "-bs", type=int, default=512)
-    ap.add_argument("--max-runs", type=int, default=None,
-                    help="Limit number of runs (debugging).")
+    ap.add_argument(
+        "--max-runs", type=int, default=None, help="Limit number of runs (debugging)."
+    )
     ap.add_argument("--use-amp", action="store_true", help="Mixed precision on CUDA.")
     ap.add_argument("--device", default=None, help="torch device (default: auto).")
     args = ap.parse_args(argv)
@@ -392,7 +429,9 @@ def main(argv: list[str] | None = None) -> None:
                 probs = _softmax(logits)
                 np.savez(
                     score_dir / f"{run}.npz",
-                    prediction=probs, logits=logits, pid=pid,
+                    prediction=probs,
+                    logits=logits,
+                    pid=pid,
                 )
                 scores_json["scores"][rel][run] = {
                     "mode": mode,

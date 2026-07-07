@@ -219,11 +219,7 @@ def log_binned_weight_summary(
         used_global = n_signal == 0 or n_background == 0
         lo, hi = edges[b], edges[b + 1]
         br = "]" if b == n_bins - 1 else ")"
-        weights = (
-            global_weights
-            if used_global
-            else weight_table[b]
-        )
+        weights = global_weights if used_global else weight_table[b]
         print(
             f"  bin {b} [{lo:.2f}, {hi:.2f}{br}: "
             f"n={n_events}, signal={n_signal}, background={n_background}, "

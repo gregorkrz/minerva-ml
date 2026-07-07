@@ -94,7 +94,12 @@ def build_steps_cache_from_pickles(
     )
 
     return build_steps_cache_payload(
-        lh_c, flops_c, colors_c, lh_r, flops_r, colors_r,
+        lh_c,
+        flops_c,
+        colors_c,
+        lh_r,
+        flops_r,
+        colors_r,
     )
 
 
@@ -133,7 +138,9 @@ def update_steps_cache_from_pickles(
                     if m in clf["clrs_dict_full"]
                 },
             }
-            merge_steps_side(out, partial, lh_key="lh_c", flops_key="flops_c", colors_key="colors_c")
+            merge_steps_side(
+                out, partial, lh_key="lh_c", flops_key="flops_c", colors_key="colors_c"
+            )
         else:
             print("  Steps cache (classification): no new models.")
         del clf
@@ -162,7 +169,9 @@ def update_steps_cache_from_pickles(
                     if m in reg["clrs_dict_full"]
                 },
             }
-            merge_steps_side(out, partial, lh_key="lh_r", flops_key="flops_r", colors_key="colors_r")
+            merge_steps_side(
+                out, partial, lh_key="lh_r", flops_key="flops_r", colors_key="colors_r"
+            )
         else:
             print("  Steps cache (regression): no new models.")
         del reg

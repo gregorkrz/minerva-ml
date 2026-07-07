@@ -7,7 +7,11 @@ import pytest
 import torch
 import torch.nn.functional as F
 
-from src.eval._constants import is_horizontal_reference_model, is_steps_plot_excluded_model, plot_model_label
+from src.eval._constants import (
+    is_horizontal_reference_model,
+    is_steps_plot_excluded_model,
+    plot_model_label,
+)
 from src.eval.baseline_val_loss import (
     RECO_BASELINE_MODEL_KEY,
     inject_reco_baseline_loss_history,
@@ -58,12 +62,14 @@ def test_regression_reco_baseline_huber_matches_eval_recipe():
     targets = np.array([1.0, 2.0, 3.0], dtype=np.float32)
     preds = np.array([1.1, 1.9, 3.2], dtype=np.float32)
     expected = F.huber_loss(
-        torch.from_numpy(preds), torch.from_numpy(targets),
+        torch.from_numpy(preds),
+        torch.from_numpy(targets),
     ).item()
     assert expected == pytest.approx(
         float(
             F.huber_loss(
-                torch.tensor([1.1, 1.9, 3.2]), torch.tensor([1.0, 2.0, 3.0]),
+                torch.tensor([1.1, 1.9, 3.2]),
+                torch.tensor([1.0, 2.0, 3.0]),
             )
         )
     )
@@ -71,7 +77,9 @@ def test_regression_reco_baseline_huber_matches_eval_recipe():
     from src.eval.baseline_val_loss import inject_reco_baseline_regression_loss_history
 
     inject_reco_baseline_regression_loss_history(
-        loss_histories, data_path="/nonexistent", playlists=(),
+        loss_histories,
+        data_path="/nonexistent",
+        playlists=(),
     )
     assert RECO_BASELINE_MODEL_KEY not in loss_histories
 
@@ -94,4 +102,3 @@ def test_weighted_ce_matches_eval_recipe():
     assert RECO_BASELINE_MODEL_KEY not in loss_histories
 
     assert expected == F.cross_entropy(logits, mc, weight=weights).item()
-

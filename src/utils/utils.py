@@ -64,9 +64,7 @@ _HYPERSCALE_RUN_RE = re.compile(
 )
 
 
-def parse_hyperscale_model_cap(
-    name: str, *, task: str
-) -> tuple[str, int] | None:
+def parse_hyperscale_model_cap(name: str, *, task: str) -> tuple[str, int] | None:
     """Map a HyperScale run name to ``(plot_model_key, data_cap)`` for *task*."""
     m = _HYPERSCALE_RUN_RE.search(name)
     if m is None:
@@ -95,9 +93,7 @@ def parse_binned_classifier_model_cap(name: str) -> tuple[str, int] | None:
         return None
     raw, cap_s, _seed, _var, signal = m.groups()
     base = _TRANSFORMER_RAW_TO_PLOT_KEY.get(raw, raw)
-    suffix = _BINNED_SIGNAL_TO_PLOT_SUFFIX.get(
-        signal.lower(), f"binned-{signal}"
-    )
+    suffix = _BINNED_SIGNAL_TO_PLOT_SUFFIX.get(signal.lower(), f"binned-{signal}")
     return f"{base}-{suffix}", int(cap_s)
 
 

@@ -94,7 +94,10 @@ def _rebuild_per_event_array(
 
         return mc_true_hadronic_W_gev_from_baselines(bl_pl, test_idx)
 
-    if key in ("pion_E_MC", "pion_theta_MC", "has_pion") and "pion_four_vectors" in bl_pl:
+    if (
+        key in ("pion_E_MC", "pion_theta_MC", "has_pion")
+        and "pion_four_vectors" in bl_pl
+    ):
         pion_fv = bl_pl["pion_four_vectors"][test_idx] / 1000.0
         if key == "pion_E_MC":
             return pion_fv[:, -1]
@@ -178,13 +181,19 @@ def _pion_kinematic_bin_mask(
         raise ValueError(f"kind must be 'E' or 'theta', got {kind!r}")
     if n_pred is not None:
         x = _align_per_event_array(
-            x, data, playlist, n_pred, key="pion_E_MC" if kind == "E" else "pion_theta_MC"
+            x,
+            data,
+            playlist,
+            n_pred,
+            key="pion_E_MC" if kind == "E" else "pion_theta_MC",
         )
     bm = mc_value_in_bin(x, edges, bin_index, require_finite=req_fin)
     if require_has_pion:
         has_pion = data["has_pion"]
         if n_pred is not None:
-            has_pion = _align_per_event_array(has_pion, data, playlist, n_pred, key="has_pion")
+            has_pion = _align_per_event_array(
+                has_pion, data, playlist, n_pred, key="has_pion"
+            )
         bm = bm & has_pion
     return bm
 

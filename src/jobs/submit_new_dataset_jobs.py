@@ -173,13 +173,14 @@ SLURM_MODEL_KEYS: tuple[str, ...] = tuple(spec.plot_key for spec in MODEL_SPECS)
 ALL_MODEL_KEYS: tuple[str, ...] = SLURM_MODEL_KEYS + ("MLP",)
 
 
-def resolve_model_selection(models: tuple[str, ...]) -> tuple[tuple[ModelSpec, ...], bool]:
+def resolve_model_selection(
+    models: tuple[str, ...],
+) -> tuple[tuple[ModelSpec, ...], bool]:
     """Return SLURM model specs and whether to print local MLP commands."""
     unknown = sorted(set(models) - set(ALL_MODEL_KEYS))
     if unknown:
         raise ValueError(
-            f"Unknown model(s): {unknown}. "
-            f"Choose from: {list(ALL_MODEL_KEYS)}"
+            f"Unknown model(s): {unknown}. " f"Choose from: {list(ALL_MODEL_KEYS)}"
         )
     include_mlp = "MLP" in models
     slurm_keys = [m for m in models if m != "MLP"]

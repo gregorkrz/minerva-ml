@@ -71,7 +71,9 @@ _SMALL_PAPER_SIGNAL_CLASSES: dict[str, list[int]] = {
 }
 
 
-def _resolve_classification_pickle(explicit: Path | None, cache_root: Path) -> Path | None:
+def _resolve_classification_pickle(
+    explicit: Path | None, cache_root: Path
+) -> Path | None:
     if explicit is not None:
         return explicit
     candidates = [
@@ -325,7 +327,8 @@ def main(argv: list[str] | None = None) -> None:
             _save_classification_val_loss_curves(
                 steps=steps,
                 cfg=cfg,
-                out_pdf=small_dir / "classification_val_loss_vs_log10_flops_and_log10_steps.pdf",
+                out_pdf=small_dir
+                / "classification_val_loss_vs_log10_flops_and_log10_steps.pdf",
             )
         else:
             print(f"Skip classification val-loss (steps cache missing): {steps_cache}")

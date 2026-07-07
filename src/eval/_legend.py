@@ -74,9 +74,7 @@ def layout_legend_with_column_stacks(
         for col in range(ncol):
             if grid_h[row][col] is None:
                 slot = row * ncol + col
-                grid_h[row][col] = Line2D(
-                    [], [], linestyle="", marker="", alpha=0.0
-                )
+                grid_h[row][col] = Line2D([], [], linestyle="", marker="", alpha=0.0)
                 grid_l[row][col] = legend_spacer_label(slot)
 
     out_h: list = []

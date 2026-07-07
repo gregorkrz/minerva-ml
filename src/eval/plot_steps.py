@@ -226,13 +226,24 @@ def _plot_flops_vs_loss(
 ) -> None:
     fig, ax = plt.subplots(figsize=figsize, constrained_layout=True)
     _draw_flops_curves(
-        ax, loss_histories, flops_per_step, colors, ylim, panel_title,
-        label_fn=label_fn, ylabel=ylabel, flops_xmin=flops_xmin,
-        step_cutoff=step_cutoff, curve_end=curve_end, model_curve_cuts=model_curve_cuts,
+        ax,
+        loss_histories,
+        flops_per_step,
+        colors,
+        ylim,
+        panel_title,
+        label_fn=label_fn,
+        ylabel=ylabel,
+        flops_xmin=flops_xmin,
+        step_cutoff=step_cutoff,
+        curve_end=curve_end,
+        model_curve_cuts=model_curve_cuts,
         horizontal_ref_models=horizontal_ref_models,
     )
     _apply_ax_legend(
-        ax, legend_outside=legend_outside, legend_label_order=legend_label_order,
+        ax,
+        legend_outside=legend_outside,
+        legend_label_order=legend_label_order,
     )
     ax.grid(True)
     out_pdf.parent.mkdir(parents=True, exist_ok=True)
@@ -315,14 +326,11 @@ def _resolve_model_step_cutoffs(
     cutoffs: dict[str, float] = {}
     for model, (steps_grid, mean_loss) in aligned.items():
         policy = cuts.step_cut_policy.get(model)
-        use_min_loss = (
-            policy == "min_val_loss"
-            or (
-                policy is None
-                and model not in cuts.step_cut
-                and model not in cuts.step_cut_match
-                and cuts.legacy_global_min_val_loss
-            )
+        use_min_loss = policy == "min_val_loss" or (
+            policy is None
+            and model not in cuts.step_cut
+            and model not in cuts.step_cut_match
+            and cuts.legacy_global_min_val_loss
         )
         if use_min_loss:
             cutoffs[model] = _step_at_min_val_loss(steps_grid, mean_loss)
@@ -429,20 +437,18 @@ def _split_bdt_runs(
 ) -> tuple[OrderedDict[str, list], OrderedDict[str, list]]:
     runs = _runs_per_model(loss_histories, flops_per_step)
     if horizontal_ref_models is None:
+
         def _is_ref(name: str) -> bool:
             return is_horizontal_reference_model(name)
+
     else:
         ref_set = horizontal_ref_models
 
         def _is_ref(name: str) -> bool:
             return name in ref_set
 
-    curve_runs = OrderedDict(
-        (m, s) for m, s in runs.items() if not _is_ref(m)
-    )
-    ref_runs = OrderedDict(
-        (m, s) for m, s in runs.items() if _is_ref(m)
-    )
+    curve_runs = OrderedDict((m, s) for m, s in runs.items() if not _is_ref(m))
+    ref_runs = OrderedDict((m, s) for m, s in runs.items() if _is_ref(m))
     return curve_runs, ref_runs
 
 
@@ -570,10 +576,7 @@ def _validation_loss_y_limits(
                 flop_mask = log10_cum_flops >= global_flops_xmin
                 st_arr = st_arr[flop_mask]
                 lo_arr = lo_arr[flop_mask]
-            if (
-                log_step_cuts
-                and log_step_cuts.get(model) is not None
-            ):
+            if log_step_cuts and log_step_cuts.get(model) is not None:
                 log10_steps = np.log10(st_arr + 1.0)
                 step_mask = log10_steps <= log_step_cuts[model]
                 st_arr = st_arr[step_mask]
@@ -581,7 +584,8 @@ def _validation_loss_y_limits(
             if len(lo_arr) == 0:
                 continue
             lo_win = _loss_values_in_log_steps_window(
-                st_arr, lo_arr,
+                st_arr,
+                lo_arr,
                 log_steps_xmin=log_steps_xmin,
                 log_steps_xmax=log_steps_xmax,
             )
@@ -690,7 +694,9 @@ def _draw_flops_curves(
     if label_fn is None:
         label_fn = plot_model_label
     curve_runs, ref_runs = _split_bdt_runs(
-        loss_histories, flops_per_step, horizontal_ref_models=horizontal_ref_models,
+        loss_histories,
+        flops_per_step,
+        horizontal_ref_models=horizontal_ref_models,
     )
     model_step_cutoffs = _resolve_model_step_cutoffs(
         curve_runs,
@@ -709,7 +715,9 @@ def _draw_flops_curves(
             continue
         steps_grid, mean_loss, sigma_loss = packed
         steps_grid, mean_loss, sigma_loss = _apply_step_cutoff_mask(
-            steps_grid, mean_loss, sigma_loss,
+            steps_grid,
+            mean_loss,
+            sigma_loss,
             max_step=model_step_cutoffs.get(model),
         )
         if len(steps_grid) == 0:
@@ -717,11 +725,15 @@ def _draw_flops_curves(
         cum_flops = steps_grid * flops
         x = np.log10(cum_flops + 1)
         x, mean_loss, sigma_loss = _apply_flop_xmin_mask(
-            x, mean_loss, sigma_loss,
+            x,
+            mean_loss,
+            sigma_loss,
             min_log10_flop=flop_xmins.get(model),
         )
         x, mean_loss, sigma_loss = _apply_flop_cut_mask(
-            x, mean_loss, sigma_loss,
+            x,
+            mean_loss,
+            sigma_loss,
             max_log10_flop=flop_cuts.get(model),
         )
         if len(x) == 0:
@@ -742,7 +754,9 @@ def _draw_flops_curves(
     ax.set_ylabel(ylabel, fontsize=_LABEL_FS)
     ax.tick_params(axis="both", labelsize=_TICK_FS)
     effective_ylim = _validation_loss_y_limits(
-        curve_runs, ref_runs, ylim=ylim,
+        curve_runs,
+        ref_runs,
+        ylim=ylim,
         model_step_cutoffs=model_step_cutoffs,
         flop_cuts=flop_cuts,
         flop_xmins=flop_xmins,
@@ -776,12 +790,23 @@ def _plot_steps_vs_loss(
 ) -> None:
     fig, ax = plt.subplots(figsize=figsize, constrained_layout=True)
     _draw_steps_curves(
-        ax, loss_histories, flops_per_step, colors, ylim, panel_title, step_cutoff,
-        label_fn=label_fn, ylabel=ylabel, curve_end=curve_end, model_curve_cuts=model_curve_cuts,
+        ax,
+        loss_histories,
+        flops_per_step,
+        colors,
+        ylim,
+        panel_title,
+        step_cutoff,
+        label_fn=label_fn,
+        ylabel=ylabel,
+        curve_end=curve_end,
+        model_curve_cuts=model_curve_cuts,
         horizontal_ref_models=horizontal_ref_models,
     )
     _apply_ax_legend(
-        ax, legend_outside=legend_outside, legend_label_order=legend_label_order,
+        ax,
+        legend_outside=legend_outside,
+        legend_label_order=legend_label_order,
     )
     ax.grid(True)
     out_pdf.parent.mkdir(parents=True, exist_ok=True)
@@ -810,7 +835,9 @@ def _draw_steps_curves(
     if label_fn is None:
         label_fn = plot_model_label
     curve_runs, ref_runs = _split_bdt_runs(
-        loss_histories, flops_per_step, horizontal_ref_models=horizontal_ref_models,
+        loss_histories,
+        flops_per_step,
+        horizontal_ref_models=horizontal_ref_models,
     )
     model_step_cutoffs = _resolve_model_step_cutoffs(
         curve_runs,
@@ -818,7 +845,9 @@ def _draw_steps_curves(
         curve_end=curve_end,
         global_step_cutoff=step_cutoff,
     )
-    log_step_cuts = model_curve_cuts.log_step_cut if model_curve_cuts is not None else {}
+    log_step_cuts = (
+        model_curve_cuts.log_step_cut if model_curve_cuts is not None else {}
+    )
 
     for model, series_list in curve_runs.items():
         color = colors.get(model, "tab:gray")
@@ -827,18 +856,24 @@ def _draw_steps_curves(
             continue
         steps_grid, mean_loss, sigma_loss = packed
         steps_grid, mean_loss, sigma_loss = _apply_step_cutoff_mask(
-            steps_grid, mean_loss, sigma_loss,
+            steps_grid,
+            mean_loss,
+            sigma_loss,
             max_step=model_step_cutoffs.get(model),
         )
         steps_grid, mean_loss, sigma_loss = _apply_log_step_cut_mask(
-            steps_grid, mean_loss, sigma_loss,
+            steps_grid,
+            mean_loss,
+            sigma_loss,
             max_log10_step=log_step_cuts.get(model),
         )
         if len(steps_grid) == 0:
             continue
         log_steps_plot = np.log10(steps_grid + 1)
         log_steps_plot, mean_loss, sigma_loss = _mask_log_steps_series(
-            log_steps_plot, mean_loss, sigma_loss,
+            log_steps_plot,
+            mean_loss,
+            sigma_loss,
             log_steps_xmin=log_steps_xmin,
             log_steps_xmax=log_steps_xmax,
         )
@@ -860,7 +895,9 @@ def _draw_steps_curves(
     ax.set_ylabel(ylabel, fontsize=_LABEL_FS)
     ax.tick_params(axis="both", labelsize=_TICK_FS)
     effective_ylim = _validation_loss_y_limits(
-        curve_runs, ref_runs, ylim=ylim,
+        curve_runs,
+        ref_runs,
+        ylim=ylim,
         log_steps_xmin=log_steps_xmin,
         log_steps_xmax=log_steps_xmax,
         model_step_cutoffs=model_step_cutoffs,
@@ -1003,11 +1040,17 @@ def _add_steps_zoom_inset(
     axins.set_xlim(log_steps_xmin, log_steps_xmax)
     axins.set_box_aspect(1)
     indicator = ax.indicate_inset_zoom(
-        axins, edgecolor="0.45", linestyle="--", linewidth=0.9,
+        axins,
+        edgecolor="0.45",
+        linestyle="--",
+        linewidth=0.9,
     )
     _style_inset_top_corner_connectors(indicator)
     _draw_inset_top_connectors(
-        ax, axins, log_xmin=log_steps_xmin, log_xmax=log_steps_xmax,
+        ax,
+        axins,
+        log_xmin=log_steps_xmin,
+        log_xmax=log_steps_xmax,
     )
 
 
@@ -1054,12 +1097,23 @@ def _plot_steps_vs_loss_with_zoom(
     """Steps vs val-loss with an inset zoomed to a log-step window."""
     fig, ax = plt.subplots(figsize=figsize, constrained_layout=True)
     _draw_steps_curves(
-        ax, loss_histories, flops_per_step, colors, ylim, panel_title, step_cutoff,
-        label_fn=label_fn, ylabel=ylabel, curve_end=curve_end, model_curve_cuts=model_curve_cuts,
+        ax,
+        loss_histories,
+        flops_per_step,
+        colors,
+        ylim,
+        panel_title,
+        step_cutoff,
+        label_fn=label_fn,
+        ylabel=ylabel,
+        curve_end=curve_end,
+        model_curve_cuts=model_curve_cuts,
         horizontal_ref_models=horizontal_ref_models,
     )
     _apply_ax_legend(
-        ax, legend_outside=legend_outside, legend_label_order=legend_label_order,
+        ax,
+        legend_outside=legend_outside,
+        legend_label_order=legend_label_order,
     )
     _add_steps_zoom_inset(
         ax,
@@ -1143,17 +1197,37 @@ def _plot_combined_flops_row(
         return
     colors = _merged_colors(colors_c, colors_r)
     fig, (ax0, ax1) = plt.subplots(
-        1, 2, figsize=(11.5, 4.6), constrained_layout=True, sharey=False,
+        1,
+        2,
+        figsize=(11.5, 4.6),
+        constrained_layout=True,
+        sharey=False,
     )
     _draw_flops_curves(
-        ax0, lh_c, flops_c, colors, ylim_c, "Classification", label_fn,
-        flops_xmin=None, step_cutoff=step_cutoff, curve_end=curve_end,
+        ax0,
+        lh_c,
+        flops_c,
+        colors,
+        ylim_c,
+        "Classification",
+        label_fn,
+        flops_xmin=None,
+        step_cutoff=step_cutoff,
+        curve_end=curve_end,
         model_curve_cuts=model_curve_cuts_c,
         horizontal_ref_models=horizontal_ref_models_c,
     )
     _draw_flops_curves(
-        ax1, lh_r, flops_r, colors, ylim_r, "Regression", label_fn,
-        flops_xmin=flops_xmin, curve_end=curve_end, model_curve_cuts=model_curve_cuts_r,
+        ax1,
+        lh_r,
+        flops_r,
+        colors,
+        ylim_r,
+        "Regression",
+        label_fn,
+        flops_xmin=flops_xmin,
+        curve_end=curve_end,
+        model_curve_cuts=model_curve_cuts_r,
         horizontal_ref_models=horizontal_ref_models_r,
     )
     ax1.set_ylabel("")
@@ -1198,16 +1272,36 @@ def _plot_combined_steps_row(
         return
     colors = _merged_colors(colors_c, colors_r)
     fig, (ax0, ax1) = plt.subplots(
-        1, 2, figsize=(11.5, 4.6), constrained_layout=True, sharey=False,
+        1,
+        2,
+        figsize=(11.5, 4.6),
+        constrained_layout=True,
+        sharey=False,
     )
     _draw_steps_curves(
-        ax0, lh_c, flops_c, colors, ylim_c, "Classification", step_cutoff_c,
-        label_fn=label_fn, curve_end=curve_end, model_curve_cuts=model_curve_cuts_c,
+        ax0,
+        lh_c,
+        flops_c,
+        colors,
+        ylim_c,
+        "Classification",
+        step_cutoff_c,
+        label_fn=label_fn,
+        curve_end=curve_end,
+        model_curve_cuts=model_curve_cuts_c,
         horizontal_ref_models=horizontal_ref_models_c,
     )
     _draw_steps_curves(
-        ax1, lh_r, flops_r, colors, ylim_r, "Regression", None,
-        label_fn=label_fn, curve_end=curve_end, model_curve_cuts=model_curve_cuts_r,
+        ax1,
+        lh_r,
+        flops_r,
+        colors,
+        ylim_r,
+        "Regression",
+        None,
+        label_fn=label_fn,
+        curve_end=curve_end,
+        model_curve_cuts=model_curve_cuts_r,
         horizontal_ref_models=horizontal_ref_models_r,
     )
     ax1.set_ylabel("")
@@ -1302,8 +1396,14 @@ def _plot_variant_bundle(
 
     combined_out = plots_root / f"steps_combined{variant.suffix}"
     _plot_combined_flops_row(
-        lh_c_v, flops_c_v, colors_c_v, ylim_c,
-        lh_r_v, flops_r_v, colors_r_v, ylim_r,
+        lh_c_v,
+        flops_c_v,
+        colors_c_v,
+        ylim_c,
+        lh_r_v,
+        flops_r_v,
+        colors_r_v,
+        ylim_r,
         combined_out / "log_flops_vs_val_loss.pdf",
         label_fn,
         flops_xmin=flops_xmin,
@@ -1317,8 +1417,15 @@ def _plot_variant_bundle(
         horizontal_ref_models_r=horizontal_ref_models_r,
     )
     _plot_combined_steps_row(
-        lh_c_v, flops_c_v, colors_c_v, ylim_c, step_cutoff,
-        lh_r_v, flops_r_v, colors_r_v, ylim_r,
+        lh_c_v,
+        flops_c_v,
+        colors_c_v,
+        ylim_c,
+        step_cutoff,
+        lh_r_v,
+        flops_r_v,
+        colors_r_v,
+        ylim_r,
         combined_out / "log_steps_vs_val_loss.pdf",
         label_fn,
         legend_label_order=legend_label_order,
@@ -1332,7 +1439,11 @@ def _plot_variant_bundle(
 
     if lh_c_v:
         _plot_flops_vs_loss(
-            lh_c_v, flops_c_v, colors_c_v, "", ylim_c,
+            lh_c_v,
+            flops_c_v,
+            colors_c_v,
+            "",
+            ylim_c,
             combined_out / "log_flops_vs_val_loss_classification.pdf",
             label_fn=label_fn,
             legend_label_order=legend_label_order,
@@ -1340,49 +1451,73 @@ def _plot_variant_bundle(
             figsize=_SINGLE_PANEL_FIGSIZE,
             flops_xmin=None,
             step_cutoff=step_cutoff,
-            curve_end=curve_end, model_curve_cuts=model_curve_cuts_c,
+            curve_end=curve_end,
+            model_curve_cuts=model_curve_cuts_c,
             horizontal_ref_models=horizontal_ref_models_c,
         )
         _plot_steps_vs_loss(
-            lh_c_v, flops_c_v, colors_c_v, "", ylim_c, step_cutoff,
+            lh_c_v,
+            flops_c_v,
+            colors_c_v,
+            "",
+            ylim_c,
+            step_cutoff,
             combined_out / "log_steps_vs_val_loss_classification.pdf",
             label_fn=label_fn,
             legend_label_order=legend_label_order,
             ylabel="Validation loss (classification)",
             figsize=_SINGLE_PANEL_FIGSIZE,
-            curve_end=curve_end, model_curve_cuts=model_curve_cuts_c,
+            curve_end=curve_end,
+            model_curve_cuts=model_curve_cuts_c,
             horizontal_ref_models=horizontal_ref_models_c,
         )
     if lh_r_v:
         _plot_flops_vs_loss(
-            lh_r_v, flops_r_v, colors_r_v, "", ylim_r,
+            lh_r_v,
+            flops_r_v,
+            colors_r_v,
+            "",
+            ylim_r,
             combined_out / "log_flops_vs_val_loss_regression.pdf",
             label_fn=label_fn,
             legend_label_order=legend_label_order,
             ylabel="Validation loss (regression)",
             figsize=_SINGLE_PANEL_FIGSIZE,
             flops_xmin=flops_xmin,
-            curve_end=curve_end, model_curve_cuts=model_curve_cuts_r,
+            curve_end=curve_end,
+            model_curve_cuts=model_curve_cuts_r,
             horizontal_ref_models=horizontal_ref_models_r,
         )
         _plot_steps_vs_loss(
-            lh_r_v, flops_r_v, colors_r_v, "", ylim_r, None,
+            lh_r_v,
+            flops_r_v,
+            colors_r_v,
+            "",
+            ylim_r,
+            None,
             combined_out / "log_steps_vs_val_loss_regression.pdf",
             label_fn=label_fn,
             legend_label_order=legend_label_order,
             ylabel="Validation loss (regression)",
             figsize=_SINGLE_PANEL_FIGSIZE,
-            curve_end=curve_end, model_curve_cuts=model_curve_cuts_r,
+            curve_end=curve_end,
+            model_curve_cuts=model_curve_cuts_r,
             horizontal_ref_models=horizontal_ref_models_r,
         )
         _plot_steps_vs_loss_with_zoom(
-            lh_r_v, flops_r_v, colors_r_v, "", ylim_r, None,
+            lh_r_v,
+            flops_r_v,
+            colors_r_v,
+            "",
+            ylim_r,
+            None,
             combined_out / "log_steps_vs_val_loss_regression_with_zoom.pdf",
             label_fn=label_fn,
             legend_label_order=legend_label_order,
             ylabel="Validation loss (regression)",
             figsize=_SINGLE_PANEL_FIGSIZE,
-            curve_end=curve_end, model_curve_cuts=model_curve_cuts_r,
+            curve_end=curve_end,
+            model_curve_cuts=model_curve_cuts_r,
             horizontal_ref_models=horizontal_ref_models_r,
         )
 
@@ -1392,28 +1527,58 @@ def _plot_variant_bundle(
     clf_out = plots_root / "classification" / f"steps{variant.suffix}"
     reg_out = plots_root / "regression" / f"steps{variant.suffix}"
     _plot_flops_vs_loss(
-        lh_c_v, flops_c_v, colors_c_v, "Classification", ylim_c,
-        clf_out / "log_flops_vs_val_loss.pdf", legend_outside=True,
-        flops_xmin=None, step_cutoff=step_cutoff, curve_end=curve_end,
+        lh_c_v,
+        flops_c_v,
+        colors_c_v,
+        "Classification",
+        ylim_c,
+        clf_out / "log_flops_vs_val_loss.pdf",
+        legend_outside=True,
+        flops_xmin=None,
+        step_cutoff=step_cutoff,
+        curve_end=curve_end,
         model_curve_cuts=model_curve_cuts_c,
         horizontal_ref_models=horizontal_ref_models_c,
     )
     _plot_steps_vs_loss(
-        lh_c_v, flops_c_v, colors_c_v, "Classification", ylim_c, step_cutoff,
-        clf_out / "log_steps_vs_val_loss.pdf", legend_outside=True, label_fn=label_fn,
-        curve_end=curve_end, model_curve_cuts=model_curve_cuts_c,
+        lh_c_v,
+        flops_c_v,
+        colors_c_v,
+        "Classification",
+        ylim_c,
+        step_cutoff,
+        clf_out / "log_steps_vs_val_loss.pdf",
+        legend_outside=True,
+        label_fn=label_fn,
+        curve_end=curve_end,
+        model_curve_cuts=model_curve_cuts_c,
         horizontal_ref_models=horizontal_ref_models_c,
     )
     _plot_flops_vs_loss(
-        lh_r_v, flops_r_v, colors_r_v, "Regression", ylim_r,
-        reg_out / "log_flops_vs_val_loss.pdf", legend_outside=False,
-        flops_xmin=flops_xmin, curve_end=curve_end, model_curve_cuts=model_curve_cuts_r,
+        lh_r_v,
+        flops_r_v,
+        colors_r_v,
+        "Regression",
+        ylim_r,
+        reg_out / "log_flops_vs_val_loss.pdf",
+        legend_outside=False,
+        flops_xmin=flops_xmin,
+        curve_end=curve_end,
+        model_curve_cuts=model_curve_cuts_r,
         horizontal_ref_models=horizontal_ref_models_r,
     )
     _plot_steps_vs_loss(
-        lh_r_v, flops_r_v, colors_r_v, "Regression", ylim_r, None,
-        reg_out / "log_steps_vs_val_loss.pdf", legend_outside=False, label_fn=label_fn,
-        curve_end=curve_end, model_curve_cuts=model_curve_cuts_r,
+        lh_r_v,
+        flops_r_v,
+        colors_r_v,
+        "Regression",
+        ylim_r,
+        None,
+        reg_out / "log_steps_vs_val_loss.pdf",
+        legend_outside=False,
+        label_fn=label_fn,
+        curve_end=curve_end,
+        model_curve_cuts=model_curve_cuts_r,
         horizontal_ref_models=horizontal_ref_models_r,
     )
 
@@ -1442,7 +1607,10 @@ def write_classification_val_loss_log_flops_steps_pdf(
     else:
         model_filter = lambda m: m in model_names  # noqa: E731
     lh, flops, clrs = _subset_for_plot(
-        loss_histories, flops_per_step, colors, model_filter,
+        loss_histories,
+        flops_per_step,
+        colors,
+        model_filter,
     )
     if config_horizontal_refs:
         lh, flops, clrs = _merge_config_horizontal_refs(
@@ -1461,17 +1629,39 @@ def write_classification_val_loss_log_flops_steps_pdf(
         return
 
     fig, (ax0, ax1) = plt.subplots(
-        1, 2, figsize=(11.5, 4.6), constrained_layout=True, sharey=True,
+        1,
+        2,
+        figsize=(11.5, 4.6),
+        constrained_layout=True,
+        sharey=True,
     )
     _draw_flops_curves(
-        ax0, lh, flops, clrs, ylim, "",
-        label_fn=label_fn, ylabel="Validation loss (classification)",
-        flops_xmin=None, step_cutoff=step_cutoff, curve_end=curve_end, model_curve_cuts=model_curve_cuts,
+        ax0,
+        lh,
+        flops,
+        clrs,
+        ylim,
+        "",
+        label_fn=label_fn,
+        ylabel="Validation loss (classification)",
+        flops_xmin=None,
+        step_cutoff=step_cutoff,
+        curve_end=curve_end,
+        model_curve_cuts=model_curve_cuts,
         horizontal_ref_models=horizontal_ref_models,
     )
     _draw_steps_curves(
-        ax1, lh, flops, clrs, ylim, "", step_cutoff,
-        label_fn=label_fn, ylabel="", curve_end=curve_end, model_curve_cuts=model_curve_cuts,
+        ax1,
+        lh,
+        flops,
+        clrs,
+        ylim,
+        "",
+        step_cutoff,
+        label_fn=label_fn,
+        ylabel="",
+        curve_end=curve_end,
+        model_curve_cuts=model_curve_cuts,
         horizontal_ref_models=horizontal_ref_models,
     )
     for ax in (ax0, ax1):
@@ -1586,8 +1776,15 @@ def main(argv: list[str] | None = None) -> None:
         config_horizontal_refs_c = _config_horizontal_ref_names(cfg, "classification")
         config_horizontal_refs_r = _config_horizontal_ref_names(cfg, "regression")
         _plot_variant_bundle(
-            variant, lh_c, flops_c, colors_c, ylim_c,
-            lh_r, flops_r, colors_r, ylim_r,
+            variant,
+            lh_c,
+            flops_c,
+            colors_c,
+            ylim_c,
+            lh_r,
+            flops_r,
+            colors_r,
+            ylim_r,
             plots_root,
             separate_panels=args.separate_panels,
             step_cutoff=cfg.step_cutoff,
@@ -1603,8 +1800,15 @@ def main(argv: list[str] | None = None) -> None:
     else:
         for variant in STEPS_PLOT_VARIANTS:
             _plot_variant_bundle(
-                variant, lh_c, flops_c, colors_c, ylim_c,
-                lh_r, flops_r, colors_r, ylim_r,
+                variant,
+                lh_c,
+                flops_c,
+                colors_c,
+                ylim_c,
+                lh_r,
+                flops_r,
+                colors_r,
+                ylim_r,
                 plots_root,
                 separate_panels=args.separate_panels,
             )

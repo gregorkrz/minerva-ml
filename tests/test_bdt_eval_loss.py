@@ -115,7 +115,13 @@ def test_bdt_classification_batched_matches_eval_aggregate():
 
         X, y, _ = _bdt_cond_batch(batch, args)
         loss_b = _bdt_classification_batch_loss(
-            clf, X, y, num_classes, task, False, class_weights=class_weights,
+            clf,
+            X,
+            y,
+            num_classes,
+            task,
+            False,
+            class_weights=class_weights,
         )
         n = len(y)
         total_loss += loss_b * n
@@ -159,12 +165,20 @@ def test_bdt_weighted_classification_batch_matches_cross_entropy():
     y = np.array([0, 1, 2, 1, 0], dtype=np.int64)
     weights = np.array([1.0, 2.0, 3.0, 4.0, 5.0], dtype=np.float32)
     loss = _bdt_classification_batch_loss(
-        clf, X, y, 5, task, True, sample_weights=weights,
+        clf,
+        X,
+        y,
+        5,
+        task,
+        True,
+        sample_weights=weights,
     )
     proba = clf.predict_proba(X)
     logits = torch.log(torch.from_numpy(proba).clamp(min=1e-12)).float()
     expected = F.cross_entropy(
-        logits, torch.from_numpy(y).long(), reduction="none",
+        logits,
+        torch.from_numpy(y).long(),
+        reduction="none",
     )
     expected = (expected * torch.from_numpy(weights)).mean().item()
     assert loss == pytest.approx(expected)

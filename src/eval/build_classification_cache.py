@@ -56,10 +56,15 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--out-dir", type=Path, default=None)
     ap.add_argument("--classification-pickle", type=Path, default=None)
     ap.add_argument(
-        "--metrics-cache", type=Path, default=None, metavar="PKL",
+        "--metrics-cache",
+        type=Path,
+        default=None,
+        metavar="PKL",
         help="Override output path (default: plots/tmp_results/classification_metrics.pkl).",
     )
-    ap.add_argument("--force", action="store_true", help="Rebuild even if cache already exists.")
+    ap.add_argument(
+        "--force", action="store_true", help="Rebuild even if cache already exists."
+    )
     ap.add_argument(
         "--additive",
         action="store_true",

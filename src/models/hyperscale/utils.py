@@ -44,13 +44,15 @@ def _strip_known_prefixes(state_dict):
         # remainder starts with a known HyperScale submodule name.
         for p in prefixes:
             if nk.startswith(p):
-                nk = nk[len(p):]
+                nk = nk[len(p) :]
                 break
         out[nk] = v
     return out
 
 
-def _filter_compatible(checkpoint_state, model_state, skip_prefixes=("head.",), verbose=True):
+def _filter_compatible(
+    checkpoint_state, model_state, skip_prefixes=("head.",), verbose=True
+):
     """Keep only ckpt entries that exist in the model with matching shape.
 
     ``skip_prefixes`` are dropped unconditionally (default: the task-specific
@@ -153,7 +155,8 @@ def _resolve_hyperscale_ckpt_path(path):
             if os.path.exists(cand):
                 return cand
         ckpts = sorted(
-            n for n in os.listdir(path)
+            n
+            for n in os.listdir(path)
             if (n.endswith(".pt") or n.endswith(".pth"))
             and os.path.isfile(os.path.join(path, n))
         )
@@ -164,9 +167,7 @@ def _resolve_hyperscale_ckpt_path(path):
                 f"Multiple .pt/.pth files in {path!r}; pass an explicit file "
                 f"path. Found: {ckpts}"
             )
-        raise FileNotFoundError(
-            f"No .pt or .pth files found in directory: {path}"
-        )
+        raise FileNotFoundError(f"No .pt or .pth files found in directory: {path}")
     raise FileNotFoundError(
         f"HyperScale checkpoint path is neither file nor dir: {path}"
     )

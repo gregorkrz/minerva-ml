@@ -214,7 +214,9 @@ def main() -> None:
             )
         )
 
-    print(f"\nDone: {len(submitted)} job(s) {'prepared' if args.dry_run else 'submitted'}.")
+    print(
+        f"\nDone: {len(submitted)} job(s) {'prepared' if args.dry_run else 'submitted'}."
+    )
 
 
 if __name__ == "__main__":

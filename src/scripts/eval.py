@@ -204,7 +204,11 @@ def evaluate_bdt(model, dataloader, device, args_dict, task):
 
     for batch in tqdm(dataloader, desc="Evaluating (BDT)", leave=True):
         loss, n, extras = _bdt_eval_batch(
-            model, batch, args, task, use_binned_loss=use_binned_loss,
+            model,
+            batch,
+            args,
+            task,
+            use_binned_loss=use_binned_loss,
         )
         total_loss += loss * n
         total_samples += n
@@ -493,11 +497,7 @@ def main():
     np.savez(
         output_file,
         prediction=results["predictions"],
-        pid=(
-            results["pid_labels"]
-            if "pid_labels" in results
-            else results["targets"]
-        ),
+        pid=(results["pid_labels"] if "pid_labels" in results else results["targets"]),
         cond=results["cond"],
         eval_indices=eval_indices,
     )

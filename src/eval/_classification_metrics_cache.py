@@ -151,15 +151,21 @@ def _compute_baseline_fpr(
     if n_muons_cond == "cc1pi":
         n_charged_prongs = baselines_pl["n_charged_prongs"][test_idx]
         improved_nmichel = baselines_pl["improved_nmichel"][test_idx]
-        y_pred = ((n_muons == 1) & (n_charged_prongs == 1) & (improved_nmichel == 1)).astype(int)
+        y_pred = (
+            (n_muons == 1) & (n_charged_prongs == 1) & (improved_nmichel == 1)
+        ).astype(int)
     elif n_muons_cond == "ccnpi_ge1":
         n_charged_prongs = baselines_pl["n_charged_prongs"][test_idx]
         improved_nmichel = baselines_pl["improved_nmichel"][test_idx]
-        y_pred = ((n_muons == 1) & (n_charged_prongs >= 1) & (improved_nmichel >= 1)).astype(int)
+        y_pred = (
+            (n_muons == 1) & (n_charged_prongs >= 1) & (improved_nmichel >= 1)
+        ).astype(int)
     elif n_muons_cond == "ccnpi_gt1":
         n_charged_prongs = baselines_pl["n_charged_prongs"][test_idx]
         improved_nmichel = baselines_pl["improved_nmichel"][test_idx]
-        y_pred = ((n_muons == 1) & (n_charged_prongs >= 2) & (improved_nmichel >= 1)).astype(int)
+        y_pred = (
+            (n_muons == 1) & (n_charged_prongs >= 2) & (improved_nmichel >= 1)
+        ).astype(int)
     elif n_muons_cond == "cc1pi0":
         PI0_MASS = 134.977
         is_pizero_signal = baselines_pl["is_pizero_signal"][test_idx]
@@ -192,15 +198,21 @@ def _compute_reco_pred(
     if n_muons_cond == "cc1pi":
         n_charged_prongs = baselines_pl["n_charged_prongs"][test_idx]
         improved_nmichel = baselines_pl["improved_nmichel"][test_idx]
-        return ((n_muons == 1) & (n_charged_prongs == 1) & (improved_nmichel == 1)).astype(int)
+        return (
+            (n_muons == 1) & (n_charged_prongs == 1) & (improved_nmichel == 1)
+        ).astype(int)
     elif n_muons_cond == "ccnpi_ge1":
         n_charged_prongs = baselines_pl["n_charged_prongs"][test_idx]
         improved_nmichel = baselines_pl["improved_nmichel"][test_idx]
-        return ((n_muons == 1) & (n_charged_prongs >= 1) & (improved_nmichel >= 1)).astype(int)
+        return (
+            (n_muons == 1) & (n_charged_prongs >= 1) & (improved_nmichel >= 1)
+        ).astype(int)
     elif n_muons_cond == "ccnpi_gt1":
         n_charged_prongs = baselines_pl["n_charged_prongs"][test_idx]
         improved_nmichel = baselines_pl["improved_nmichel"][test_idx]
-        return ((n_muons == 1) & (n_charged_prongs >= 2) & (improved_nmichel >= 1)).astype(int)
+        return (
+            (n_muons == 1) & (n_charged_prongs >= 2) & (improved_nmichel >= 1)
+        ).astype(int)
     elif n_muons_cond == "cc1pi0":
         PI0_MASS = 134.977
         is_pizero_signal = baselines_pl["is_pizero_signal"][test_idx]
@@ -245,7 +257,9 @@ def build_metrics_cache(clf: dict, *, models_only: set[str] | None = None) -> di
     for pl in playlists:
         n_events = len(pid_by_pl[pl])
         data_by_playlist[pl] = _ensure_data_test_idx(data_by_playlist[pl], pl, clf)
-        data_by_playlist[pl] = _normalize_data_arrays(data_by_playlist[pl], pl, n_events)
+        data_by_playlist[pl] = _normalize_data_arrays(
+            data_by_playlist[pl], pl, n_events
+        )
         if pl in data_w_by_playlist:
             data_w_by_playlist[pl] = _ensure_data_test_idx(
                 data_w_by_playlist[pl], pl, clf
@@ -285,7 +299,9 @@ def build_metrics_cache(clf: dict, *, models_only: set[str] | None = None) -> di
         for pl in playlists:
             data = data_by_playlist[pl]
             pid = pid_by_pl[pl]
-            baseline_fpr[tag][pl] = _compute_baseline_fpr(results, data, pid, sc, pl, cond, n_muons_cond=cond)
+            baseline_fpr[tag][pl] = _compute_baseline_fpr(
+                results, data, pid, sc, pl, cond, n_muons_cond=cond
+            )
             reco_pred[tag][pl] = _compute_reco_pred(data, pid, pl, cond)
 
     # -----------------------------------------------------------------------
@@ -297,7 +313,12 @@ def build_metrics_cache(clf: dict, *, models_only: set[str] | None = None) -> di
         masks = _int_masks(data, pl, n_events)
         result = {
             "all": compute_all_metrics_q3(
-                results, data, sig_classes, fixed_fpr=[fpr], playlist=pl, use_global_fpr=use_gfpr
+                results,
+                data,
+                sig_classes,
+                fixed_fpr=[fpr],
+                playlist=pl,
+                use_global_fpr=use_gfpr,
             ),
         }
         for code, mask in masks.items():
@@ -317,7 +338,12 @@ def build_metrics_cache(clf: dict, *, models_only: set[str] | None = None) -> di
         masks = _int_masks(data_w, pl, n_events)
         result = {
             "all": compute_all_metrics_W(
-                results, data_w, sig_classes, fixed_fpr=[fpr], playlist=pl, use_global_fpr=use_gfpr
+                results,
+                data_w,
+                sig_classes,
+                fixed_fpr=[fpr],
+                playlist=pl,
+                use_global_fpr=use_gfpr,
             ),
         }
         for code, mask in masks.items():
@@ -332,7 +358,9 @@ def build_metrics_cache(clf: dict, *, models_only: set[str] | None = None) -> di
             )
         return result
 
-    def _metrics_pion(sig_classes, fpr, data_pion, pl, pion_bins_require_has_pion=False):
+    def _metrics_pion(
+        sig_classes, fpr, data_pion, pl, pion_bins_require_has_pion=False
+    ):
         n_events = len(pid_by_pl[pl])
         masks = _int_masks(data_pion, pl, n_events)
         result_full = {
@@ -364,23 +392,53 @@ def build_metrics_cache(clf: dict, *, models_only: set[str] | None = None) -> di
     metrics_q3: dict = {"cc1pi": {}, "ccnpi_ge1": {}}
     for pl in playlists:
         data = data_by_playlist[pl]
-        metrics_q3["cc1pi"][pl] = _metrics_q3(_CC1PI_CLASSES, baseline_fpr["cc1pi"][pl], data, pl)
-        metrics_q3["ccnpi_ge1"][pl] = _metrics_q3(_CCNPI_GE1_CLASSES, baseline_fpr["ccnpi_ge1"][pl], data, pl)
+        metrics_q3["cc1pi"][pl] = _metrics_q3(
+            _CC1PI_CLASSES, baseline_fpr["cc1pi"][pl], data, pl
+        )
+        metrics_q3["ccnpi_ge1"][pl] = _metrics_q3(
+            _CCNPI_GE1_CLASSES, baseline_fpr["ccnpi_ge1"][pl], data, pl
+        )
 
     # -----------------------------------------------------------------------
     # W metrics from data_w_by_playlist (plot_classification_W)
     # -----------------------------------------------------------------------
     print("  Computing W-clf metrics …")
-    metrics_W_clf: dict = {tag: {} for tag in ("cc1pi", "cc1pi0", "ccnpi_ge1", "ccnpi_gt1")}
+    metrics_W_clf: dict = {
+        tag: {} for tag in ("cc1pi", "cc1pi0", "ccnpi_ge1", "ccnpi_gt1")
+    }
     if data_w_by_playlist:
         for pl in ["1A"]:  # plot_classification_W only uses 1A
             if pl not in data_w_by_playlist:
                 continue
             data_w = data_w_by_playlist[pl]
-            metrics_W_clf["cc1pi"][pl] = _metrics_W(_CC1PI_CLASSES, baseline_fpr["cc1pi"][pl], data_w, pl, use_gfpr=use_global_fpr_W)
-            metrics_W_clf["cc1pi0"][pl] = _metrics_W(_CC1PI0_CLASSES, baseline_fpr["cc1pi0"][pl], data_w, pl, use_gfpr=use_global_fpr_W)
-            metrics_W_clf["ccnpi_ge1"][pl] = _metrics_W(_CCNPI_GE1_CLASSES, baseline_fpr["ccnpi_ge1"][pl], data_w, pl, use_gfpr=use_global_fpr_W)
-            metrics_W_clf["ccnpi_gt1"][pl] = _metrics_W(_CCNPI_GT1_CLASSES, baseline_fpr["ccnpi_gt1"][pl], data_w, pl, use_gfpr=use_global_fpr_W)
+            metrics_W_clf["cc1pi"][pl] = _metrics_W(
+                _CC1PI_CLASSES,
+                baseline_fpr["cc1pi"][pl],
+                data_w,
+                pl,
+                use_gfpr=use_global_fpr_W,
+            )
+            metrics_W_clf["cc1pi0"][pl] = _metrics_W(
+                _CC1PI0_CLASSES,
+                baseline_fpr["cc1pi0"][pl],
+                data_w,
+                pl,
+                use_gfpr=use_global_fpr_W,
+            )
+            metrics_W_clf["ccnpi_ge1"][pl] = _metrics_W(
+                _CCNPI_GE1_CLASSES,
+                baseline_fpr["ccnpi_ge1"][pl],
+                data_w,
+                pl,
+                use_gfpr=use_global_fpr_W,
+            )
+            metrics_W_clf["ccnpi_gt1"][pl] = _metrics_W(
+                _CCNPI_GT1_CLASSES,
+                baseline_fpr["ccnpi_gt1"][pl],
+                data_w,
+                pl,
+                use_gfpr=use_global_fpr_W,
+            )
 
     # -----------------------------------------------------------------------
     # Pion E/theta + W metrics from pion-augmented data (plot_classification_Pions)
@@ -399,7 +457,10 @@ def build_metrics_cache(clf: dict, *, models_only: set[str] | None = None) -> di
         first_run0 = results[first_model][0]
 
         data_cc1pi = data_with_signal_pion_bins(
-            data, pid, _CC1PI_CLASSES, pion_quantile_require_has_pion=False,
+            data,
+            pid,
+            _CC1PI_CLASSES,
+            pion_quantile_require_has_pion=False,
             pion_bin_edge_method="equal_frequency",
         )
         data_cc1pi_w = add_hadronic_W_to_classification_data(data_cc1pi, pl)
@@ -407,17 +468,32 @@ def build_metrics_cache(clf: dict, *, models_only: set[str] | None = None) -> di
         data_cc1pi_w_by_pl[pl] = data_cc1pi_w
 
         data_cc1pi0 = data_with_signal_pion_bins(
-            data, pid, _CC1PI0_CLASSES, pion_quantile_require_has_pion=False,
+            data,
+            pid,
+            _CC1PI0_CLASSES,
+            pion_quantile_require_has_pion=False,
             pion_bin_edge_method="equal_frequency",
         )
         data_cc1pi0_w = add_hadronic_W_to_classification_data(data_cc1pi0, pl)
         data_cc1pi0_by_pl[pl] = data_cc1pi0
         data_cc1pi0_w_by_pl[pl] = data_cc1pi0_w
 
-        metrics_pion["cc1pi"][pl] = _metrics_pion(_CC1PI_CLASSES, baseline_fpr["cc1pi"][pl], data_cc1pi, pl)
-        metrics_pion["cc1pi0"][pl] = _metrics_pion(_CC1PI0_CLASSES, baseline_fpr["cc1pi0"][pl], data_cc1pi0, pl)
-        metrics_W_pion["cc1pi"][pl] = _metrics_W(_CC1PI_CLASSES, baseline_fpr["cc1pi"][pl], data_cc1pi_w, pl, use_gfpr=True)
-        metrics_W_pion["cc1pi0"][pl] = _metrics_W(_CC1PI0_CLASSES, baseline_fpr["cc1pi0"][pl], data_cc1pi0_w, pl, use_gfpr=True)
+        metrics_pion["cc1pi"][pl] = _metrics_pion(
+            _CC1PI_CLASSES, baseline_fpr["cc1pi"][pl], data_cc1pi, pl
+        )
+        metrics_pion["cc1pi0"][pl] = _metrics_pion(
+            _CC1PI0_CLASSES, baseline_fpr["cc1pi0"][pl], data_cc1pi0, pl
+        )
+        metrics_W_pion["cc1pi"][pl] = _metrics_W(
+            _CC1PI_CLASSES, baseline_fpr["cc1pi"][pl], data_cc1pi_w, pl, use_gfpr=True
+        )
+        metrics_W_pion["cc1pi0"][pl] = _metrics_W(
+            _CC1PI0_CLASSES,
+            baseline_fpr["cc1pi0"][pl],
+            data_cc1pi0_w,
+            pl,
+            use_gfpr=True,
+        )
 
     # -----------------------------------------------------------------------
     # PRC curves
@@ -425,7 +501,11 @@ def build_metrics_cache(clf: dict, *, models_only: set[str] | None = None) -> di
     print("  Computing PRC curves …")
     prc: dict = {}
     signal_frac: dict = {}
-    for sig_tag, sig_classes in [("cc1pi", _CC1PI_CLASSES), ("ccnpi_ge1", _CCNPI_GE1_CLASSES), ("cc1pi0", _CC1PI0_CLASSES)]:
+    for sig_tag, sig_classes in [
+        ("cc1pi", _CC1PI_CLASSES),
+        ("ccnpi_ge1", _CCNPI_GE1_CLASSES),
+        ("cc1pi0", _CC1PI0_CLASSES),
+    ]:
         prc[sig_tag] = {}
         signal_frac[sig_tag] = {}
         for pl in playlists:
@@ -447,29 +527,93 @@ def build_metrics_cache(clf: dict, *, models_only: set[str] | None = None) -> di
         is_signal_ccnpi = np.isin(pid, _CCNPI_GE1_CLASSES)
         is_signal_cc1pi0 = np.isin(pid, _CC1PI0_CLASSES)
 
-        signal_baseline["cc1pi"][pl] = compute_signal_baseline(results, data, _CC1PI_CLASSES, playlist=pl, pion_bins_require_has_pion=False)
-        signal_baseline["ccnpi_ge1"][pl] = compute_signal_baseline(results, data, _CCNPI_GE1_CLASSES, playlist=pl)
-        signal_baseline["cc1pi0"][pl] = compute_signal_baseline(results, data, _CC1PI0_CLASSES, playlist=pl, pion_bins_require_has_pion=False)
+        signal_baseline["cc1pi"][pl] = compute_signal_baseline(
+            results, data, _CC1PI_CLASSES, playlist=pl, pion_bins_require_has_pion=False
+        )
+        signal_baseline["ccnpi_ge1"][pl] = compute_signal_baseline(
+            results, data, _CCNPI_GE1_CLASSES, playlist=pl
+        )
+        signal_baseline["cc1pi0"][pl] = compute_signal_baseline(
+            results,
+            data,
+            _CC1PI0_CLASSES,
+            playlist=pl,
+            pion_bins_require_has_pion=False,
+        )
 
-        reco_tpr[f"q3_cc1pi_{pl}"] = compute_reco_baseline_recall_per_bin(reco_pred["cc1pi"][pl], is_signal_cc1pi, data["q3_GeV"], data["q3_bin_edges"])
-        reco_tpr[f"q3_ccnpi_ge1_{pl}"] = compute_reco_baseline_recall_per_bin(reco_pred["ccnpi_ge1"][pl], is_signal_ccnpi, data["q3_GeV"], data["q3_bin_edges"])
+        reco_tpr[f"q3_cc1pi_{pl}"] = compute_reco_baseline_recall_per_bin(
+            reco_pred["cc1pi"][pl],
+            is_signal_cc1pi,
+            data["q3_GeV"],
+            data["q3_bin_edges"],
+        )
+        reco_tpr[f"q3_ccnpi_ge1_{pl}"] = compute_reco_baseline_recall_per_bin(
+            reco_pred["ccnpi_ge1"][pl],
+            is_signal_ccnpi,
+            data["q3_GeV"],
+            data["q3_bin_edges"],
+        )
 
         data_cc1pi = data_cc1pi_by_pl[pl]
         data_cc1pi0 = data_cc1pi0_by_pl[pl]
         data_cc1pi_w = data_cc1pi_w_by_pl[pl]
         data_cc1pi0_w = data_cc1pi0_w_by_pl[pl]
 
-        reco_tpr[f"pion_E_cc1pi_{pl}"] = compute_reco_baseline_recall_per_bin(reco_pred["cc1pi"][pl], is_signal_cc1pi, data_cc1pi["pion_E_MC"], data_cc1pi["pion_E_MC_bins"], has_pion=None)
-        reco_tpr[f"pion_theta_cc1pi_{pl}"] = compute_reco_baseline_recall_per_bin(reco_pred["cc1pi"][pl], is_signal_cc1pi, data_cc1pi["pion_theta_MC"], data_cc1pi["pion_theta_MC_bins"], has_pion=None, finite_bin_var=True)
-        reco_tpr[f"pion_E_cc1pi0_{pl}"] = compute_reco_baseline_recall_per_bin(reco_pred["cc1pi0"][pl], is_signal_cc1pi0, data_cc1pi0["pion_E_MC"], data_cc1pi0["pion_E_MC_bins"], has_pion=None)
-        reco_tpr[f"pion_theta_cc1pi0_{pl}"] = compute_reco_baseline_recall_per_bin(reco_pred["cc1pi0"][pl], is_signal_cc1pi0, data_cc1pi0["pion_theta_MC"], data_cc1pi0["pion_theta_MC_bins"], has_pion=None, finite_bin_var=True)
-        reco_tpr[f"W_pion_cc1pi_{pl}"] = compute_reco_baseline_recall_per_bin(reco_pred["cc1pi"][pl], is_signal_cc1pi, data_cc1pi_w["W_GeV"], data_cc1pi_w["W_bin_edges"])
-        reco_tpr[f"W_pion_cc1pi0_{pl}"] = compute_reco_baseline_recall_per_bin(reco_pred["cc1pi0"][pl], is_signal_cc1pi0, data_cc1pi0_w["W_GeV"], data_cc1pi0_w["W_bin_edges"])
-        W_pion_baseline["cc1pi"][pl] = compute_signal_baseline_W(results, data_cc1pi_w, _CC1PI_CLASSES, playlist=pl)
-        W_pion_baseline["cc1pi0"][pl] = compute_signal_baseline_W(results, data_cc1pi0_w, _CC1PI0_CLASSES, playlist=pl)
+        reco_tpr[f"pion_E_cc1pi_{pl}"] = compute_reco_baseline_recall_per_bin(
+            reco_pred["cc1pi"][pl],
+            is_signal_cc1pi,
+            data_cc1pi["pion_E_MC"],
+            data_cc1pi["pion_E_MC_bins"],
+            has_pion=None,
+        )
+        reco_tpr[f"pion_theta_cc1pi_{pl}"] = compute_reco_baseline_recall_per_bin(
+            reco_pred["cc1pi"][pl],
+            is_signal_cc1pi,
+            data_cc1pi["pion_theta_MC"],
+            data_cc1pi["pion_theta_MC_bins"],
+            has_pion=None,
+            finite_bin_var=True,
+        )
+        reco_tpr[f"pion_E_cc1pi0_{pl}"] = compute_reco_baseline_recall_per_bin(
+            reco_pred["cc1pi0"][pl],
+            is_signal_cc1pi0,
+            data_cc1pi0["pion_E_MC"],
+            data_cc1pi0["pion_E_MC_bins"],
+            has_pion=None,
+        )
+        reco_tpr[f"pion_theta_cc1pi0_{pl}"] = compute_reco_baseline_recall_per_bin(
+            reco_pred["cc1pi0"][pl],
+            is_signal_cc1pi0,
+            data_cc1pi0["pion_theta_MC"],
+            data_cc1pi0["pion_theta_MC_bins"],
+            has_pion=None,
+            finite_bin_var=True,
+        )
+        reco_tpr[f"W_pion_cc1pi_{pl}"] = compute_reco_baseline_recall_per_bin(
+            reco_pred["cc1pi"][pl],
+            is_signal_cc1pi,
+            data_cc1pi_w["W_GeV"],
+            data_cc1pi_w["W_bin_edges"],
+        )
+        reco_tpr[f"W_pion_cc1pi0_{pl}"] = compute_reco_baseline_recall_per_bin(
+            reco_pred["cc1pi0"][pl],
+            is_signal_cc1pi0,
+            data_cc1pi0_w["W_GeV"],
+            data_cc1pi0_w["W_bin_edges"],
+        )
+        W_pion_baseline["cc1pi"][pl] = compute_signal_baseline_W(
+            results, data_cc1pi_w, _CC1PI_CLASSES, playlist=pl
+        )
+        W_pion_baseline["cc1pi0"][pl] = compute_signal_baseline_W(
+            results, data_cc1pi0_w, _CC1PI0_CLASSES, playlist=pl
+        )
 
-    W_clf_baseline: dict = {tag: {} for tag in ("cc1pi", "cc1pi0", "ccnpi_ge1", "ccnpi_gt1")}
-    W_clf_reco_tpr: dict = {tag: {} for tag in ("cc1pi", "cc1pi0", "ccnpi_ge1", "ccnpi_gt1")}
+    W_clf_baseline: dict = {
+        tag: {} for tag in ("cc1pi", "cc1pi0", "ccnpi_ge1", "ccnpi_gt1")
+    }
+    W_clf_reco_tpr: dict = {
+        tag: {} for tag in ("cc1pi", "cc1pi0", "ccnpi_ge1", "ccnpi_gt1")
+    }
     if data_w_by_playlist:
         for pl in ["1A"]:
             if pl not in data_w_by_playlist:
@@ -481,15 +625,43 @@ def build_metrics_cache(clf: dict, *, models_only: set[str] | None = None) -> di
             is_signal_ccnpi_ge1 = np.isin(pid, _CCNPI_GE1_CLASSES)
             is_signal_ccnpi_gt1 = np.isin(pid, _CCNPI_GT1_CLASSES)
 
-            W_clf_baseline["cc1pi"][pl] = compute_signal_baseline_W(results, data_w, _CC1PI_CLASSES, playlist=pl)
-            W_clf_baseline["cc1pi0"][pl] = compute_signal_baseline_W(results, data_w, _CC1PI0_CLASSES, playlist=pl)
-            W_clf_baseline["ccnpi_ge1"][pl] = compute_signal_baseline_W(results, data_w, _CCNPI_GE1_CLASSES, playlist=pl)
-            W_clf_baseline["ccnpi_gt1"][pl] = compute_signal_baseline_W(results, data_w, _CCNPI_GT1_CLASSES, playlist=pl)
+            W_clf_baseline["cc1pi"][pl] = compute_signal_baseline_W(
+                results, data_w, _CC1PI_CLASSES, playlist=pl
+            )
+            W_clf_baseline["cc1pi0"][pl] = compute_signal_baseline_W(
+                results, data_w, _CC1PI0_CLASSES, playlist=pl
+            )
+            W_clf_baseline["ccnpi_ge1"][pl] = compute_signal_baseline_W(
+                results, data_w, _CCNPI_GE1_CLASSES, playlist=pl
+            )
+            W_clf_baseline["ccnpi_gt1"][pl] = compute_signal_baseline_W(
+                results, data_w, _CCNPI_GT1_CLASSES, playlist=pl
+            )
 
-            W_clf_reco_tpr["cc1pi"][pl] = compute_reco_baseline_recall_per_bin(reco_pred["cc1pi"][pl], is_signal_cc1pi, data_w["W_GeV"], data_w["W_bin_edges"])
-            W_clf_reco_tpr["cc1pi0"][pl] = compute_reco_baseline_recall_per_bin(reco_pred["cc1pi0"][pl], is_signal_cc1pi0, data_w["W_GeV"], data_w["W_bin_edges"])
-            W_clf_reco_tpr["ccnpi_ge1"][pl] = compute_reco_baseline_recall_per_bin(reco_pred["ccnpi_ge1"][pl], is_signal_ccnpi_ge1, data_w["W_GeV"], data_w["W_bin_edges"])
-            W_clf_reco_tpr["ccnpi_gt1"][pl] = compute_reco_baseline_recall_per_bin(reco_pred["ccnpi_gt1"][pl], is_signal_ccnpi_gt1, data_w["W_GeV"], data_w["W_bin_edges"])
+            W_clf_reco_tpr["cc1pi"][pl] = compute_reco_baseline_recall_per_bin(
+                reco_pred["cc1pi"][pl],
+                is_signal_cc1pi,
+                data_w["W_GeV"],
+                data_w["W_bin_edges"],
+            )
+            W_clf_reco_tpr["cc1pi0"][pl] = compute_reco_baseline_recall_per_bin(
+                reco_pred["cc1pi0"][pl],
+                is_signal_cc1pi0,
+                data_w["W_GeV"],
+                data_w["W_bin_edges"],
+            )
+            W_clf_reco_tpr["ccnpi_ge1"][pl] = compute_reco_baseline_recall_per_bin(
+                reco_pred["ccnpi_ge1"][pl],
+                is_signal_ccnpi_ge1,
+                data_w["W_GeV"],
+                data_w["W_bin_edges"],
+            )
+            W_clf_reco_tpr["ccnpi_gt1"][pl] = compute_reco_baseline_recall_per_bin(
+                reco_pred["ccnpi_gt1"][pl],
+                is_signal_ccnpi_gt1,
+                data_w["W_GeV"],
+                data_w["W_bin_edges"],
+            )
 
     # -----------------------------------------------------------------------
     # Per-inttype signal baselines (for plot_binned_by_inttype's bl_values)
@@ -519,7 +691,14 @@ def build_metrics_cache(clf: dict, *, models_only: set[str] | None = None) -> di
                 signal_baseline_inttype[tag][pl] = {}
 
             for code, mask in int_masks.items():
-                bl = compute_signal_baseline(results, data, sig_classes, event_mask=mask, playlist=pl, pion_bins_require_has_pion=pion_has_pion)
+                bl = compute_signal_baseline(
+                    results,
+                    data,
+                    sig_classes,
+                    event_mask=mask,
+                    playlist=pl,
+                    pion_bins_require_has_pion=pion_has_pion,
+                )
                 # bl has keys "E", "theta", "q3" — the x_var-specific value is extracted at draw time
                 signal_baseline_inttype[tag][pl][code] = bl
 
@@ -527,23 +706,35 @@ def build_metrics_cache(clf: dict, *, models_only: set[str] | None = None) -> di
         if data_w_by_playlist and pl in data_w_by_playlist:
             data_w = data_w_by_playlist[pl]
             int_masks_w = _int_masks(data_w, pl, n_events)
-            for tag, sig_classes in [("cc1pi", _CC1PI_CLASSES), ("cc1pi0", _CC1PI0_CLASSES), ("ccnpi_ge1", _CCNPI_GE1_CLASSES), ("ccnpi_gt1", _CCNPI_GT1_CLASSES)]:
+            for tag, sig_classes in [
+                ("cc1pi", _CC1PI_CLASSES),
+                ("cc1pi0", _CC1PI0_CLASSES),
+                ("ccnpi_ge1", _CCNPI_GE1_CLASSES),
+                ("ccnpi_gt1", _CCNPI_GT1_CLASSES),
+            ]:
                 if tag not in W_clf_baseline_inttype:
                     W_clf_baseline_inttype[tag] = {}
                 if pl not in W_clf_baseline_inttype[tag]:
                     W_clf_baseline_inttype[tag][pl] = {}
                 for code, mask in int_masks_w.items():
-                    W_clf_baseline_inttype[tag][pl][code] = compute_signal_baseline_W(results, data_w, sig_classes, event_mask=mask, playlist=pl)
+                    W_clf_baseline_inttype[tag][pl][code] = compute_signal_baseline_W(
+                        results, data_w, sig_classes, event_mask=mask, playlist=pl
+                    )
 
         # W pion per-inttype baselines
-        for tag, data_pion_w, sig_classes in [("cc1pi", data_cc1pi_w, _CC1PI_CLASSES), ("cc1pi0", data_cc1pi0_w, _CC1PI0_CLASSES)]:
+        for tag, data_pion_w, sig_classes in [
+            ("cc1pi", data_cc1pi_w, _CC1PI_CLASSES),
+            ("cc1pi0", data_cc1pi0_w, _CC1PI0_CLASSES),
+        ]:
             if tag not in W_pion_baseline_inttype:
                 W_pion_baseline_inttype[tag] = {}
             if pl not in W_pion_baseline_inttype[tag]:
                 W_pion_baseline_inttype[tag][pl] = {}
             int_masks_pw = _int_masks(data_pion_w, pl, n_events)
             for code, mask in int_masks_pw.items():
-                W_pion_baseline_inttype[tag][pl][code] = compute_signal_baseline_W(results, data_pion_w, sig_classes, event_mask=mask, playlist=pl)
+                W_pion_baseline_inttype[tag][pl][code] = compute_signal_baseline_W(
+                    results, data_pion_w, sig_classes, event_mask=mask, playlist=pl
+                )
 
     return {
         "schema_version": 1,
@@ -617,7 +808,9 @@ def update_metrics_cache(
     for model in new_models:
         existing["confusion_matrices"][model] = partial["confusion_matrices"][model]
 
-    merge_model_metrics_tree(existing.setdefault("metrics_q3", {}), partial["metrics_q3"])
+    merge_model_metrics_tree(
+        existing.setdefault("metrics_q3", {}), partial["metrics_q3"]
+    )
     merge_model_metrics_tree(
         existing.setdefault("metrics_W_clf", {}), partial["metrics_W_clf"]
     )
@@ -655,6 +848,5 @@ def precomputed_bl_from_signal_baseline(
     """
     sub_key = {"q3": "q3", "pion_E": "E", "pion_theta": "theta"}[x_var]
     return {
-        code: bl[sub_key]
-        for code, bl in signal_baseline_inttype[sig_tag][pl].items()
+        code: bl[sub_key] for code, bl in signal_baseline_inttype[sig_tag][pl].items()
     }

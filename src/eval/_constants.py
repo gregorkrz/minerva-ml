@@ -28,11 +28,13 @@ def canonical_classification_pickle_paths(
     paths = [
         runs_root / f"{CLASSIFICATION_PICKLE_STEM}_{flag}.pkl",
         DEFAULT_CFS_CACHE_DIR / CANONICAL_CLASSIFICATION_PICKLE,
-        repo_output_path(repo_root, DEFAULT_CACHE_DIR) / CANONICAL_CLASSIFICATION_PICKLE,
+        repo_output_path(repo_root, DEFAULT_CACHE_DIR)
+        / CANONICAL_CLASSIFICATION_PICKLE,
     ]
     if data_root is not None:
         paths.insert(1, data_root / f"{CLASSIFICATION_PICKLE_STEM}_{flag}.pkl")
     return paths
+
 
 # FLOPs per training step (batch size 2048) — same tables as notebooks.
 # OmniLearned-medium: scalar used for log-FLOPs plots (full-model training proxy). Frozen-backbone
@@ -147,16 +149,18 @@ def is_base_steps_model(name: str) -> bool:
 
 
 # ``plot_steps`` small-architecture comparison (pretrained dark, rw light per family).
-STEPS_SMALL_MODELS: frozenset[str] = frozenset({
-    "HyperScale-small",
-    "HyperScale-small-rw",
-    "HyperScale-medium",
-    "HyperScale-medium-rw",
-    "OmniLearned-small",
-    "OmniLearned-small-rw",
-    "BERT-tiny",
-    "BERT-tiny-rw",
-})
+STEPS_SMALL_MODELS: frozenset[str] = frozenset(
+    {
+        "HyperScale-small",
+        "HyperScale-small-rw",
+        "HyperScale-medium",
+        "HyperScale-medium-rw",
+        "OmniLearned-small",
+        "OmniLearned-small-rw",
+        "BERT-tiny",
+        "BERT-tiny-rw",
+    }
+)
 
 STEPS_SMALL_MODEL_COLORS: dict[str, str] = {
     "HyperScale-small": "#0369a1",  # sky-700

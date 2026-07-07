@@ -182,6 +182,7 @@ def w_bin_edges_finer(factor: int = 10) -> np.ndarray:
         n_coarse * factor + 1,
     )
 
+
 # PDG-like masses for W² (MeV), consistent with ``extract_baselines.py``.
 PROTON_MASS_MEV = 938.2720813
 MUON_MASS_MEV = 105.6583755

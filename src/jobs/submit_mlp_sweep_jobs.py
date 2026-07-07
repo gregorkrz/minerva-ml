@@ -108,7 +108,9 @@ def build_slurm_commands(runs: list[tuple[str, str]], *, batch_label: str) -> st
             log_file = f'"$LOG_DIR/{label}.log"'
             lines.append(f"({cmd}) > {log_file} 2>&1 &")
         lines.append("wait")
-        lines.append("if [ $? -ne 0 ]; then echo 'One or more training runs failed'; exit 1; fi")
+        lines.append(
+            "if [ $? -ne 0 ]; then echo 'One or more training runs failed'; exit 1; fi"
+        )
     lines.append(f'echo "Finished {batch_label}."')
     return "\n".join(lines)
 
@@ -229,9 +231,7 @@ def main() -> None:
         help=f"Container --shm-size per job (default: {DEFAULT_SHM_SIZE})",
     )
     parser.add_argument("--max-steps", type=int, default=DEFAULT_MAX_STEPS)
-    parser.add_argument(
-        "--warmup-steps", type=int, default=DEFAULT_WARMUP_STEPS
-    )
+    parser.add_argument("--warmup-steps", type=int, default=DEFAULT_WARMUP_STEPS)
     parser.add_argument("--batch-size", "-bs", type=int, default=DEFAULT_BATCH_SIZE)
     parser.add_argument(
         "--data-path",
@@ -287,7 +287,11 @@ def main() -> None:
             job_name = f"mlp_sweep_{batch[0][0]}_{ts}"
         else:
             job_name = f"mlp_sweep_batch{batch_index + 1}of{n_slurm_jobs}_{ts}"
-        batch_label = batch[0][0] if len(batch) == 1 else f"batch {batch_index + 1}/{n_slurm_jobs}"
+        batch_label = (
+            batch[0][0]
+            if len(batch) == 1
+            else f"batch {batch_index + 1}/{n_slurm_jobs}"
+        )
         commands = build_slurm_commands(batch, batch_label=batch_label)
         submit_job(
             commands,

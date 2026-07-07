@@ -81,15 +81,24 @@ def get_pi0_baseline_pred(
 ):
     has_candidate = is_pizero_signal == 2
     in_mass_window = np.abs(two_gamma_inv_mass - PI0_MASS) < delta_m
-    return ((n_muons == 1) & has_candidate & in_mass_window & (n_michel == 0)).astype(int)
+    return ((n_muons == 1) & has_candidate & in_mass_window & (n_michel == 0)).astype(
+        int
+    )
 
 
 def precision_recall_fpr_vs_deltam(
-    y_true, is_pizero_signal, two_gamma_inv_mass, delta_m_values, n_muons, n_michel,
+    y_true,
+    is_pizero_signal,
+    two_gamma_inv_mass,
+    delta_m_values,
+    n_muons,
+    n_michel,
 ):
     precisions, recalls, fprs = [], [], []
     for dm in delta_m_values:
-        y_pred = get_pi0_baseline_pred(is_pizero_signal, two_gamma_inv_mass, dm, n_muons, n_michel)
+        y_pred = get_pi0_baseline_pred(
+            is_pizero_signal, two_gamma_inv_mass, dm, n_muons, n_michel
+        )
         tp = np.sum((y_pred == 1) & (y_true == 1))
         fp = np.sum((y_pred == 1) & (y_true == 0))
         fn = np.sum((y_pred == 0) & (y_true == 1))
@@ -122,12 +131,33 @@ def _draw_pi0_deltam_figs(
         pid = pid_by_pl[playlist]
         y_true = np.isin(pid, _CC1PI0_CLASSES).astype(int)
         precisions, recalls, fprs = precision_recall_fpr_vs_deltam(
-            y_true, is_pizero_signal, two_gamma_inv_mass, delta_m_values, n_muons_b, n_michel,
+            y_true,
+            is_pizero_signal,
+            two_gamma_inv_mass,
+            delta_m_values,
+            n_muons_b,
+            n_michel,
         )
         fig, ax1 = plt.subplots(figsize=(10, 5))
-        ax1.plot(delta_m_values, precisions, ".-", color="steelblue", linewidth=1.5, label="Precision")
-        ax1.plot(delta_m_values, recalls, ".-", color="darkorange", linewidth=1.5, label="Recall")
-        ax1.plot(delta_m_values, fprs, ".-", color="firebrick", linewidth=1.5, label="FPR")
+        ax1.plot(
+            delta_m_values,
+            precisions,
+            ".-",
+            color="steelblue",
+            linewidth=1.5,
+            label="Precision",
+        )
+        ax1.plot(
+            delta_m_values,
+            recalls,
+            ".-",
+            color="darkorange",
+            linewidth=1.5,
+            label="Recall",
+        )
+        ax1.plot(
+            delta_m_values, fprs, ".-", color="firebrick", linewidth=1.5, label="FPR"
+        )
         ax1.set_xlabel(r"$\Delta m$ window [MeV]")
         ax1.set_ylabel(r"Fraction")
         ax1.legend(loc="center right")
@@ -149,16 +179,23 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--plots-dir", type=Path, default=None)
     ap.add_argument("--classification-pickle", type=Path, default=None)
     ap.add_argument(
-        "--config", type=Path, default=None, metavar="JSON",
+        "--config",
+        type=Path,
+        default=None,
+        metavar="JSON",
         help="Plot config JSON (models, colors, optional display_name).",
     )
     ap.add_argument(
-        "--plots-only", action="store_true",
+        "--plots-only",
+        action="store_true",
         help="Load from the pre-computed metrics cache (fast path).",
     )
     ap.add_argument("--plots-cache", type=Path, default=None, metavar="PKL")
     ap.add_argument(
-        "--metrics-cache", type=Path, default=None, metavar="PKL",
+        "--metrics-cache",
+        type=Path,
+        default=None,
+        metavar="PKL",
         help="Override the metrics cache path "
         "(default: plots/tmp_results/classification_metrics.pkl).",
     )
@@ -218,7 +255,10 @@ def main(argv: list[str] | None = None) -> None:
         run0 = results[first_model][0][playlist]
         pid = run0["pid"]
         data_cc1pi = data_with_signal_pion_bins(
-            data, pid, cc1pi_classes, pion_quantile_require_has_pion=False,
+            data,
+            pid,
+            cc1pi_classes,
+            pion_quantile_require_has_pion=False,
             pion_bin_edge_method="equal_frequency",
         )
         y_true_cc1pi = np.isin(pid, cc1pi_classes).astype(int)
@@ -232,79 +272,133 @@ def main(argv: list[str] | None = None) -> None:
         baseline_fpr_cc1pi = fp / (fp + tn)
 
         metrics_cc1pi = compute_all_metrics(
-            results, data_cc1pi, signal_classes=cc1pi_classes,
-            fixed_fpr=[baseline_fpr_cc1pi], playlist=playlist,
+            results,
+            data_cc1pi,
+            signal_classes=cc1pi_classes,
+            fixed_fpr=[baseline_fpr_cc1pi],
+            playlist=playlist,
             pion_bins_require_has_pion=False,
         )
         baseline_cc1pi = compute_signal_baseline(
-            results, data_cc1pi, signal_classes=cc1pi_classes, playlist=playlist,
+            results,
+            data_cc1pi,
+            signal_classes=cc1pi_classes,
+            playlist=playlist,
             pion_bins_require_has_pion=False,
         )
         is_signal_cc1pi = y_true_cc1pi == 1
         reco_baseline_tpr_cc1pi = {
             "E": compute_reco_baseline_recall_per_bin(
-                y_pred_cc1pi, is_signal_cc1pi, data_cc1pi["pion_E_MC"],
-                data_cc1pi["pion_E_MC_bins"], has_pion=None,
+                y_pred_cc1pi,
+                is_signal_cc1pi,
+                data_cc1pi["pion_E_MC"],
+                data_cc1pi["pion_E_MC_bins"],
+                has_pion=None,
             ),
             "theta": compute_reco_baseline_recall_per_bin(
-                y_pred_cc1pi, is_signal_cc1pi, data_cc1pi["pion_theta_MC"],
-                data_cc1pi["pion_theta_MC_bins"], has_pion=None, finite_bin_var=True,
+                y_pred_cc1pi,
+                is_signal_cc1pi,
+                data_cc1pi["pion_theta_MC"],
+                data_cc1pi["pion_theta_MC_bins"],
+                has_pion=None,
+                finite_bin_var=True,
             ),
         }
         data_cc1pi_w = add_hadronic_W_to_classification_data(data_cc1pi, playlist)
         metrics_W_cc1pi = compute_all_metrics_W(
-            results, data_cc1pi_w, signal_classes=cc1pi_classes,
-            fixed_fpr=[baseline_fpr_cc1pi], playlist=playlist,
+            results,
+            data_cc1pi_w,
+            signal_classes=cc1pi_classes,
+            fixed_fpr=[baseline_fpr_cc1pi],
+            playlist=playlist,
         )
         baseline_W_cc1pi = compute_signal_baseline_W(
-            results, data_cc1pi_w, signal_classes=cc1pi_classes, playlist=playlist,
+            results,
+            data_cc1pi_w,
+            signal_classes=cc1pi_classes,
+            playlist=playlist,
         )
         reco_baseline_tpr_W_cc1pi = compute_reco_baseline_recall_per_bin(
-            y_pred_cc1pi, is_signal_cc1pi, data_cc1pi_w["W_GeV"], data_cc1pi_w["W_bin_edges"],
+            y_pred_cc1pi,
+            is_signal_cc1pi,
+            data_cc1pi_w["W_GeV"],
+            data_cc1pi_w["W_bin_edges"],
         )
         fig_w_cc1pi = plot_multi_classification_vs_W(
-            metrics_W_cc1pi, data_cc1pi_w, baseline_W_cc1pi,
-            fixed_fpr=[baseline_fpr_cc1pi], uncertainties=True,
+            metrics_W_cc1pi,
+            data_cc1pi_w,
+            baseline_W_cc1pi,
+            fixed_fpr=[baseline_fpr_cc1pi],
+            uncertainties=True,
             reco_baseline_tpr_W=reco_baseline_tpr_W_cc1pi,
-            reco_baseline_global_fpr=baseline_fpr_cc1pi, colors=clrs,
+            reco_baseline_global_fpr=baseline_fpr_cc1pi,
+            colors=clrs,
             title=rf"$CC1\pi^\pm$ tagging - MINERvA Open Data Playlist {playlist}",
-            playlist=playlist, use_global_fpr=True,
+            playlist=playlist,
+            use_global_fpr=True,
         )
-        figs_cc1pi.append(fig_w_cc1pi); plt.close(fig_w_cc1pi)
+        figs_cc1pi.append(fig_w_cc1pi)
+        plt.close(fig_w_cc1pi)
 
         fig = plot_cc1pi_vs_pion_kinematics(
-            metrics_cc1pi, data_cc1pi, baseline_cc1pi, uncertainties=True,
-            fixed_fpr=[baseline_fpr_cc1pi], reco_baseline_tpr=reco_baseline_tpr_cc1pi,
-            reco_baseline_global_fpr=baseline_fpr_cc1pi, colors=clrs, playlist=playlist,
+            metrics_cc1pi,
+            data_cc1pi,
+            baseline_cc1pi,
+            uncertainties=True,
+            fixed_fpr=[baseline_fpr_cc1pi],
+            reco_baseline_tpr=reco_baseline_tpr_cc1pi,
+            reco_baseline_global_fpr=baseline_fpr_cc1pi,
+            colors=clrs,
+            playlist=playlist,
         )
-        figs_cc1pi.append(fig); plt.close(fig)
+        figs_cc1pi.append(fig)
+        plt.close(fig)
 
         fig = plot_prc_curves(
-            results, signal_classes=cc1pi_classes,
+            results,
+            signal_classes=cc1pi_classes,
             title=rf"PRC — $CC1\pi^\pm$ tagging - MINERvA Open Data Playlist {playlist}",
-            playlist=playlist, colors=clrs, uncertainties=True,
+            playlist=playlist,
+            colors=clrs,
+            uncertainties=True,
         )
-        figs_cc1pi.append(fig); plt.close(fig)
+        figs_cc1pi.append(fig)
+        plt.close(fig)
 
         fig = plot_binned_by_inttype(
-            results, data_cc1pi, signal_classes=cc1pi_classes, x_var="pion_E",
+            results,
+            data_cc1pi,
+            signal_classes=cc1pi_classes,
+            x_var="pion_E",
             xlabel=r"True $E_\pi$ [GeV]",
             title=rf"$CC1\pi^\pm$ tagging - MINERvA Open Data Playlist {playlist} - by interaction type",
-            log_x=True, uncertainties=True, fixed_fpr=[baseline_fpr_cc1pi],
-            reco_baseline_pred=y_pred_cc1pi, playlist=playlist, colors=clrs,
+            log_x=True,
+            uncertainties=True,
+            fixed_fpr=[baseline_fpr_cc1pi],
+            reco_baseline_pred=y_pred_cc1pi,
+            playlist=playlist,
+            colors=clrs,
             pion_bins_require_has_pion=False,
         )
-        figs_cc1pi.append(fig); plt.close(fig)
+        figs_cc1pi.append(fig)
+        plt.close(fig)
 
         fig = plot_binned_by_inttype(
-            results, data_cc1pi, signal_classes=cc1pi_classes, x_var="pion_theta",
+            results,
+            data_cc1pi,
+            signal_classes=cc1pi_classes,
+            x_var="pion_theta",
             xlabel=r"True $\theta_\pi$ [rad]",
             title=rf"$CC1\pi^\pm$ tagging - MINERvA Open Data Playlist {playlist} - by interaction type",
-            uncertainties=True, fixed_fpr=[baseline_fpr_cc1pi],
-            reco_baseline_pred=y_pred_cc1pi, playlist=playlist, colors=clrs,
+            uncertainties=True,
+            fixed_fpr=[baseline_fpr_cc1pi],
+            reco_baseline_pred=y_pred_cc1pi,
+            playlist=playlist,
+            colors=clrs,
             pion_bins_require_has_pion=False,
         )
-        figs_cc1pi.append(fig); plt.close(fig)
+        figs_cc1pi.append(fig)
+        plt.close(fig)
         save_figures_to_pdf(figs_cc1pi, out_dir / f"eval_cc1pi_tagging_{playlist}.pdf")
         print("Saved:", out_dir / f"eval_cc1pi_tagging_{playlist}.pdf")
 
@@ -321,13 +415,18 @@ def main(argv: list[str] | None = None) -> None:
         run0 = results[first_model][0][playlist]
         pid = run0["pid"]
         data_pi0 = data_with_signal_pion_bins(
-            data, pid, cc1pi0_classes, pion_quantile_require_has_pion=False,
+            data,
+            pid,
+            cc1pi0_classes,
+            pion_quantile_require_has_pion=False,
             pion_bin_edge_method="equal_frequency",
         )
         y_true_pi0 = np.isin(pid, cc1pi0_classes).astype(int)
         y_pred_baseline = (
-            (n_muons == 1) & (is_pizero_signal == 2)
-            & (np.abs(two_gamma_inv_mass - PI0_MASS) < DELTA_M) & (n_michel == 0)
+            (n_muons == 1)
+            & (is_pizero_signal == 2)
+            & (np.abs(two_gamma_inv_mass - PI0_MASS) < DELTA_M)
+            & (n_michel == 0)
         ).astype(int)
         tp_g = np.sum((y_pred_baseline == 1) & (y_true_pi0 == 1))
         fp_g = np.sum((y_pred_baseline == 1) & (y_true_pi0 == 0))
@@ -336,80 +435,134 @@ def main(argv: list[str] | None = None) -> None:
         baseline_fpr = fp_g / (fp_g + tn_g)
 
         metrics_cc1pi0 = compute_all_metrics(
-            results, data_pi0, signal_classes=cc1pi0_classes,
-            fixed_fpr=[baseline_fpr], playlist=playlist, pion_bins_require_has_pion=False,
+            results,
+            data_pi0,
+            signal_classes=cc1pi0_classes,
+            fixed_fpr=[baseline_fpr],
+            playlist=playlist,
+            pion_bins_require_has_pion=False,
         )
         baseline_cc1pi0 = compute_signal_baseline(
-            results, data_pi0, signal_classes=cc1pi0_classes, playlist=playlist,
+            results,
+            data_pi0,
+            signal_classes=cc1pi0_classes,
+            playlist=playlist,
             pion_bins_require_has_pion=False,
         )
         is_signal_pi0 = y_true_pi0 == 1
         reco_baseline_tpr = {
             "E": compute_reco_baseline_recall_per_bin(
-                y_pred_baseline, is_signal_pi0, data_pi0["pion_E_MC"],
-                data_pi0["pion_E_MC_bins"], has_pion=None,
+                y_pred_baseline,
+                is_signal_pi0,
+                data_pi0["pion_E_MC"],
+                data_pi0["pion_E_MC_bins"],
+                has_pion=None,
             ),
             "theta": compute_reco_baseline_recall_per_bin(
-                y_pred_baseline, is_signal_pi0, data_pi0["pion_theta_MC"],
-                data_pi0["pion_theta_MC_bins"], has_pion=None, finite_bin_var=True,
+                y_pred_baseline,
+                is_signal_pi0,
+                data_pi0["pion_theta_MC"],
+                data_pi0["pion_theta_MC_bins"],
+                has_pion=None,
+                finite_bin_var=True,
             ),
         }
         data_pi0_w = add_hadronic_W_to_classification_data(data_pi0, playlist)
         metrics_W_pi0 = compute_all_metrics_W(
-            results, data_pi0_w, signal_classes=cc1pi0_classes,
-            fixed_fpr=[baseline_fpr], playlist=playlist,
+            results,
+            data_pi0_w,
+            signal_classes=cc1pi0_classes,
+            fixed_fpr=[baseline_fpr],
+            playlist=playlist,
         )
         baseline_W_pi0 = compute_signal_baseline_W(
-            results, data_pi0_w, signal_classes=cc1pi0_classes, playlist=playlist,
+            results,
+            data_pi0_w,
+            signal_classes=cc1pi0_classes,
+            playlist=playlist,
         )
         reco_baseline_tpr_W_pi0 = compute_reco_baseline_recall_per_bin(
-            y_pred_baseline, is_signal_pi0, data_pi0_w["W_GeV"], data_pi0_w["W_bin_edges"],
+            y_pred_baseline,
+            is_signal_pi0,
+            data_pi0_w["W_GeV"],
+            data_pi0_w["W_bin_edges"],
         )
         fig_w_pi0 = plot_multi_classification_vs_W(
-            metrics_W_pi0, data_pi0_w, baseline_W_pi0,
-            fixed_fpr=[baseline_fpr], uncertainties=True,
+            metrics_W_pi0,
+            data_pi0_w,
+            baseline_W_pi0,
+            fixed_fpr=[baseline_fpr],
+            uncertainties=True,
             reco_baseline_tpr_W=reco_baseline_tpr_W_pi0,
-            reco_baseline_global_fpr=baseline_fpr, colors=clrs,
+            reco_baseline_global_fpr=baseline_fpr,
+            colors=clrs,
             title=rf"$CC1\pi^0$ tagging - MINERvA Open Data Playlist {playlist}",
-            playlist=playlist, use_global_fpr=True,
+            playlist=playlist,
+            use_global_fpr=True,
         )
-        figs_pi0.append(fig_w_pi0); plt.close(fig_w_pi0)
+        figs_pi0.append(fig_w_pi0)
+        plt.close(fig_w_pi0)
 
         fig = plot_cc1pi_vs_pion_kinematics(
-            metrics_cc1pi0, data_pi0, baseline_cc1pi0, uncertainties=True,
-            fixed_fpr=[baseline_fpr], reco_baseline_tpr=reco_baseline_tpr,
-            reco_baseline_global_fpr=baseline_fpr, colors=clrs,
+            metrics_cc1pi0,
+            data_pi0,
+            baseline_cc1pi0,
+            uncertainties=True,
+            fixed_fpr=[baseline_fpr],
+            reco_baseline_tpr=reco_baseline_tpr,
+            reco_baseline_global_fpr=baseline_fpr,
+            colors=clrs,
             suptitle=rf"$CC1\pi^0$ tagging - MINERvA Open Data Playlist {playlist}",
             playlist=playlist,
         )
-        figs_pi0.append(fig); plt.close(fig)
+        figs_pi0.append(fig)
+        plt.close(fig)
 
         fig2 = plot_binned_by_inttype(
-            results, data_pi0, signal_classes=cc1pi0_classes, x_var="pion_E",
+            results,
+            data_pi0,
+            signal_classes=cc1pi0_classes,
+            x_var="pion_E",
             xlabel=r"True $E_\pi$ [GeV]",
             title=rf"$CC1\pi^0$ tagging - MINERvA Open Data Playlist {playlist} - by interaction type",
-            log_x=True, uncertainties=True, fixed_fpr=[baseline_fpr],
-            reco_baseline_pred=y_pred_baseline, playlist=playlist, colors=clrs,
+            log_x=True,
+            uncertainties=True,
+            fixed_fpr=[baseline_fpr],
+            reco_baseline_pred=y_pred_baseline,
+            playlist=playlist,
+            colors=clrs,
             pion_bins_require_has_pion=False,
         )
-        figs_pi0.append(fig2); plt.close(fig2)
+        figs_pi0.append(fig2)
+        plt.close(fig2)
 
         fig3 = plot_binned_by_inttype(
-            results, data_pi0, signal_classes=cc1pi0_classes, x_var="pion_theta",
+            results,
+            data_pi0,
+            signal_classes=cc1pi0_classes,
+            x_var="pion_theta",
             xlabel=r"True $\theta_\pi$ [rad]",
             title=rf"$CC1\pi^0$ tagging - MINERvA Open Data Playlist {playlist} - by interaction type",
-            uncertainties=True, fixed_fpr=[baseline_fpr],
-            reco_baseline_pred=y_pred_baseline, playlist=playlist, colors=clrs,
+            uncertainties=True,
+            fixed_fpr=[baseline_fpr],
+            reco_baseline_pred=y_pred_baseline,
+            playlist=playlist,
+            colors=clrs,
             pion_bins_require_has_pion=False,
         )
-        figs_pi0.append(fig3); plt.close(fig3)
+        figs_pi0.append(fig3)
+        plt.close(fig3)
 
         fig4 = plot_prc_curves(
-            results, signal_classes=cc1pi0_classes,
+            results,
+            signal_classes=cc1pi0_classes,
             title=rf"PRC — $CC1\pi^0$ tagging - MINERvA Open Data Playlist {playlist}",
-            playlist=playlist, uncertainties=True, colors=clrs,
+            playlist=playlist,
+            uncertainties=True,
+            colors=clrs,
         )
-        figs_pi0.append(fig4); plt.close(fig4)
+        figs_pi0.append(fig4)
+        plt.close(fig4)
         save_figures_to_pdf(figs_pi0, out_dir / f"eval_cc1pi0_tagging_{playlist}.pdf")
         print("Saved:", out_dir / f"eval_cc1pi0_tagging_{playlist}.pdf")
 
@@ -417,18 +570,30 @@ def main(argv: list[str] | None = None) -> None:
         data = data_by_playlist[playlist]
         first_model = next(iter(results))
         pid = results[first_model][0][playlist]["pid"]
-        fig_comp = plot_signal_composition_single_pion(data=data, pid=pid, playlist=playlist)
+        fig_comp = plot_signal_composition_single_pion(
+            data=data, pid=pid, playlist=playlist
+        )
         fp = out_dir / f"event_composition_single_pion_{playlist}.pdf"
         fp.parent.mkdir(parents=True, exist_ok=True)
         fig_comp.savefig(fp, bbox_inches="tight")
         plt.close(fig_comp)
         print("Saved:", fp)
 
-    _draw_pi0_deltam_figs(out_dir, playlists, {pl: results[next(iter(results))][0][pl]["pid"] for pl in playlists}, data_by_playlist)
+    _draw_pi0_deltam_figs(
+        out_dir,
+        playlists,
+        {pl: results[next(iter(results))][0][pl]["pid"] for pl in playlists},
+        data_by_playlist,
+    )
 
     save_light_classification_pdfs(
-        light_dir, results, data_by_playlist, clrs, playlists,
-        components=("pion",), data_w_by_playlist=data_w_by_playlist,
+        light_dir,
+        results,
+        data_by_playlist,
+        clrs,
+        playlists,
+        components=("pion",),
+        data_w_by_playlist=data_w_by_playlist,
     )
 
 
@@ -454,7 +619,9 @@ def _run_plots_only(
     def _filter(d: dict) -> dict:
         return cfg.filter_dict(d) if cfg is not None else d
 
-    def _draw_cc1pi_section(sig_tag, sig_classes, pdf_stem, title_base, suptitle_base=None):
+    def _draw_cc1pi_section(
+        sig_tag, sig_classes, pdf_stem, title_base, suptitle_base=None
+    ):
         for playlist in playlists:
             data_pion = cache[f"data_{sig_tag}"][playlist]
             data_pion_w = cache[f"data_{sig_tag}_w"][playlist]
@@ -475,39 +642,59 @@ def _run_plots_only(
 
             # W plot
             fig_w = plot_multi_classification_vs_W(
-                metrics_W_all, data_pion_w,
+                metrics_W_all,
+                data_pion_w,
                 W_baseline_all,
-                fixed_fpr=[fpr], uncertainties=True,
-                reco_baseline_tpr_W=reco_tpr_W, reco_baseline_global_fpr=fpr,
-                colors=clrs, title=rf"{title_base} - MINERvA Open Data Playlist {playlist}",
-                playlist=playlist, use_global_fpr=True,
+                fixed_fpr=[fpr],
+                uncertainties=True,
+                reco_baseline_tpr_W=reco_tpr_W,
+                reco_baseline_global_fpr=fpr,
+                colors=clrs,
+                title=rf"{title_base} - MINERvA Open Data Playlist {playlist}",
+                playlist=playlist,
+                use_global_fpr=True,
             )
-            figs.append(fig_w); plt.close(fig_w)
+            figs.append(fig_w)
+            plt.close(fig_w)
 
             # Pion E + theta kinematics plot
             reco_tpr = {"E": reco_tpr_E, "theta": reco_tpr_theta}
             kw = {"suptitle": suptitle_base} if suptitle_base else {}
             fig_kin = plot_cc1pi_vs_pion_kinematics(
-                metrics_all, data_pion, baseline_pion, uncertainties=True,
-                fixed_fpr=[fpr], reco_baseline_tpr=reco_tpr,
-                reco_baseline_global_fpr=fpr, colors=clrs, playlist=playlist,
+                metrics_all,
+                data_pion,
+                baseline_pion,
+                uncertainties=True,
+                fixed_fpr=[fpr],
+                reco_baseline_tpr=reco_tpr,
+                reco_baseline_global_fpr=fpr,
+                colors=clrs,
+                playlist=playlist,
                 **kw,
             )
-            figs.append(fig_kin); plt.close(fig_kin)
+            figs.append(fig_kin)
+            plt.close(fig_kin)
 
             # PRC
             prc_data = _filter(cache["prc"][sig_tag][playlist])
             sig_frac = cache["signal_frac"][sig_tag][playlist]
             fig_prc = plot_prc_curves(
-                {}, sig_classes,
+                {},
+                sig_classes,
                 title=rf"PRC — {title_base} - MINERvA Open Data Playlist {playlist}",
-                playlist=playlist, uncertainties=True, colors=clrs,
-                precomputed_curves=prc_data, signal_frac=sig_frac,
+                playlist=playlist,
+                uncertainties=True,
+                colors=clrs,
+                precomputed_curves=prc_data,
+                signal_frac=sig_frac,
             )
-            figs.append(fig_prc); plt.close(fig_prc)
+            figs.append(fig_prc)
+            plt.close(fig_prc)
 
             # pion_E by inttype
-            inttype_agg_full = precomputed_inttype_agg(cache["metrics_pion"][sig_tag][playlist])
+            inttype_agg_full = precomputed_inttype_agg(
+                cache["metrics_pion"][sig_tag][playlist]
+            )
             # extract E sub-key for pion_E x_var
             pre_agg_E = {
                 code: _filter({m: v["E"] for m, v in agg.items()})
@@ -517,16 +704,25 @@ def _run_plots_only(
                 cache["signal_baseline_inttype"], sig_tag, playlist, "pion_E"
             )
             fig_E = plot_binned_by_inttype(
-                {}, data_pion, sig_classes, x_var="pion_E",
+                {},
+                data_pion,
+                sig_classes,
+                x_var="pion_E",
                 xlabel=r"True $E_\pi$ [GeV]",
                 title=rf"{title_base} - MINERvA Open Data Playlist {playlist} - by interaction type",
-                log_x=True, uncertainties=True, fixed_fpr=[fpr],
-                reco_baseline_pred=reco_pred, playlist=playlist, colors=clrs,
+                log_x=True,
+                uncertainties=True,
+                fixed_fpr=[fpr],
+                reco_baseline_pred=reco_pred,
+                playlist=playlist,
+                colors=clrs,
                 pion_bins_require_has_pion=False,
-                precomputed_agg=pre_agg_E, precomputed_bl_values=pre_bl_E,
+                precomputed_agg=pre_agg_E,
+                precomputed_bl_values=pre_bl_E,
                 precomputed_y_true_binary=y_true_binary,
             )
-            figs.append(fig_E); plt.close(fig_E)
+            figs.append(fig_E)
+            plt.close(fig_E)
 
             # pion_theta by inttype
             pre_agg_theta = {
@@ -537,31 +733,46 @@ def _run_plots_only(
                 cache["signal_baseline_inttype"], sig_tag, playlist, "pion_theta"
             )
             fig_theta = plot_binned_by_inttype(
-                {}, data_pion, sig_classes, x_var="pion_theta",
+                {},
+                data_pion,
+                sig_classes,
+                x_var="pion_theta",
                 xlabel=r"True $\theta_\pi$ [rad]",
                 title=rf"{title_base} - MINERvA Open Data Playlist {playlist} - by interaction type",
-                uncertainties=True, fixed_fpr=[fpr],
-                reco_baseline_pred=reco_pred, playlist=playlist, colors=clrs,
+                uncertainties=True,
+                fixed_fpr=[fpr],
+                reco_baseline_pred=reco_pred,
+                playlist=playlist,
+                colors=clrs,
                 pion_bins_require_has_pion=False,
-                precomputed_agg=pre_agg_theta, precomputed_bl_values=pre_bl_theta,
+                precomputed_agg=pre_agg_theta,
+                precomputed_bl_values=pre_bl_theta,
                 precomputed_y_true_binary=y_true_binary,
             )
-            figs.append(fig_theta); plt.close(fig_theta)
+            figs.append(fig_theta)
+            plt.close(fig_theta)
 
             save_figures_to_pdf(figs, out_dir / f"{pdf_stem}_{playlist}.pdf")
             print("Saved:", out_dir / f"{pdf_stem}_{playlist}.pdf")
 
-    _draw_cc1pi_section("cc1pi", _CC1PI_CLASSES, "eval_cc1pi_tagging", r"$CC1\pi^\pm$ tagging")
     _draw_cc1pi_section(
-        "cc1pi0", _CC1PI0_CLASSES, "eval_cc1pi0_tagging",
-        r"$CC1\pi^0$ tagging", suptitle_base=None,
+        "cc1pi", _CC1PI_CLASSES, "eval_cc1pi_tagging", r"$CC1\pi^\pm$ tagging"
+    )
+    _draw_cc1pi_section(
+        "cc1pi0",
+        _CC1PI0_CLASSES,
+        "eval_cc1pi0_tagging",
+        r"$CC1\pi^0$ tagging",
+        suptitle_base=None,
     )
 
     # Event composition (single pion)
     for playlist in playlists:
         data = data_by_playlist[playlist]
         pid = cache["pid"][playlist]
-        fig_comp = plot_signal_composition_single_pion(data=data, pid=pid, playlist=playlist)
+        fig_comp = plot_signal_composition_single_pion(
+            data=data, pid=pid, playlist=playlist
+        )
         fp = out_dir / f"event_composition_single_pion_{playlist}.pdf"
         fig_comp.savefig(fp, bbox_inches="tight")
         plt.close(fig_comp)
@@ -574,7 +785,9 @@ def _run_plots_only(
     light_cache_path = args.plots_cache or (cache_root / _LIGHT_CACHE_NAME)
     with open(light_cache_path, "rb") as f:
         light_cached = pickle.load(f)
-    draw_light_classification_from_cache(light_cached["specs"], clrs, light_dir, cfg=cfg)
+    draw_light_classification_from_cache(
+        light_cached["specs"], clrs, light_dir, cfg=cfg
+    )
 
 
 if __name__ == "__main__":
