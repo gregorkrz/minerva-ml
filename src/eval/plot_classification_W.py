@@ -740,12 +740,12 @@ def main(argv: list[str] | None = None) -> None:
     with open(pkl, "rb") as f:
         clf = pickle.load(f)
 
+    playlists = ["1A"]
     results, data_w_by_playlist, data_w_by_split = apply_plot_config_results(
         clf, cfg, playlists=playlists
     )
     clrs = clf["clrs_dict_full"]
     use_global_fpr = False if args.per_bin_fpr else clf.get("use_global_fpr_W", True)
-    playlists = ["1A"]
 
     if cfg is not None:
         clrs = {**clrs, **cfg.colors()}
