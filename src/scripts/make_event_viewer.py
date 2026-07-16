@@ -774,12 +774,33 @@ function buildScores(events){
   const reg=models.filter(m=>m.mode==='regression');
   if(reg.length){
     const unit=task.bin_unit||'';
-    html+='<div class="scoreblk"><h3>Regression &mdash; predicted value</h3>';
-    html+='<table class="scoretbl"><thead><tr><th>Model</th><th>Prediction</th></tr></thead><tbody>';
-    reg.forEach(m=>{ const pred=scores[m.run];
-      html+=`<tr><td class="mname">${m.label}</td><td>${(pred==null)?'&mdash;':(+pred).toFixed(3)+' '+unit}</td></tr>`; });
+    const truth=ev.bin_value;
+    // error = prediction - MC-truth target; sort models by |error| (best first).
+    const rows=reg.map(m=>{
+      const pred=scores[m.run];
+      const p=(pred==null)?null:+pred;
+      const err=(p==null||truth==null)?null:(p-truth);
+      return {label:m.label, p, err};
+    });
+    rows.sort((a,b)=>{
+      const aa=(a.err==null)?Infinity:Math.abs(a.err);
+      const bb=(b.err==null)?Infinity:Math.abs(b.err);
+      return aa-bb;
+    });
+    html+='<div class="scoreblk"><h3>Regression &mdash; predicted value (sorted by |error|)</h3>';
+    html+='<table class="scoretbl"><thead><tr><th>Model</th><th>Prediction</th><th>Error</th></tr></thead><tbody>';
+    let bestMarked=false;
+    rows.forEach(r=>{
+      const predStr=(r.p==null)?'&mdash;':(r.p.toFixed(3)+' '+unit);
+      let errStr='&mdash;', errCls='';
+      if(r.err!=null){
+        errStr=(r.err>=0?'+':'')+r.err.toFixed(3)+' '+unit;
+        if(!bestMarked){ errCls=' class="hi"'; bestMarked=true; }  // smallest |error|
+      }
+      html+=`<tr><td class="mname">${r.label}</td><td>${predStr}</td><td${errCls}>${errStr}</td></tr>`;
+    });
     html+='</tbody></table>';
-    if(ev.bin_value!=null) html+=`<div class="muted">MC-truth target: <b>${ev.bin_value.toFixed(3)} ${unit}</b></div>`;
+    if(truth!=null) html+=`<div class="muted">MC-truth target: <b>${truth.toFixed(3)} ${unit}</b></div>`;
     html+='</div>';
   }
 

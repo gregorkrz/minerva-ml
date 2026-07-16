@@ -20,6 +20,12 @@ It also writes a combined ``<input-dir>/scores.json`` indexing every
 Event order matches ``0.pb`` / ``meta.json`` (no shuffling), so ``prediction[i]``
 corresponds to event ``i`` in the viewer.
 
+Progress is cached in ``<input-dir>/scores_cache.json`` (same ``{models,
+scores}`` shape, accumulated across flags/invocations and keyed by run name),
+rewritten after each successfully-scored run. On a re-run, any run already
+present in the cache is skipped, so you only pay for models that haven't been
+scored yet. Pass ``--force`` to ignore the cache and re-evaluate everything.
+
 Run names are resolved from wandb (project ``minerva-models``) by tag, then
 intersected with checkpoint folders that contain ``best_model.pt`` — the same
 selection logic as ``src/scripts/evaluate_single_gpu.py``.
@@ -56,6 +62,8 @@ from src.dataset.dataloader import (
 from src.eval._constants import plot_model_label
 from src.scripts.eval import create_model_from_checkpoint
 from src.scripts.train import (
+    _bdt_cond_batch,
+    _bdt_proba_full,
     forward_model,
     prepare_batch,
     prepare_batch_bert,
@@ -282,6 +290,35 @@ def run_inference(model, loader, device, args_dict, use_amp: bool) -> np.ndarray
     return np.concatenate(outs, axis=0)
 
 
+def run_inference_bdt(model, loader, task, args_dict: dict) -> np.ndarray:
+    """Score a scikit-learn BDT (``HistGradientBoosting*``) on cond features.
+
+    BDTs aren't callable torch modules, so they can't go through
+    :func:`run_inference`. Mirrors the training/eval path (``_bdt_cond_batch`` +
+    ``_bdt_proba_full`` / ``.predict``): returns per-class **probabilities**
+    ``(N, num_classes)`` for classifiers (already normalized, so the caller must
+    not softmax them) or the scalar regression output ``(N,)``.
+    """
+    # _bdt_cond_batch reads args.include_E_sum / args.zero_cond_feature; ensure
+    # both exist so a checkpoint missing them doesn't raise AttributeError.
+    args_ns = SimpleNamespace(
+        include_E_sum=args_dict.get("include_E_sum", False),
+        zero_cond_feature=args_dict.get("zero_cond_feature", None),
+        **{k: v for k, v in args_dict.items()
+           if k not in ("include_E_sum", "zero_cond_feature")},
+    )
+    is_reg = task.type == "regression"
+    num_classes = len(task.class_idx) if not is_reg else None
+    outs = []
+    for batch in loader:
+        X, _, _ = _bdt_cond_batch(batch, args_ns, with_weights=False)
+        if is_reg:
+            outs.append(np.asarray(model.predict(X), dtype=np.float64).reshape(-1))
+        else:
+            outs.append(_bdt_proba_full(model, X, num_classes))
+    return np.concatenate(outs, axis=0)
+
+
 def truth_pid_for_dataset(folder: Path) -> np.ndarray:
     """MC-truth Pi_labels_v2 per event from the dataset's own truth labels."""
     meta = folder / "meta.json"
@@ -344,6 +381,13 @@ def main(argv: list[str] | None = None) -> None:
     )
     ap.add_argument("--use-amp", action="store_true", help="Mixed precision on CUDA.")
     ap.add_argument("--device", default=None, help="torch device (default: auto).")
+    ap.add_argument(
+        "--force",
+        "--ignore-cache",
+        dest="force",
+        action="store_true",
+        help="Ignore scores_cache.json and re-evaluate every run from scratch.",
+    )
     args = ap.parse_args(argv)
 
     if not args.input_dir.exists():
@@ -378,16 +422,43 @@ def main(argv: list[str] | None = None) -> None:
     print("Resolving human-readable model names …")
     run_to_model = resolve_model_names(args.flag, runs)
 
-    scores_json: dict = {
-        "flag": args.flag,
-        "ckpt_dir": str(args.ckpt_dir),
-        "input_dir": str(args.input_dir),
-        "runs": runs,
-        "models": {},
-        "scores": {rel: {} for rel, _ in datasets},
-    }
+    # Persistent per-run cache (accumulated across flags/invocations, keyed by
+    # run name) so already-scored models can be skipped on re-runs. Same
+    # {models, scores} shape as scores.json but a superset of runs. It is
+    # rewritten after every successfully-scored run so progress survives a crash.
+    cache_path = args.input_dir / "scores_cache.json"
+    cache: dict = {"models": {}, "scores": {}}
+    if cache_path.exists() and not args.force:
+        try:
+            with open(cache_path) as f:
+                loaded = json.load(f)
+            cache["models"] = dict(loaded.get("models", {}))
+            cache["scores"] = {
+                rel: dict(sc) for rel, sc in loaded.get("scores", {}).items()
+            }
+            print(f"Loaded {cache_path.name} ({len(cache['models'])} model(s) cached).")
+        except Exception as exc:  # noqa: BLE001
+            print(f"Could not read {cache_path.name} ({exc}); starting fresh.")
+            cache = {"models": {}, "scores": {}}
+    for rel, _ in datasets:
+        cache["scores"].setdefault(rel, {})
+
+    def run_fully_cached(run: str) -> bool:
+        """True iff the cache has this run's info and scores for every dataset."""
+        if run not in cache["models"]:
+            return False
+        return all(run in cache["scores"].get(rel, {}) for rel, _ in datasets)
+
+    def write_cache() -> None:
+        tmp = cache_path.with_name(cache_path.name + ".tmp")
+        with open(tmp, "w") as f:
+            json.dump(cache, f, separators=(",", ":"))
+        tmp.replace(cache_path)
 
     for ri, run in enumerate(runs, start=1):
+        if not args.force and run_fully_cached(run):
+            print(f"[{ri}/{len(runs)}] {run}: cached, skipping eval")
+            continue
         ckpt = args.ckpt_dir / run / "best_model.pt"
         if not ckpt.exists():
             print(f"[{ri}/{len(runs)}] {run}: no best_model.pt, skipping")
@@ -411,52 +482,98 @@ def main(argv: list[str] | None = None) -> None:
             "run_name": run,
             **info,
         }
-        scores_json["models"][run] = info
+        cache["models"][run] = info
         mode = info["mode"]
+        is_bdt = bool(args_dict.get("use_bdt", False))
 
-        for rel, folder in datasets:
-            with contextlib.redirect_stdout(io.StringIO()):
-                loader = build_loader(
-                    folder, args_dict, task, args.batch_size, max_particles
-                )
-                raw = run_inference(model, loader, device, args_dict, args.use_amp)
-            score_dir = folder / "scores"
-            score_dir.mkdir(parents=True, exist_ok=True)
-            pid = truth_pid[rel]
+        try:
+            for rel, folder in datasets:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    loader = build_loader(
+                        folder, args_dict, task, args.batch_size, max_particles
+                    )
+                    if is_bdt:
+                        raw = run_inference_bdt(model, loader, task, args_dict)
+                    else:
+                        raw = run_inference(
+                            model, loader, device, args_dict, args.use_amp
+                        )
+                score_dir = folder / "scores"
+                score_dir.mkdir(parents=True, exist_ok=True)
+                pid = truth_pid[rel]
 
-            if mode == "classifier":
-                logits = raw
-                probs = _softmax(logits)
-                np.savez(
-                    score_dir / f"{run}.npz",
-                    prediction=probs,
-                    logits=logits,
-                    pid=pid,
-                )
-                scores_json["scores"][rel][run] = {
-                    "mode": mode,
-                    "prediction": np.round(probs, 5).tolist(),
-                }
-            else:
-                pred = raw
-                if info["log1p_loss"]:
-                    pred = np.maximum(np.exp(pred) - 1.0, 0.0)
-                np.savez(score_dir / f"{run}.npz", prediction=pred, pid=pid)
-                scores_json["scores"][rel][run] = {
-                    "mode": mode,
-                    "prediction": np.round(pred, 4).tolist(),
-                }
-        print(f"    done ({mode}, {len(datasets)} datasets).")
+                if mode == "classifier":
+                    # BDT already returns normalized probabilities; NN returns
+                    # logits that still need a softmax.
+                    if is_bdt:
+                        probs = raw
+                        logits = np.log(np.clip(probs, 1e-12, None))
+                    else:
+                        logits = raw
+                        probs = _softmax(logits)
+                    np.savez(
+                        score_dir / f"{run}.npz",
+                        prediction=probs,
+                        logits=logits,
+                        pid=pid,
+                    )
+                    cache["scores"][rel][run] = {
+                        "mode": mode,
+                        "prediction": np.round(probs, 5).tolist(),
+                    }
+                else:
+                    pred = raw
+                    if info["log1p_loss"]:
+                        pred = np.maximum(np.exp(pred) - 1.0, 0.0)
+                    np.savez(score_dir / f"{run}.npz", prediction=pred, pid=pid)
+                    cache["scores"][rel][run] = {
+                        "mode": mode,
+                        "prediction": np.round(pred, 4).tolist(),
+                    }
+            # Persist progress after each successful run so a later crash (or a
+            # bad run) never discards work already done.
+            write_cache()
+            print(f"    done ({mode}, {len(datasets)} datasets); cache updated.")
+        except Exception as exc:  # noqa: BLE001
+            # One bad run (e.g. a scikit-learn BDT that isn't a callable torch
+            # module) must not abort the whole eval and lose every other run's
+            # scores. Drop this run's partial results and keep going.
+            print(f"    inference failed ({exc}); skipping this run")
+            cache["models"].pop(run, None)
+            for rel, _ in datasets:
+                cache["scores"][rel].pop(run, None)
+        finally:
+            del model
+            if device.type == "cuda":
+                torch.cuda.empty_cache()
 
-        del model
-        if device.type == "cuda":
-            torch.cuda.empty_cache()
+    # Build scores.json for *this flag* from the cache: only runs that were
+    # requested and are fully scored (drops load/inference failures, e.g. BDTs),
+    # so the event viewer never renders empty rows.
+    scored_runs = [r for r in runs if run_fully_cached(r)]
+    scores_json = {
+        "flag": args.flag,
+        "ckpt_dir": str(args.ckpt_dir),
+        "input_dir": str(args.input_dir),
+        "runs": scored_runs,
+        "models": {r: cache["models"][r] for r in scored_runs},
+        "scores": {
+            rel: {r: cache["scores"][rel][r] for r in scored_runs}
+            for rel, _ in datasets
+        },
+    }
 
     out_json = args.input_dir / "scores.json"
     with open(out_json, "w") as f:
         json.dump(scores_json, f, separators=(",", ":"))
-    print(f"\nWrote per-dataset npz under each <dataset>/scores/ and {out_json}")
-    print(f"Models scored: {len(scores_json['models'])}")
+    print(
+        f"\nWrote per-dataset npz under each <dataset>/scores/, "
+        f"{cache_path} (cache), and {out_json}"
+    )
+    print(
+        f"Models scored for flag {args.flag!r}: {len(scored_runs)} "
+        f"(cache holds {len(cache['models'])} total)"
+    )
 
 
 if __name__ == "__main__":

@@ -65,6 +65,10 @@
     [
       "HyperScale-small",
       "HyperScale-small-rw"
+    ],
+    [
+      "MLP"
     ]
-  ]
+  ],
+  "flops_xmin": 15.0
 }

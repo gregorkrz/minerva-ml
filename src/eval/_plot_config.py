@@ -197,6 +197,7 @@ class PlotConfig:
     eval_split: str = "test"
     step_cutoff: int | None = None
     flops_xmin: float | None = None
+    log_steps_xmin: float | None = None
     curve_end: CurveEndConfig = field(default_factory=CurveEndConfig)
     legend_column_stacks: list[list[str]] = field(default_factory=list)
 
@@ -354,6 +355,7 @@ class PlotConfig:
             eval_split=data.get("eval_split", "test"),
             step_cutoff=data.get("step_cutoff"),
             flops_xmin=data.get("flops_xmin"),
+            log_steps_xmin=data.get("log_steps_xmin"),
             curve_end=curve_end,
             legend_column_stacks=legend_column_stacks,
         )

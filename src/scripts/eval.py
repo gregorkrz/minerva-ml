@@ -26,6 +26,7 @@ from src.models.omnilearned import PET2, get_model_parameters
 from src.scripts.train import (
     set_seed,
     prepare_batch,
+    prepare_batch_cond,
     prepare_batch_omnilearned,
     prepare_batch_bert,
     prepare_batch_hyperscale,
@@ -290,6 +291,13 @@ def evaluate(model, dataloader, device, args_dict, use_amp=False):
                 include_E_sum=include_E_sum,
                 zero_cond_feature=zero_cond_feature,
                 variant=use_hyperscale,
+            )
+        elif cond_only:
+            inputs = prepare_batch_cond(
+                batch,
+                device,
+                include_E_sum=include_E_sum,
+                zero_cond_feature=zero_cond_feature,
             )
         else:
             inputs = prepare_batch(

@@ -4,6 +4,7 @@ This repository contains the data processing and model training code used for ML
 
 > **Evaluation plots** — browse the latest model-comparison figures (classification, regression, training curves) by configuration:
 > **[minerva-ml plots](https://d1to0n5578l1po.cloudfront.net/index.html)**
+> · **[Event viewer](https://d1to0n5578l1po.cloudfront.net/event_viewer.html)**
 
 ## Dataset
 
@@ -328,6 +329,36 @@ bash scripts/generate_comparison_plots.sh --config default
 bash scripts/publish_plots.sh
 ```
 
+#### Per-tag wrapper (e.g. `Run_0707_CR`)
+
+`scripts/rebuild_plots_Run_0707.sh` runs the full pull-and-replot pipeline for the
+`Run_0707_CR` W&B tag across **all** `plot_configs/*.json` (classification +
+regression):
+
+1. **Eval** missing test npz (`evaluate_single_gpu`)
+2. **Collect** fresh pickles + wandb val-loss histories (`collect_eval_data`)
+3. **Rebuild** caches (additive by default) and regenerate every config's PDFs
+
+Paths: `FLAG=Run_0707_CR`, `OUT_DIR=…/runs_Run_0707_CR`,
+`LOCAL_PLOTS_ROOT=plots_Run_0707_CR`.
+
+```bash
+cd ~/minerva-ml-hyperscale
+
+# Full refresh after new trainings finish (step 1 needs a GPU if new npz are missing):
+salloc --nodes 1 --qos interactive --time 04:00:00 --constraint gpu --gpus 1 --account m3246 \
+  bash scripts/rebuild_plots_Run_0707.sh
+
+# Replot-only on CPU when all test_results npz already exist:
+salloc --nodes 1 --qos interactive --time 04:00:00 --constraint cpu --account m3246 \
+  bash -c 'SKIP_EVAL=1 bash scripts/rebuild_plots_Run_0707.sh'
+```
+
+Useful env overrides: `CONFIG=<name>` (one config), `SKIP_EVAL=1` (skip eval),
+`SKIP_WANDB=1` (reuse existing val-loss histories), `SKIP_UNEVALUATED=1` (ignore
+tagged runs without npz), `ADDITIVE=0` (full cache rebuild instead of incremental).
+Output: `plots_Run_0707_CR/<config>/`.
+
 #### 4. Publish plots (S3 / CloudFront)
 
 Plot PDFs are not tracked in git. After generating locally, publish the HTML index and figures:
@@ -493,15 +524,29 @@ Defaults: `--ckpt-dir /global/cfs/cdirs/m3246/gregork/checkpoints`,
 `--batch-size 512`, auto device. Use `--runs <name ...>` to score explicit
 checkpoints instead of resolving from `--flag`.
 
+**Model types:** torch checkpoints (OmniLearned / BERT / HyperScale / ViT /
+cond-only MLP) and scikit-learn **BDTs** (`HistGradientBoosting*`, scored on the
+cond/global features via `predict_proba` / `predict`) are all supported.
+
+**Caching / resumability:** progress is written to `<input-dir>/scores_cache.json`
+after **each** successfully-scored run (accumulated across flags/invocations,
+keyed by run name). On a re-run, any run already in the cache is skipped, so you
+only pay for models that haven't been scored yet — and a crash or a genuinely
+broken run no longer discards the work already done (any run that fails to load
+or score is skipped gracefully). Pass `--force` (alias `--ignore-cache`) to
+ignore the cache and re-evaluate everything.
+
 Outputs:
 
 - `<task>/<bin>/<class>/scores/<run>.npz` next to each `0.pb` — `prediction`
   (per-class softmax probabilities for classifiers, or regressed energy for
   regression checkpoints; interpret classifier columns via `class_idx`),
   `logits`, and MC-truth `pid`. Event order matches `0.pb` / `meta.json`.
-- `<input-dir>/scores.json` — combined index with a `models` section (human-
-  readable model name, seed, mode, `num_classes`, `class_idx`) and
-  `scores[task/bin/class][run].prediction`.
+- `<input-dir>/scores.json` — combined index for **this flag** with a `models`
+  section (human-readable model name, seed, mode, `num_classes`, `class_idx`)
+  and `scores[task/bin/class][run].prediction`.
+- `<input-dir>/scores_cache.json` — persistent superset of `scores.json` across
+  all flags/runs ever scored; consulted to skip already-done evals.
 
 ## Citation
 

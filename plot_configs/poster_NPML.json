@@ -56,5 +56,6 @@
       "HyperScale-small",
       "HyperScale-small-rw"
     ]
-  ]
+  ],
+  "log_steps_xmin": 3.0
 }

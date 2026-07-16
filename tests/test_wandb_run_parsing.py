@@ -154,6 +154,18 @@ def test_bdt_mc_truth_plain_maps_to_bdt():
     assert classification_model_cap_from_name(name) == ("BDT", -1)
 
 
+def test_mlp_sweep_regression_nr_full_maps_to_mlp():
+    name = "Run_cond_only_lowLR_MLP3_NR_full_seed61_20260715_181433"
+    assert regression_model_cap_from_name(name) == ("MLP", -1)
+    assert classification_model_cap_from_name(name) is None
+
+
+def test_mlp_classifier_nr_full_not_matched_as_regression():
+    name = "Run_cond_only_lowLR_MLP3_classifier_NR_full_seed55_20260625_120000"
+    assert regression_model_cap_from_name(name) is None
+    assert classification_model_cap_from_name(name) == ("MLP", -1)
+
+
 def test_bdt_regression_maps_to_bdt():
     name = "Run_BDT_regression_NR_full_seed55_20260630_120000"
     assert regression_model_cap_from_name(name) == ("BDT", -1)

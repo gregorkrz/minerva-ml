@@ -97,12 +97,21 @@ def has_test_results_npz_for_dataset(
 
 
 def folder_matches_task(folder: str, task: str) -> bool:
-    """Heuristic: training run folder names include ``_classifier_`` or ``_regression_``."""
+    """Match classifier/regression via name tokens or wandb-style parsers.
+
+    Most runs include ``_classifier_`` / ``_regression_``. Cond-only MLP sweep
+    names omit those tokens, so fall back to :func:`parse_folder_model_seed`.
+    """
     if task == "classifier":
-        return "_classifier_" in folder
-    if task == "regression":
-        return "_regression_" in folder
-    raise ValueError(f"Unknown task: {task!r}")
+        if "_classifier_" in folder:
+            return True
+    elif task == "regression":
+        if "_regression_" in folder:
+            return True
+    else:
+        raise ValueError(f"Unknown task: {task!r}")
+    parsed_task, _, _ = parse_folder_model_seed(folder)
+    return parsed_task == task
 
 
 def filter_folders_by_tasks(folders: List[str], tasks: List[str]) -> List[str]:
@@ -177,8 +186,15 @@ def parse_folder_model_seed(folder: str) -> Tuple[str, str, Optional[int]]:
         task = "regression"
         parsed = regression_model_cap_from_name(folder)
     else:
-        task = "unknown"
-        parsed = None
+        # Cond-only MLP sweep names omit ``_classifier_`` / ``_regression_``.
+        parsed_clf = classification_model_cap_from_name(folder)
+        parsed_reg = regression_model_cap_from_name(folder)
+        if parsed_clf is not None:
+            task, parsed = "classifier", parsed_clf
+        elif parsed_reg is not None:
+            task, parsed = "regression", parsed_reg
+        else:
+            task, parsed = "unknown", None
     model_key = parsed[0] if parsed else "(unparsed)"
 
     seed: Optional[int] = None

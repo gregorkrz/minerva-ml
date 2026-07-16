@@ -205,10 +205,11 @@ def get_runs_by_model_and_cap(
       - Transformer1 / Transformer1NR: both map to "Transformer-xsmall"
         (Run_*_regression_Transformer1_data_cap_... and ...Transformer1NR_data_cap_...)
       - MLP: Run_cond_only_lowLR_full_seed<SEED>_...
-      - MLP (NR full): names containing _cond_only_lowLR_NR_full_seed<SEED>_ (regression template in
-          generate_cond_only_jobs.py). Same global ablation as Transformer1NR (--zero-cond-feature 2).
-          cap is always -1. Names with _cond_only_lowLR_classifier_NR_full_ are classification jobs and
-          are excluded here so regression eval only sees regression MLP runs.
+      - MLP (NR full): names containing _cond_only_lowLR_NR_full_seed<SEED>_ or
+          _cond_only_lowLR_MLP<N>_NR_full_seed<SEED>_ (MLP sweep / generate_cond_only_jobs).
+          Same global ablation as Transformer1NR (--zero-cond-feature 2). Cap is always -1.
+          Names with _cond_only_lowLR_classifier_NR_full_ or _MLP<N>_classifier_NR_full_ are
+          classification jobs and are excluded here so regression eval only sees regression MLP runs.
       - BERT-tiny / BERT-tiny-rw: Run_*_BERT_tiny_rw_regression_<cap>_seed... and
           Run_*_BERT_tiny_regression_<cap>_seed... (``tiny_rw`` before ``tiny`` so names match correctly).
       - BERT-tiny-energy-order: Run_*_BERT_tiny_energy_order_regression_<cap>_seed...
@@ -283,7 +284,13 @@ def regression_model_cap_from_name(name: str) -> tuple[str, object] | None:
         if m:
             model, cap = "BDT", -1
     if model is None:
-        # Regression NR-full only; do not match _cond_only_lowLR_classifier_NR_full_ (classification).
+        # Sweep-style regression NR-full: ..._cond_only_lowLR_MLP3_NR_full_seed61_...
+        # (must not match ..._MLP3_classifier_NR_full_...).
+        m = re.search(r"_cond_only_lowLR_(MLP\d+)_NR_full_seed(-?\d+)_", name)
+        if m:
+            model, cap = "MLP", -1
+    if model is None:
+        # Legacy regression NR-full only; do not match _cond_only_lowLR_classifier_NR_full_.
         m = re.search(r"_cond_only_lowLR_(?!classifier_)NR_full_seed(-?\d+)_", name)
         if m:
             model, cap = "MLP", -1

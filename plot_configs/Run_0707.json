@@ -1,0 +1,57 @@
+{
+  "_comment": "Run_0707: NEW-dataset classifiers (20260326_NEW). Baselines + small/medium HyperScale, OmniLearned-small.",
+  "models": [
+    {
+      "name": "OmniLearned-small",
+      "color": "#c2410c"
+    },
+    {
+      "name": "OmniLearned-small-rw",
+      "color": "#ff7f0e"
+    },
+    {
+      "name": "HyperScale-small",
+      "color": "#0369a1"
+    },
+    {
+      "name": "HyperScale-small-rw",
+      "color": "#7dd3fc"
+    },
+    {
+      "name": "HyperScale-medium",
+      "color": "#c026d3"
+    },
+    {
+      "name": "HyperScale-medium-rw",
+      "color": "#e879f9"
+    },
+    {
+      "name": "MLP",
+      "color": "#2ca02c"
+    },
+    {
+      "name": "BDT",
+      "color": "#b91c1c"
+    }
+  ],
+  "legend_column_stacks": [
+    [
+      "OmniLearned-small",
+      "OmniLearned-small-rw"
+    ],
+    [
+      "HyperScale-small",
+      "HyperScale-small-rw"
+    ],
+    [
+      "HyperScale-medium",
+      "HyperScale-medium-rw"
+    ],
+    [
+      "MLP",
+      "BDT"
+    ]
+  ],
+  "eval_split": "test",
+  "step_cutoff": null
+}

@@ -710,6 +710,12 @@ def main(argv: list[str] | None = None) -> None:
         help="Use per-bin FPR for TPR (local ROC cut in each W bin) instead of "
         "a single global score threshold. Output PDFs get a _per_bin_fpr suffix.",
     )
+    ap.add_argument(
+        "--skip-conf-matrix",
+        action="store_true",
+        help="Skip conf_matrix_at_threshold (avoids loading the full classification "
+        "pickle; useful on memory-limited nodes).",
+    )
     args = ap.parse_args(argv)
     if args.plots_dir is None:
         args.plots_dir = Path(args.out_dir or DEFAULT_OUT_DIR) / "plots"
@@ -1056,18 +1062,21 @@ def _run_plots_only(
         pid_by_playlist=cache["pid"],
     )
 
-    results_cm = _load_results_for_conf_matrix(args, cfg, cache_root, data_root)
-    if results_cm is not None:
-        _run_conf_matrix_at_threshold(
-            results_cm,
-            data_w_by_playlist,
-            out_dir,
-            playlists,
-            use_global_fpr,
-            baseline_fpr_by_tag=cache["baseline_fpr"],
-            reco_pred_by_tag=cache["reco_pred"],
-            cfg=cfg,
-        )
+    if not args.skip_conf_matrix:
+        results_cm = _load_results_for_conf_matrix(args, cfg, cache_root, data_root)
+        if results_cm is not None:
+            _run_conf_matrix_at_threshold(
+                results_cm,
+                data_w_by_playlist,
+                out_dir,
+                playlists,
+                use_global_fpr,
+                baseline_fpr_by_tag=cache["baseline_fpr"],
+                reco_pred_by_tag=cache["reco_pred"],
+                cfg=cfg,
+            )
+    else:
+        print("Skipping conf_matrix_at_threshold (--skip-conf-matrix).")
 
     # Event composition
     for playlist in playlists:
