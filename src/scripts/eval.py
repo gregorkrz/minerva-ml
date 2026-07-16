@@ -244,6 +244,7 @@ def evaluate(model, dataloader, device, args_dict, use_amp=False):
     cond_only = args_dict.get("cond_only", False)
     include_E_sum = args_dict.get("include_E_sum", False)
     zero_cond_feature = args_dict.get("zero_cond_feature", None)
+    remove_muon_kinematics = args_dict.get("remove_muon_kinematics", False)
     use_omnilearned = args_dict.get("use_omnilearned", None)
     use_bert = args_dict.get("use_bert", None)
     use_hyperscale = args_dict.get("use_hyperscale", None)
@@ -268,7 +269,13 @@ def evaluate(model, dataloader, device, args_dict, use_amp=False):
     for batch in tqdm(dataloader, desc=f"Evaluating", leave=True):
         if use_omnilearned:
             inputs = prepare_batch_omnilearned(
-                batch, device, use_cond, use_pid, pid_idx, include_E_sum=include_E_sum
+                batch,
+                device,
+                use_cond,
+                use_pid,
+                pid_idx,
+                include_E_sum=include_E_sum,
+                remove_muon_kinematics=remove_muon_kinematics,
             )
         elif use_bert:
             inputs = prepare_batch_bert(
@@ -279,6 +286,7 @@ def evaluate(model, dataloader, device, args_dict, use_amp=False):
                 use_cond=use_cond,
                 include_E_sum=include_E_sum,
                 zero_cond_feature=zero_cond_feature,
+                remove_muon_kinematics=remove_muon_kinematics,
                 energy_order=args_dict.get("bert_energy_order", False),
             )
         elif use_hyperscale:
@@ -290,6 +298,7 @@ def evaluate(model, dataloader, device, args_dict, use_amp=False):
                 use_cond=use_cond,
                 include_E_sum=include_E_sum,
                 zero_cond_feature=zero_cond_feature,
+                remove_muon_kinematics=remove_muon_kinematics,
                 variant=use_hyperscale,
             )
         elif cond_only:
@@ -309,6 +318,7 @@ def evaluate(model, dataloader, device, args_dict, use_amp=False):
                 pid_idx,
                 include_E_sum=include_E_sum,
                 zero_cond_feature=zero_cond_feature,
+                remove_muon_kinematics=remove_muon_kinematics,
             )
         amp_enabled = bool(use_amp and device.type == "cuda")
         with torch.amp.autocast(device_type="cuda", enabled=amp_enabled):

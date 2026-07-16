@@ -132,6 +132,7 @@ def generate_cmd(
     binned_loss_signal=None,
     binary_classifier=False,
     predict_baseline=False,
+    remove_muon_kinematics=False,
     data_path="/global/cfs/cdirs/m3246/gregork/Minerva/20260326",
     fp16=False,
 ):
@@ -254,6 +255,11 @@ def generate_cmd(
             raise ValueError("predict_baseline requires task='classifier'.")
         extra += " --predict-baseline "
         name += "_predictBaseline"
+    if remove_muon_kinematics:
+        # Ablation: zero muon token kinematics (η, φ, log pT, log E). No-op for
+        # cond-only models (no particle tokens); still tags the run name if set.
+        extra += " --remove-muon-kinematics "
+        name += "_noMuonKin"
     return base.format(
         bs=bs,
         task=task,
@@ -319,6 +325,50 @@ def get_cmds_and_slurm_times():
                 max_steps=500000,
                 bs=2048,
                 grad_accum_steps=1,
+            )
+            cmds.append(cmd)
+            slurm_times.append(walltime_bert)
+    return cmds, slurm_times
+
+
+def get_cmds_and_slurm_times_no_muon_kin():
+    """Muon-kinematics ablation: same Transformer2 (DIS) + BERT-tiny (all events)
+    sweep as :func:`get_cmds_and_slurm_times`, with ``--remove-muon-kinematics``.
+
+    Run names get a ``_noMuonKin`` suffix so they do not collide with baselines.
+    """
+    cmds = []
+    slurm_times = []
+    seeds = [55, 56]
+    tasks = ["regression", "classifier"]
+    walltime = "20:00:00"
+    for seed in seeds:
+        for task in tasks:
+            cmd = generate_cmd(
+                data_cap=-1,
+                seed=seed,
+                task=task,
+                model="Transformer2",
+                max_steps=500000,
+                bs=2048,
+                grad_accum_steps=1,
+                event_types=["DIS"],
+                remove_muon_kinematics=True,
+            )
+            cmds.append(cmd)
+            slurm_times.append(walltime)
+    walltime_bert = "05:00:00"
+    for seed in seeds:
+        for task in tasks:
+            cmd = generate_cmd(
+                data_cap=-1,
+                seed=seed,
+                task=task,
+                model="BERT-tiny",
+                max_steps=500000,
+                bs=2048,
+                grad_accum_steps=1,
+                remove_muon_kinematics=True,
             )
             cmds.append(cmd)
             slurm_times.append(walltime_bert)
@@ -563,10 +613,10 @@ def get_cmds_and_slurm_times_continue():
 CONTAINER_IMAGE = "docker.io/gkrz/minerva_ml:v1"
 
 if __name__ == "__main__":
-    # To submit the HyperScale sweep instead (16 jobs across small ×
-    # pretrained/rw × embedding × 4 seeds × {regression, classifier}),
-    # swap the next line for:
-    #     cmds, slurm_times = get_cmds_and_slurm_times_hyperscale()
+    # Active sweep selectors (uncomment one):
+    #   cmds, slurm_times = get_cmds_and_slurm_times()
+    #   cmds, slurm_times = get_cmds_and_slurm_times_hyperscale()
+    #   cmds, slurm_times = get_cmds_and_slurm_times_no_muon_kin()  # muon-kin ablation
     cmds, slurm_times = get_cmds_and_slurm_times()
     for i, cmd in enumerate(cmds):
         job_name = f"run_{i}_{dt.now().strftime('%Y%m%d_%H%M%S')}"

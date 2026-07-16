@@ -18,10 +18,12 @@ coordinates (blobs / prongs); prongs additionally get a momentum-direction
 arrow, while muons and photons (which carry no stored position) are drawn as
 arrows from the estimated interaction vertex (mean of the positioned hits).
 
-An optional "Show MC truth" toggle overlays the MC truth pion direction (from
-``truth_labels`` columns 11-14) as a dashed magenta arrow / star marker. Note
-the processed dataset only retains the truth pion four-vector, not the full
-``mc_FSPart*`` list, so that is the only MC particle available here.
+An optional "Show MC truth particles" toggle overlays the full MC final-state
+list (``mc_FSPart*`` from the raw ROOT playlists), joined via each event's
+``playlist_global_index`` in ``meta.json``. Particles are drawn as dashed
+magenta arrows (3D) / star markers (η–φ). If the raw ROOT dir is unavailable,
+falls back to the single charged-pion four-vector in ``truth_labels`` columns
+11–14.
 
 The data is embedded directly in the HTML (Plotly.js is loaded from a CDN), so
 the output file is fully portable.
@@ -49,7 +51,34 @@ if str(_REPO_ROOT) not in sys.path:
 DEFAULT_INPUT_DIR = Path(
     "/global/cfs/cdirs/m3246/gregork/Minerva/20260326_NEW_DEMO_ONLY"
 )
+DEFAULT_RAW_DIR = Path(
+    "/pscratch/sd/g/gregork/MINERvA/raw_data/MediumEnergy_FHC_StandardMC_Playlist"
+)
 DEFAULT_OUTPUT = _REPO_ROOT / "plots" / "event_viewer.html"
+
+# Neutrinos are omitted from the MC overlay (not useful in the detector view).
+_NEUTRINO_ABS_PDG = frozenset({12, 14, 16})
+
+PDG_LABELS = {
+    22: "γ",
+    211: "π+",
+    -211: "π-",
+    111: "π0",
+    2212: "p",
+    -2212: "p̄",
+    2112: "n",
+    -2112: "n̄",
+    13: "μ-",
+    -13: "μ+",
+    11: "e-",
+    -11: "e+",
+    321: "K+",
+    -321: "K-",
+    130: "K0L",
+    310: "K0S",
+    311: "K0",
+    -311: "K̄0",
+}
 
 PID_NAMES = {
     0: "Muon",
@@ -166,39 +195,129 @@ def _label_from_run(run: str) -> str:
     return f"{name} (seed {seed_m.group(1)})" if seed_m else name
 
 
-def mc_particles_from_truth(tl_row: np.ndarray) -> list[dict]:
-    """MC-truth particle overlay from a truth-labels row.
+def pdg_label(pdg: int) -> str:
+    """Human-readable label for an MC PDG code."""
+    if abs(pdg) >= 1_000_000_000:
+        return "nucleus"
+    return PDG_LABELS.get(pdg, f"PDG {pdg}")
 
-    The processed dataset only retains the MC truth **pion** four-vector
-    (``truth_labels`` columns 11-14, nonzero only for single-pion CC events;
-    see ``DATASET.md``); full ``mc_FSPart*`` lists are not stored. Returns a
-    direction unit vector plus (eta, phi, E) for the viewer.
-    """
-    px, py, pz, E = (
-        _to_float(tl_row[11]),
-        _to_float(tl_row[12]),
-        _to_float(tl_row[13]),
-        _to_float(tl_row[14]),
-    )
+
+def mc_particle_from_kinematics(
+    px: float, py: float, pz: float, E: float, pdg: int
+) -> dict | None:
+    """Build one viewer MC particle dict, or ``None`` if not overlay-worthy."""
+    if abs(int(pdg)) in _NEUTRINO_ABS_PDG:
+        return None
+    px, py, pz, E = _to_float(px), _to_float(py), _to_float(pz), _to_float(E)
     p = math.sqrt(px * px + py * py + pz * pz)
     if E <= 0.0 or p <= 0.0:
-        return []
+        return None
     eta = 0.5 * math.log(max((p + pz), 1e-9) / max((p - pz), 1e-9))
     eta = max(-10.0, min(10.0, eta))
     phi = math.atan2(py, px)
-    return [
-        {
-            "label": "π (MC truth)",
-            "eta": round(eta, 4),
-            "phi": round(phi, 4),
-            "E": round(max(E, 0.0), 3),
-            "dir": [round(px / p, 5), round(py / p, 5), round(pz / p, 5)],
-        }
+    return {
+        "label": pdg_label(int(pdg)),
+        "pdg": int(pdg),
+        "eta": round(eta, 4),
+        "phi": round(phi, 4),
+        "E": round(max(E, 0.0), 3),
+        "dir": [round(px / p, 5), round(py / p, 5), round(pz / p, 5)],
+    }
+
+
+def mc_particles_from_truth(tl_row: np.ndarray) -> list[dict]:
+    """Fallback MC overlay: charged-pion four-vector from ``truth_labels`` 11–14."""
+    part = mc_particle_from_kinematics(
+        tl_row[11], tl_row[12], tl_row[13], tl_row[14], pdg=211
+    )
+    if part is None:
+        return []
+    part["label"] = "π (truth_labels)"
+    return [part]
+
+
+def build_playlist_file_index(raw_playlist_dir: Path) -> list[tuple[Path, int, int]]:
+    """Map sorted ROOT files to global playlist offsets.
+
+    Returns ``[(root_path, global_offset, n_events), ...]``. Global indices in
+    ``meta.json`` / ``result.pkl`` refer to this concatenation order (same as
+    baselines and the per-file ``.pb`` concat in ``split_dataset``).
+    """
+    import uproot
+
+    files = sorted(raw_playlist_dir.glob("*.root"))
+    if not files:
+        raise FileNotFoundError(f"No .root files in {raw_playlist_dir}")
+    out: list[tuple[Path, int, int]] = []
+    offset = 0
+    for path in files:
+        with uproot.open(path) as rf:
+            n = int(rf["MasterAnaDev"].num_entries)
+        out.append((path, offset, n))
+        offset += n
+    return out
+
+
+def load_mc_map_from_root(
+    raw_playlist_dir: Path, global_indices: set[int]
+) -> dict[int, list[dict]]:
+    """Load full ``mc_FSPart*`` lists for the requested playlist-global indices."""
+    import uproot
+
+    if not global_indices:
+        return {}
+    file_index = build_playlist_file_index(raw_playlist_dir)
+    # Group needed locals by ROOT file.
+    by_file: dict[Path, list[tuple[int, int]]] = {}  # path -> [(global, local), ...]
+    for gidx in global_indices:
+        for path, offset, n in file_index:
+            if offset <= gidx < offset + n:
+                by_file.setdefault(path, []).append((gidx, gidx - offset))
+                break
+        else:
+            print(f"  WARNING: global index {gidx} out of range for {raw_playlist_dir}")
+
+    branches = [
+        "mc_FSPartPx",
+        "mc_FSPartPy",
+        "mc_FSPartPz",
+        "mc_FSPartE",
+        "mc_FSPartPDG",
     ]
+    result: dict[int, list[dict]] = {}
+    for path, pairs in sorted(by_file.items(), key=lambda kv: kv[0].name):
+        locals_needed = sorted({loc for _, loc in pairs})
+        print(
+            f"  MC ROOT {path.name}: {len(pairs)} events "
+            f"(local {locals_needed[0]}..{locals_needed[-1]})"
+        )
+        with uproot.open(path) as rf:
+            tree = rf["MasterAnaDev"]
+            # Load the whole file's FS arrays once (typical ~2e5 events).
+            arrays = tree.arrays(branches, library="np")
+        for gidx, loc in pairs:
+            px = arrays["mc_FSPartPx"][loc]
+            py = arrays["mc_FSPartPy"][loc]
+            pz = arrays["mc_FSPartPz"][loc]
+            E = arrays["mc_FSPartE"][loc]
+            pdg = arrays["mc_FSPartPDG"][loc]
+            parts: list[dict] = []
+            for i in range(len(pdg)):
+                part = mc_particle_from_kinematics(
+                    px[i], py[i], pz[i], E[i], int(pdg[i])
+                )
+                if part is not None:
+                    parts.append(part)
+            result[gidx] = parts
+    return result
 
 
 def load_dataset_events(pb_path: Path, meta_path: Path | None) -> list[dict]:
-    """Load one ``0.pb`` (+ optional ``meta.json``) into a list of event dicts."""
+    """Load one ``0.pb`` (+ optional ``meta.json``) into a list of event dicts.
+
+    ``mc`` is left empty here; ``attach_mc_particles`` fills it from ROOT (or
+    the ``truth_labels`` pion fallback).
+    """
     blob = torch.load(pb_path, weights_only=False, map_location="cpu")
     per_event = list(blob["data"].unbind())
     truth = blob.get("truth_labels")
@@ -217,24 +336,95 @@ def load_dataset_events(pb_path: Path, meta_path: Path | None) -> list[dict]:
     events = []
     for i, feat in enumerate(per_event):
         arr = feat.detach().cpu().numpy()
-        mc = (
-            mc_particles_from_truth(truth_np[i])
-            if truth_np is not None and i < len(truth_np)
-            else []
-        )
         events.append(
             {
                 "pid_class": int(pid_classes[i]) if i < len(pid_classes) else -1,
                 "bin_value": _to_float(bin_values[i]) if i < len(bin_values) else None,
                 "global_index": int(global_idx[i]) if i < len(global_idx) else None,
                 "particles": event_to_particles(arr),
-                "mc": mc,
+                "mc": [],
+                "_truth_row": truth_np[i] if truth_np is not None and i < len(truth_np) else None,
             }
         )
     return events
 
 
-def build_payload(input_dir: Path) -> dict:
+def attach_mc_particles(
+    tasks_out: list[dict],
+    *,
+    raw_dir: Path | None,
+    playlist: str | None,
+) -> str:
+    """Fill each event's ``mc`` list from ROOT ``mc_FSPart*`` (or pion fallback).
+
+    Returns a short status string describing the MC source used.
+    """
+    all_events: list[dict] = [
+        ev
+        for t in tasks_out
+        for b in t["bins"]
+        for evs in b["classes"].values()
+        for ev in evs
+    ]
+    if not all_events:
+        return "none (no events)"
+
+    mc_map: dict[int, list[dict]] = {}
+    source = "truth_labels pion fallback"
+    raw_playlist = None
+    if raw_dir is not None and playlist:
+        raw_playlist = raw_dir / playlist
+        if raw_playlist.is_dir():
+            needed = {
+                int(ev["global_index"])
+                for ev in all_events
+                if ev.get("global_index") is not None
+            }
+            print(
+                f"  Loading MC FS particles from {raw_playlist} "
+                f"({len(needed)} unique global indices)…"
+            )
+            try:
+                mc_map = load_mc_map_from_root(raw_playlist, needed)
+                source = f"mc_FSPart* from {raw_playlist}"
+            except Exception as exc:  # noqa: BLE001 — keep viewer buildable
+                print(f"  WARNING: failed to load MC from ROOT ({exc}); using fallback")
+                mc_map = {}
+                source = f"truth_labels pion fallback (ROOT error: {exc})"
+        else:
+            print(f"  WARNING: raw playlist dir not found: {raw_playlist}")
+            source = "truth_labels pion fallback (raw dir missing)"
+    else:
+        print("  No --raw-dir/playlist; using truth_labels pion fallback for MC overlay")
+
+    n_full = n_fallback = n_empty = 0
+    for ev in all_events:
+        gidx = ev.get("global_index")
+        if gidx is not None and int(gidx) in mc_map:
+            ev["mc"] = mc_map[int(gidx)]
+            n_full += 1
+        else:
+            tl = ev.pop("_truth_row", None)
+            if tl is not None:
+                ev["mc"] = mc_particles_from_truth(tl)
+            if ev["mc"]:
+                n_fallback += 1
+            else:
+                n_empty += 1
+            continue
+        ev.pop("_truth_row", None)
+
+    # Drop any leftover private fields.
+    for ev in all_events:
+        ev.pop("_truth_row", None)
+
+    print(
+        f"  MC attach: full_FS={n_full}, pion_fallback={n_fallback}, empty={n_empty}"
+    )
+    return source
+
+
+def build_payload(input_dir: Path, raw_dir: Path | None = None) -> dict:
     """Walk the manifest (or glob) and assemble the embedded JSON payload."""
     manifest_path = input_dir / "manifest.json"
     tasks_out: list[dict] = []
@@ -369,6 +559,12 @@ def build_payload(input_dir: Path) -> dict:
                 else f"{mo['label']} [{mo['run']}]"
             )
 
+    playlist = payload_meta.get("playlist") or "1A"
+    mc_source = attach_mc_particles(
+        tasks_out, raw_dir=raw_dir, playlist=playlist
+    )
+    payload_meta["mc_source"] = mc_source
+
     return {
         "meta": payload_meta,
         "pid_names": PID_NAMES,
@@ -468,7 +664,7 @@ _HTML_TEMPLATE = r"""<!DOCTYPE html>
   </div>
   <div class="ctrl">
     <label>Overlay</label>
-    <label class="chk"><input type="checkbox" id="showmc"> Show MC truth (&pi;)</label>
+    <label class="chk"><input type="checkbox" id="showmc"> Show MC truth particles</label>
   </div>
 </div>
 
@@ -646,20 +842,30 @@ function build3D(events){
       hoverinfo:'text', text:['estimated vertex (μ/γ arrow origin)'] });
   }
 
-  // MC-truth overlay (pion direction from truth four-vector)
+  // MC-truth overlay: all MC final-state particles as one category, drawn as
+  // dashed arrows from the vertex (length scaled by energy), with hover labels.
   if(state.showMC && ev.mc && ev.mc.length){
+    const McMax=Math.max(1e-6,...ev.mc.map(m=>m.E));
+    const sx=[],sy=[],sz=[],cx=[],cy=[],cz=[],cu=[],cv=[],cw=[],
+          tx=[],ty=[],tz=[],ttext=[];
     ev.mc.forEach(m=>{
-      const len=0.7*scale, d=m.dir;
+      const d=m.dir, len=0.6*scale*(0.45+0.7*Math.sqrt(m.E/McMax));
       const end=[vx+d[0]*len, vy+d[1]*len, vz+d[2]*len];
-      traces.push({ type:'scatter3d', mode:'lines', name:m.label,
-        x:[vx,end[0]], y:[vy,end[1]], z:[vz,end[2]],
-        line:{color:MC_COLOR,width:6,dash:'dash'},
-        hoverinfo:'text', text:[`${m.label}<br>E=${m.E} MeV`] });
-      traces.push({ type:'cone', showlegend:false,
-        x:[end[0]],y:[end[1]],z:[end[2]], u:[d[0]*len],v:[d[1]*len],w:[d[2]*len],
-        anchor:'tip', sizemode:'absolute', sizeref:0.07*scale, showscale:false,
-        colorscale:[[0,MC_COLOR],[1,MC_COLOR]], hoverinfo:'skip' });
+      sx.push(vx,end[0],null); sy.push(vy,end[1],null); sz.push(vz,end[2],null);
+      cx.push(end[0]); cy.push(end[1]); cz.push(end[2]);
+      cu.push(d[0]*len); cv.push(d[1]*len); cw.push(d[2]*len);
+      tx.push(end[0]); ty.push(end[1]); tz.push(end[2]);
+      ttext.push(`MC ${m.label}<br>PDG ${m.pdg}<br>E=${m.E} MeV`);
     });
+    traces.push({ type:'scatter3d', mode:'lines', name:'MC truth', legendgroup:'mc',
+      x:sx,y:sy,z:sz, line:{color:MC_COLOR,width:5,dash:'dash'}, hoverinfo:'skip' });
+    traces.push({ type:'cone', showlegend:false, legendgroup:'mc',
+      x:cx,y:cy,z:cz,u:cu,v:cv,w:cw, anchor:'tip', sizemode:'absolute',
+      sizeref:0.05*scale, showscale:false,
+      colorscale:[[0,MC_COLOR],[1,MC_COLOR]], hoverinfo:'skip' });
+    traces.push({ type:'scatter3d', mode:'markers', showlegend:false, legendgroup:'mc',
+      x:tx,y:ty,z:tz, marker:{size:4,color:MC_COLOR,symbol:'diamond'},
+      hoverinfo:'text', text:ttext });
   }
 
   const layout={
@@ -692,11 +898,13 @@ function build2D(events){
     });
   }
   if(state.showMC && ev.mc && ev.mc.length){
+    const McMax=Math.max(1e-6,...ev.mc.map(m=>m.E));
     traces.push({
-      type:'scatter', mode:'markers', name:'π (MC truth)',
+      type:'scatter', mode:'markers', name:'MC truth',
       x:ev.mc.map(m=>m.eta), y:ev.mc.map(m=>m.phi),
-      marker:{ size:18, color:MC_COLOR, symbol:'star', line:{width:1.5,color:'#fff'} },
-      text:ev.mc.map(m=>`${m.label}<br>E=${m.E} MeV<br>&eta;=${m.eta}, &phi;=${m.phi}`),
+      marker:{ size:ev.mc.map(m=>10+18*Math.sqrt(m.E/McMax)), color:MC_COLOR,
+               symbol:'star', line:{width:1.5,color:'#fff'} },
+      text:ev.mc.map(m=>`MC ${m.label}<br>PDG ${m.pdg}<br>E=${m.E} MeV<br>&eta;=${m.eta}, &phi;=${m.phi}`),
       hoverinfo:'text',
     });
   }
@@ -716,12 +924,12 @@ function updateInfo(events){
   const unit=t.bin_unit||'';
   let bv = (ev.bin_value!=null)? ev.bin_value.toFixed(3)+' '+unit : 'n/a';
   let gi = (ev.global_index!=null)? ev.global_index : 'n/a';
-  const mcAvail = (ev.mc && ev.mc.length) ? 'yes' : 'none';
+  const mcN = (ev.mc && ev.mc.length) ? ev.mc.length : 0;
   infoDiv.innerHTML =
     `<b>${t.title}</b> &nbsp;|&nbsp; bin <b>${b.label}</b> &nbsp;|&nbsp; ` +
     `<b>${state.cls}</b> &nbsp;|&nbsp; event truth: <b>${meaning}</b> (pid ${ev.pid_class}) ` +
     `&nbsp;|&nbsp; bin value: <b>${bv}</b> &nbsp;|&nbsp; particles: <b>${ev.particles.length}</b> ` +
-    `&nbsp;|&nbsp; MC truth &pi;: <b>${mcAvail}</b> &nbsp;|&nbsp; playlist global index: <b>${gi}</b>`;
+    `&nbsp;|&nbsp; MC truth particles: <b>${mcN}</b> &nbsp;|&nbsp; playlist global index: <b>${gi}</b>`;
 }
 
 function buildScores(events){
@@ -854,7 +1062,8 @@ document.addEventListener('keydown', e=>{
   const m=DATA.meta||{};
   document.getElementById('srcline').textContent =
     `source: ${m.source||'?'}  |  playlist ${m.playlist||'?'} / ${m.split||'?'} split` +
-    (m.n_events_per_bin_class? `  |  up to ${m.n_events_per_bin_class} events per bin/class` : '');
+    (m.n_events_per_bin_class? `  |  up to ${m.n_events_per_bin_class} events per bin/class` : '') +
+    (m.mc_source? `  |  MC: ${m.mc_source}` : '');
   buildLegend();
   if((DATA.models||[]).length){
     document.getElementById('scorebar').style.display='flex';
@@ -886,14 +1095,27 @@ def main(argv: list[str] | None = None) -> None:
         default=DEFAULT_OUTPUT,
         help=f"Output HTML (default: {DEFAULT_OUTPUT})",
     )
+    ap.add_argument(
+        "--raw-dir",
+        type=Path,
+        default=DEFAULT_RAW_DIR,
+        help=(
+            "Root of raw MINERvA playlists containing <playlist>/*.root "
+            f"(default: {DEFAULT_RAW_DIR}). Used to join full mc_FSPart* "
+            "lists via playlist_global_index. Pass an empty string to skip."
+        ),
+    )
     args = ap.parse_args(argv)
 
     if not args.input_dir.exists():
         sys.exit(f"Input dir not found: {args.input_dir}")
     out = args.output
+    raw_dir = args.raw_dir
+    if raw_dir is not None and str(raw_dir) == "":
+        raw_dir = None
 
     print(f"Reading demo datasets from {args.input_dir}")
-    payload = build_payload(args.input_dir)
+    payload = build_payload(args.input_dir, raw_dir=raw_dir)
     n_tasks = len(payload["tasks"])
     n_ev = sum(
         len(evs)

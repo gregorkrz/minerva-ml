@@ -763,6 +763,13 @@ def parse_args():
         help="Zero out global/cond feature(s) at these indices (ablation). "
         "E.g. --zero-cond-feature 3 to ablate E_recoil_CCinc",
     )
+    parser.add_argument(
+        "--remove-muon-kinematics",
+        action="store_true",
+        default=False,
+        help="Ablation: zero muon token kinematics (η, φ, log pT, log E; cols 0–3) "
+        "where PID==0. PID and additional features are kept.",
+    )
     # OmniLearned (PET2) arguments
     parser.add_argument(
         "--use-omnilearned",
@@ -1193,6 +1200,20 @@ def create_hyperscale_model(args, task):
     )
 
 
+def zero_muon_kinematics(X, pid_idx=4, muon_pid=0):
+    """Zero kinematic features (cols 0..pid_idx-1) for muon tokens (PID == muon_pid).
+
+    Call before stripping the PID column. Padded slots (PID 0 / zeros) are unchanged
+    in practice. Identifies muons by PID, not sequence index (safe with energy ordering).
+    """
+    muon_mask = X[:, :, pid_idx] == muon_pid
+    if not muon_mask.any():
+        return X
+    X = X.clone()
+    X[:, :, :pid_idx] = X[:, :, :pid_idx].masked_fill(muon_mask.unsqueeze(-1), 0.0)
+    return X
+
+
 def prepare_batch_hyperscale(
     batch,
     device,
@@ -1201,6 +1222,7 @@ def prepare_batch_hyperscale(
     use_cond=False,
     include_E_sum=False,
     zero_cond_feature=None,
+    remove_muon_kinematics=False,
     variant="basic",
 ):
     """Prepare batch for HyperScaleBaseline.
@@ -1212,6 +1234,9 @@ def prepare_batch_hyperscale(
     X = batch["X"].to(device, dtype=torch.float32)
     y = batch["y"].to(device)
     mask = batch["attention_mask"].to(device, dtype=torch.float32)
+
+    if remove_muon_kinematics:
+        X = zero_muon_kinematics(X, pid_idx=pid_idx)
 
     if not use_pid and batch.get("pid") is not None:
         X = torch.cat([X[:, :, :pid_idx], X[:, :, pid_idx + 1 :]], dim=2)
@@ -1261,6 +1286,7 @@ def prepare_batch_bert(
     use_cond=False,
     include_E_sum=False,
     zero_cond_feature=None,
+    remove_muon_kinematics=False,
     energy_order=False,
 ):
     """Prepare batch for BertBaseline (particle tokens + optional global token + padding mask)."""
@@ -1271,8 +1297,12 @@ def prepare_batch_bert(
     # Sort before splitting out PID so the returned pid stays aligned with X.
     # log(E) lives at index BERT_ENERGY_FEATURE_IDX (3), which is before pid_idx (4),
     # so sorting on the full tensor is equivalent to sorting the PID-stripped one.
+    # Ablate muon kinematics *after* sorting so zeroed log(E) does not change order.
     if energy_order:
         X, mask = sort_particles_by_energy(X, mask)
+
+    if remove_muon_kinematics:
+        X = zero_muon_kinematics(X, pid_idx=pid_idx)
 
     pid = None
     if use_pid:
@@ -1312,11 +1342,20 @@ def prepare_batch_bert(
 
 
 def prepare_batch_omnilearned(
-    batch, device, use_cond=False, use_pid=False, pid_idx=4, include_E_sum=False
+    batch,
+    device,
+    use_cond=False,
+    use_pid=False,
+    pid_idx=4,
+    include_E_sum=False,
+    remove_muon_kinematics=False,
 ):
     """Prepare batch for OmniLearned PET2 model input."""
     X = batch["X"].to(device, dtype=torch.float32)
     y = batch["y"].to(device)
+
+    if remove_muon_kinematics:
+        X = zero_muon_kinematics(X, pid_idx=pid_idx)
 
     pid = None
     if use_pid and batch.get("pid") is not None:
@@ -1475,6 +1514,7 @@ def run_calculate_flops(args):
             args.use_pid,
             args.pid_idx,
             include_E_sum=args.include_E_sum,
+            remove_muon_kinematics=args.remove_muon_kinematics,
         )
     elif getattr(args, "use_bert", None):
         inputs = prepare_batch_bert(
@@ -1485,6 +1525,7 @@ def run_calculate_flops(args):
             use_cond=args.use_cond,
             include_E_sum=args.include_E_sum,
             zero_cond_feature=args.zero_cond_feature,
+            remove_muon_kinematics=args.remove_muon_kinematics,
             energy_order=args.bert_energy_order,
         )
     elif getattr(args, "use_hyperscale", None):
@@ -1496,6 +1537,7 @@ def run_calculate_flops(args):
             use_cond=args.use_cond,
             include_E_sum=args.include_E_sum,
             zero_cond_feature=args.zero_cond_feature,
+            remove_muon_kinematics=args.remove_muon_kinematics,
             variant=args.use_hyperscale,
         )
     elif args.cond_only:
@@ -1515,6 +1557,7 @@ def run_calculate_flops(args):
             args.pid_idx,
             include_E_sum=args.include_E_sum,
             zero_cond_feature=args.zero_cond_feature,
+            remove_muon_kinematics=args.remove_muon_kinematics,
         )
 
     wrapper = _FlopsWrapper(model, args, inputs)
@@ -1681,11 +1724,15 @@ def prepare_batch(
     pid_idx=4,
     include_E_sum=False,
     zero_cond_feature=None,
+    remove_muon_kinematics=False,
 ):
     """Prepare batch for model input."""
     X = batch["X"].to(device, dtype=torch.float32)
     y = batch["y"].to(device)
     attention_mask = batch["attention_mask"].to(device, dtype=torch.float32)
+
+    if remove_muon_kinematics:
+        X = zero_muon_kinematics(X, pid_idx=pid_idx)
 
     # Split features into coordinates and continuous features
     pos = X[:, :, :coord_dim]
@@ -1834,6 +1881,7 @@ def evaluate(
                 args.use_pid,
                 args.pid_idx,
                 include_E_sum=args.include_E_sum,
+                remove_muon_kinematics=args.remove_muon_kinematics,
             )
         elif getattr(args, "use_bert", None):
             inputs = prepare_batch_bert(
@@ -1844,6 +1892,7 @@ def evaluate(
                 use_cond=args.use_cond,
                 include_E_sum=args.include_E_sum,
                 zero_cond_feature=args.zero_cond_feature,
+                remove_muon_kinematics=args.remove_muon_kinematics,
                 energy_order=args.bert_energy_order,
             )
         elif getattr(args, "use_hyperscale", None):
@@ -1855,6 +1904,7 @@ def evaluate(
                 use_cond=args.use_cond,
                 include_E_sum=args.include_E_sum,
                 zero_cond_feature=args.zero_cond_feature,
+                remove_muon_kinematics=args.remove_muon_kinematics,
                 variant=args.use_hyperscale,
             )
         elif args.cond_only:
@@ -1874,6 +1924,7 @@ def evaluate(
                 args.pid_idx,
                 include_E_sum=args.include_E_sum,
                 zero_cond_feature=args.zero_cond_feature,
+                remove_muon_kinematics=args.remove_muon_kinematics,
             )
         if use_binned_loss:
             _attach_loss_weight(inputs, batch, device)
@@ -2266,6 +2317,11 @@ def train(args):
     # Count parameters
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Model parameters: {n_params:,}")
+    if args.remove_muon_kinematics:
+        print(
+            "Ablation: --remove-muon-kinematics enabled "
+            "(zero η, φ, log pT, log E on muon tokens with PID==0)."
+        )
     # Setup loss function
     if task.type == "regression":
         if args.log_MSE_loss:
@@ -2466,6 +2522,7 @@ def train(args):
                     args.use_pid,
                     args.pid_idx,
                     include_E_sum=args.include_E_sum,
+                    remove_muon_kinematics=args.remove_muon_kinematics,
                 )
             elif getattr(args, "use_bert", None):
                 inputs = prepare_batch_bert(
@@ -2476,6 +2533,7 @@ def train(args):
                     use_cond=args.use_cond,
                     include_E_sum=args.include_E_sum,
                     zero_cond_feature=args.zero_cond_feature,
+                    remove_muon_kinematics=args.remove_muon_kinematics,
                     energy_order=args.bert_energy_order,
                 )
             elif getattr(args, "use_hyperscale", None):
@@ -2487,6 +2545,7 @@ def train(args):
                     use_cond=args.use_cond,
                     include_E_sum=args.include_E_sum,
                     zero_cond_feature=args.zero_cond_feature,
+                    remove_muon_kinematics=args.remove_muon_kinematics,
                     variant=args.use_hyperscale,
                 )
             elif args.cond_only:
@@ -2506,6 +2565,7 @@ def train(args):
                     args.pid_idx,
                     include_E_sum=args.include_E_sum,
                     zero_cond_feature=args.zero_cond_feature,
+                    remove_muon_kinematics=args.remove_muon_kinematics,
                 )
 
             if use_binned_loss:

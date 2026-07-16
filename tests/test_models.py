@@ -686,6 +686,56 @@ class TestSortParticlesByEnergy:
         assert out["X"].shape == (1, 3, 4)
         assert out["X"][0, :, 3].tolist() == [3.0, 2.0, 1.0]
 
+    def test_remove_muon_kinematics_zeros_only_muon(self):
+        from src.scripts.train import prepare_batch_bert, zero_muon_kinematics
+
+        # cols: η, φ, log pT, log E, PID — muon PID=0, photon PID=1
+        X = torch.tensor(
+            [[[1.0, 2.0, 3.0, 4.0, 0.0], [5.0, 6.0, 7.0, 8.0, 1.0]]],
+            dtype=torch.float32,
+        )
+        out = zero_muon_kinematics(X, pid_idx=4)
+        assert out[0, 0, :4].tolist() == [0.0, 0.0, 0.0, 0.0]
+        assert out[0, 0, 4].item() == 0.0
+        assert out[0, 1].tolist() == [5.0, 6.0, 7.0, 8.0, 1.0]
+
+        batch = {
+            "X": X.clone(),
+            "y": torch.tensor([0.0], dtype=torch.float32),
+            "attention_mask": torch.tensor([[1.0, 1.0]], dtype=torch.float32),
+        }
+        prepared = prepare_batch_bert(
+            batch,
+            torch.device("cpu"),
+            use_pid=True,
+            pid_idx=4,
+            remove_muon_kinematics=True,
+        )
+        assert prepared["X"][0, 0].tolist() == [0.0, 0.0, 0.0, 0.0]
+        assert prepared["X"][0, 1].tolist() == [5.0, 6.0, 7.0, 8.0]
+        assert prepared["pid"][0].tolist() == [0, 1]
+
+        # Energy sort must use true log(E) before ablation zeros it.
+        batch_eo = {
+            "X": torch.tensor(
+                [[[5.0, 6.0, 7.0, 1.0, 1.0], [1.0, 2.0, 3.0, 9.0, 0.0]]],
+                dtype=torch.float32,
+            ),
+            "y": torch.tensor([0.0], dtype=torch.float32),
+            "attention_mask": torch.tensor([[1.0, 1.0]], dtype=torch.float32),
+        }
+        prepared_eo = prepare_batch_bert(
+            batch_eo,
+            torch.device("cpu"),
+            use_pid=True,
+            pid_idx=4,
+            remove_muon_kinematics=True,
+            energy_order=True,
+        )
+        assert prepared_eo["pid"][0].tolist() == [0, 1]
+        assert prepared_eo["X"][0, 0].tolist() == [0.0, 0.0, 0.0, 0.0]
+        assert prepared_eo["X"][0, 1].tolist() == [5.0, 6.0, 7.0, 1.0]
+
 
 class TestBertPidEmbedding:
     def test_prepare_batch_bert_returns_pid_aligned_with_energy_order(self):
