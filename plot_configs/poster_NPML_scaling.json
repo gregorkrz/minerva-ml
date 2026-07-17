@@ -3,7 +3,7 @@
   "models": [
     {"name": "OmniLearned-small",      "color": "#c2410c"},
     {"name": "OmniLearned-small-rw",   "color": "#ff7f0e"},
-    {"name": "OmniLearned-medium",     "color": "#9467bd", "display_name": "OmniLearned-medium-frozen"},
+    {"name": "OmniLearned-medium",     "color": "#9467bd", "display_name": "OL-medium-frozen"},
     {"name": "HyperScale-small",       "color": "#0369a1"},
     {"name": "HyperScale-small-rw",    "color": "#60a5fa", "flop_cut": {"classification": 16.6}, "log_step_cut": {"classification": 4.5}},
     {"name": "HyperScale-medium",      "color": "#86198f", "flop_cut": 17.3, "log_step_cut": {"classification": 4.4, "regression": 3.7}},

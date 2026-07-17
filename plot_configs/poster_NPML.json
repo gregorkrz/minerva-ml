@@ -1,5 +1,5 @@
 {
-  "_comment": "NPML poster / paper small-scale subset (~5M params): OL-small, HyperScale-small, BERT-small, MLP-rw. BDT temporarily disabled.",
+  "_comment": "NPML poster / paper small-scale subset (~5M params): OL-small, HyperScale-small, MLP-rw, BDT-rw.",
   "models": [
     {
       "name": "OmniLearned-small",
@@ -30,13 +30,14 @@
       "flop_xmin": {
         "classification": 14
       }
+    },
+    {
+      "name": "BDT",
+      "color": "#b91c1c",
+      "display_name": "BDT-rw"
     }
   ],
   "_disabled_models": [
-    {
-      "name": "BDT",
-      "color": "#b91c1c"
-    },
     {
       "name": "Transformer-small",
       "color": "#047857",
@@ -49,12 +50,12 @@
       "OmniLearned-small-rw"
     ],
     [
-      "BERT-tiny",
-      "BERT-tiny-rw"
-    ],
-    [
       "HyperScale-small",
       "HyperScale-small-rw"
+    ],
+    [
+      "MLP",
+      "BDT"
     ]
   ],
   "log_steps_xmin": 3.0

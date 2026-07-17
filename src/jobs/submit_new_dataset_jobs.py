@@ -20,6 +20,7 @@ Usage (from repo root):
     python src/jobs/submit_new_dataset_jobs.py --seeds 55 --models HyperScale-small
     python src/jobs/submit_new_dataset_jobs.py --seeds 55 60 61 62 --models BERT-tiny BERT-tiny-rw
     python src/jobs/submit_new_dataset_jobs.py --seeds 55 --models HyperScale-small --tasks regression
+    python src/jobs/submit_new_dataset_jobs.py --seeds 55 --models HyperScale-small --remove-muon-kinematics
     python src/jobs/submit_new_dataset_jobs.py --seeds 55 --models MLP
     python src/jobs/submit_new_dataset_jobs.py --seeds 55 --dry-run
     python src/jobs/submit_new_dataset_jobs.py --list-models
@@ -245,6 +246,7 @@ def build_training_cmd(
     task: str,
     seed: int,
     data_path: str,
+    remove_muon_kinematics: bool = False,
 ) -> str:
     if task == "regression":
         max_steps = spec.max_steps_regression
@@ -263,6 +265,7 @@ def build_training_cmd(
         grad_accum_steps=spec.grad_accum_steps,
         data_path=data_path,
         fp16=spec.fp16,
+        remove_muon_kinematics=remove_muon_kinematics,
     )
 
 
@@ -272,6 +275,7 @@ def iter_training_runs(
     seeds: tuple[int, ...],
     tasks: tuple[str, ...],
     data_path: str,
+    remove_muon_kinematics: bool = False,
 ) -> list[tuple[str, str, str]]:
     """Return (label, walltime, train_cmd) in sweep order."""
     runs: list[tuple[str, str, str]] = []
@@ -284,8 +288,14 @@ def iter_training_runs(
             )
             for seed in seeds:
                 label = f"{spec.plot_key}_{task}_seed{seed}"
+                if remove_muon_kinematics:
+                    label += "_noMuonKin"
                 cmd = build_training_cmd(
-                    spec, task=task, seed=seed, data_path=data_path
+                    spec,
+                    task=task,
+                    seed=seed,
+                    data_path=data_path,
+                    remove_muon_kinematics=remove_muon_kinematics,
                 )
                 runs.append((label, walltime, cmd))
     return runs
@@ -380,6 +390,14 @@ def main() -> None:
         help=f"Preprocessed dataset root (default: {DEFAULT_DATA_PATH})",
     )
     parser.add_argument(
+        "--remove-muon-kinematics",
+        action="store_true",
+        help=(
+            "Ablation: zero muon-token kinematics (η, φ, log pT, log E). "
+            "Tags run names with _noMuonKin."
+        ),
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Write .slurm files but do not call sbatch",
@@ -402,6 +420,7 @@ def main() -> None:
         seeds=seeds,
         tasks=tasks,
         data_path=args.data_path,
+        remove_muon_kinematics=args.remove_muon_kinematics,
     )
     ts = dt.now().strftime("%Y%m%d_%H%M%S")
 

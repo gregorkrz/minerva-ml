@@ -1,24 +1,29 @@
 #!/usr/bin/env python3
 """
-Copy selected evaluation PDFs into ``figures_latex/`` (root and subfolders) with
-stable names for a LaTeX paper.
+Copy selected evaluation PDFs into ``figures_latex/<config>/`` with stable names
+for a LaTeX paper.
+
+Pass ``--config`` (same names as ``generate_comparison_plots.sh``) so sources are
+taken from ``plots/<config>/`` and outputs go to ``figures_latex/<config>/`` —
+e.g. ``--config V1Paper`` reads ``plots/V1Paper/`` and writes
+``figures_latex/V1Paper/``. Override with ``--plots-root`` / ``--figures-root``.
 
 Joint classification/regression training curves from ``plot_steps`` go directly
-under ``figures_latex/`` (not under ``regression/``). Other regression plots still
-go to ``figures_latex/regression/``; all classification plots to ``classification/``.
+under the figures root (not under ``regression/``). Other regression plots still
+go to ``regression/``; all classification plots to ``classification/``.
 
 Classification figures are taken from **single-page** PDFs under
-``plots/classification/light/`` (from ``python -m src.eval.plot_classification_light``),
+``classification/light/`` (from ``python -m src.eval.plot_classification_light``),
 not from the large multi-page ``pions/`` or ``q3/`` tagging bundles. Metrics vs
 hadronic ``W`` are copied when those light PDFs exist (they require ``W``-binned
 data in the classification pickle).
 
-Source layout matches ``src.eval`` plotting scripts (default under repo ``plots/``):
-  - ``plots/regression/`` — ``plot_regression.py``
-  - ``plots/steps_combined/`` — ``plot_steps.py`` (classification | regression, one legend)
-  - ``plots/classification/steps/`` — ``plot_steps.py`` (only with ``--separate-panels``)
-  - ``plots/regression/steps/`` — ``plot_steps.py`` (only with ``--separate-panels``)
-  - ``plots/classification/light/`` — ``plot_classification_light.py``
+Source layout matches ``src.eval`` plotting scripts under the chosen plots root:
+  - ``regression/`` — ``plot_regression.py``
+  - ``steps_combined/`` — ``plot_steps.py`` (classification | regression, one legend)
+  - ``classification/steps/`` — ``plot_steps.py`` (only with ``--separate-panels``)
+  - ``regression/steps/`` — ``plot_steps.py`` (only with ``--separate-panels``)
+  - ``classification/light/`` — ``plot_classification_light.py``
 
 Regression copies are plain file copies. Classification light copies are plain copies
 (no PDF page extraction).
@@ -33,6 +38,42 @@ _SCRIPT_DIR = Path(__file__).resolve().parent
 _PROJECT_ROOT = _SCRIPT_DIR.parents[1]
 _DEFAULT_PLOTS = _PROJECT_ROOT / "plots"
 _DEFAULT_FIGURES = _PROJECT_ROOT / "figures_latex"
+_PLOT_CONFIGS_DIR = _PROJECT_ROOT / "plot_configs"
+
+
+def resolve_plot_config(config: str) -> tuple[Path, str]:
+    """Resolve ``--config`` to ``(json_path, slug)``.
+
+    Accepts a basename (``V1Paper``), a ``.json`` filename, or a path to a JSON
+    under ``plot_configs/`` (or elsewhere). Slug is the stem used for
+    ``plots/<slug>/`` by ``generate_comparison_plots.sh``.
+    """
+    raw = Path(config)
+    candidates: list[Path] = []
+    if raw.is_file():
+        candidates.append(raw.resolve())
+    else:
+        name = raw.name
+        if not name.endswith(".json"):
+            name = f"{name}.json"
+        candidates.append((_PLOT_CONFIGS_DIR / name).resolve())
+        if raw.suffix == ".json" or "/" in config or "\\" in config:
+            candidates.append((_PROJECT_ROOT / raw).resolve())
+
+    seen: set[Path] = set()
+    for path in candidates:
+        if path in seen:
+            continue
+        seen.add(path)
+        if path.is_file():
+            return path, path.stem
+
+    available = sorted(p.stem for p in _PLOT_CONFIGS_DIR.glob("*.json"))
+    avail_msg = ", ".join(available) if available else "(none found)"
+    raise FileNotFoundError(
+        f"Plot config not found for --config {config!r}. "
+        f"Tried: {', '.join(str(p) for p in seen)}. Available: {avail_msg}"
+    )
 
 # Combined clf | reg panels from ``plots/steps_combined/`` → ``figures_latex/<name>`` (root).
 FIGURES_LATEX_ROOT_COPIES = [
@@ -88,21 +129,36 @@ CLASSIFICATION_COPIES_OPTIONAL_W = [
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
+        "-c",
+        "--config",
+        type=str,
+        default=None,
+        metavar="NAME",
+        help=(
+            "Plot config name or JSON path (e.g. V1Paper or plot_configs/V1Paper.json). "
+            "Sets source to plots/<name>/ and output to figures_latex/<name>/ "
+            "unless --plots-root / --figures-root are given."
+        ),
+    )
+    parser.add_argument(
         "--plots-root",
         "--out-root",
         type=Path,
-        default=_DEFAULT_PLOTS,
+        default=None,
         dest="plots_root",
         help=(
-            "Root directory for plot PDFs (default: plots/ under project). "
-            "Same layout as --plots-dir for src.eval scripts."
+            "Root directory for plot PDFs (same layout as --plots-dir for src.eval). "
+            "Default: plots/<config>/ when --config is set, else plots/."
         ),
     )
     parser.add_argument(
         "--figures-root",
         type=Path,
-        default=_DEFAULT_FIGURES,
-        help=f"Output directory (default: {_DEFAULT_FIGURES})",
+        default=None,
+        help=(
+            "Output directory. Default: figures_latex/<config>/ when --config is set, "
+            f"else {_DEFAULT_FIGURES}."
+        ),
     )
     parser.add_argument(
         "--dry-run",
@@ -110,8 +166,29 @@ def main() -> None:
         help="Print planned actions only",
     )
     args = parser.parse_args()
-    plots_root = args.plots_root.resolve()
-    figures_root = args.figures_root.resolve()
+
+    config_slug: str | None = None
+    if args.config is not None:
+        try:
+            config_path, config_slug = resolve_plot_config(args.config)
+        except FileNotFoundError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            sys.exit(1)
+        print(f"Plot config: {config_path} (slug={config_slug})")
+
+    if args.plots_root is not None:
+        plots_root = args.plots_root.resolve()
+    elif config_slug is not None:
+        plots_root = (_DEFAULT_PLOTS / config_slug).resolve()
+    else:
+        plots_root = _DEFAULT_PLOTS.resolve()
+
+    if args.figures_root is not None:
+        figures_root = args.figures_root.resolve()
+    elif config_slug is not None:
+        figures_root = (_DEFAULT_FIGURES / config_slug).resolve()
+    else:
+        figures_root = _DEFAULT_FIGURES.resolve()
 
     def dest(subdir: str, name: str) -> Path:
         return figures_root / subdir / name

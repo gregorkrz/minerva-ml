@@ -4,7 +4,7 @@ This repository contains the data processing and model training code used for ML
 
 > **Evaluation plots** — browse the latest model-comparison figures (classification, regression, training curves) by configuration:
 > **[minerva-ml plots](https://d1to0n5578l1po.cloudfront.net/index.html)**
-> · **[Event viewer](https://d1to0n5578l1po.cloudfront.net/event_viewer.html)**
+> · **[Event viewer](https://d1to0n5578l1po.cloudfront.net/event_viewer.html)** *(work in progress)*
 
 ## Dataset
 
@@ -437,11 +437,14 @@ Plotting code lives under `src.eval.classification_plots` and `src.eval.e_availa
 
 #### Figures for a LaTeX paper
 
-Copies or single-page extracts into `figures_latex/`:
+Copies selected PDFs from `plots/<config>/` into `figures_latex/<config>/` with
+stable names. Pass the same config name used for `generate_comparison_plots.sh`:
 
 ```bash
-python -m src.scripts.copy_figures_for_paper
-# or: python -m src.scripts.copy_figures_for_paper --dry-run
+python -m src.scripts.copy_figures_for_paper --config V1Paper
+# -> figures_latex/V1Paper/
+# or: python -m src.scripts.copy_figures_for_paper -c V1Paper --dry-run
+# optional: --plots-root plots/V1Paper --figures-root figures/V1Paper
 ```
 
 ## 6) Event displays
