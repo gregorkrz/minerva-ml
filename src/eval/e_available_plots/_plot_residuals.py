@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from src.eval._constants import plot_model_label
-from src.eval._legend import shared_figure_legend
+from src.eval._legend import layout_legend_with_column_stacks, shared_figure_legend
 
 from ._grouped import _resolve_color_map, _SEED_SEP
 from ._constants import (
@@ -226,6 +226,10 @@ def plot_residuals_by_q3(
     data: dict | None = None,
     transform=None,
     suppress_errors: bool = False,
+    *,
+    label_fn: Callable[[str], str] | None = None,
+    legend_label_order: list[str] | None = None,
+    legend_column_stacks: list[list[str]] | None = None,
 ) -> plt.Figure:
     """Per-q3-bin residual and ratio histograms (E_reco−E_true and E_reco/E_true).
 
@@ -246,6 +250,8 @@ def plot_residuals_by_q3(
     """
     if q3_bins is None:
         q3_bins = [0, 0.3, 0.6, 1.2, 1.8, 2.4, 3.0, 100]
+    if label_fn is None:
+        label_fn = plot_model_label
 
     if data is None:
         data = load_eval_data(
@@ -363,7 +369,7 @@ def plot_residuals_by_q3(
                 ratio_model = reco[valid] / true[valid]
                 mlab = _model_base(model)
                 mcol = color_by_model_base.get(mlab, "tab:gray")
-                mlab_disp = plot_model_label(mlab)
+                mlab_disp = label_fn(mlab)
                 ax[0, i].hist(
                     reco[valid] - true[valid],
                     bins=residual_bins,
@@ -415,9 +421,20 @@ def plot_residuals_by_q3(
         for h, lab in zip(h0, lab0):
             if lab not in by_label:
                 by_label[lab] = h
-        sorted_labs = sorted(by_label.keys())
+        if legend_label_order:
+            sorted_labs = [lab for lab in legend_label_order if lab in by_label]
+            sorted_labs.extend(lab for lab in by_label if lab not in sorted_labs)
+        else:
+            sorted_labs = sorted(by_label.keys())
         sorted_handles = [by_label[lab] for lab in sorted_labs]
-        ncol = min(len(sorted_handles), 5)
+        if legend_column_stacks:
+            sorted_handles, sorted_labs, ncol = layout_legend_with_column_stacks(
+                sorted_handles,
+                sorted_labs,
+                tuple(tuple(s) for s in legend_column_stacks),
+            )
+        else:
+            ncol = min(len(sorted_handles), 5)
         fig.legend(
             sorted_handles,
             sorted_labs,

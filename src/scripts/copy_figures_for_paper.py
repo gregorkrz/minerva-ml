@@ -24,9 +24,10 @@ Source layout matches ``src.eval`` plotting scripts under the chosen plots root:
   - ``classification/steps/`` — ``plot_steps.py`` (only with ``--separate-panels``)
   - ``regression/steps/`` — ``plot_steps.py`` (only with ``--separate-panels``)
   - ``classification/light/`` — ``plot_classification_light.py``
+  - ``small_paper/`` — ``plot_small_paper.py`` (TPR kinematics + CCNπ ROC-by-W)
 
-Regression copies are plain file copies. Classification light copies are plain copies
-(no PDF page extraction).
+Regression copies are plain file copies. Classification light / small_paper copies are
+plain copies (no PDF page extraction).
 """
 
 import argparse
@@ -123,6 +124,26 @@ CLASSIFICATION_COPIES_OPTIONAL_W = [
     ("classification/light/eval_classification_light_cc1pi_W_1A.pdf", "CC1PiPM_W.pdf"),
     ("classification/light/eval_classification_light_cc1pi0_W_1A.pdf", "CC1Pi0_W.pdf"),
     ("classification/light/eval_classification_light_ccnpi_W_1A.pdf", "CCNPiPM_W.pdf"),
+]
+
+# From ``plot_small_paper`` (optional — requires small_paper regen; skip if missing).
+SMALL_PAPER_COPIES_OPTIONAL = [
+    (
+        "small_paper/classification_tpr_at_fixed_fpr_baseline_1A.pdf",
+        "classification/TPR_fixed_fpr_baseline_1A.pdf",
+    ),
+    (
+        "small_paper/classification_tpr_at_perbin_baseline_fpr_1A.pdf",
+        "classification/TPR_perbin_baseline_fpr_1A.pdf",
+    ),
+    (
+        "small_paper/ccnpi_roc_with_cut_by_W_1A.pdf",
+        "classification/CCNPiPM_ROC_by_W_1A.pdf",
+    ),
+    (
+        "small_paper/ccnpi_roc_with_cut_by_W_core_1A.pdf",
+        "classification/CCNPiPM_ROC_by_W_core_1A.pdf",
+    ),
 ]
 
 
@@ -243,6 +264,21 @@ def main() -> None:
         if not src.is_file():
             print(
                 f"WARNING: skip (no source file — run light plots with W data?): {src}"
+            )
+            continue
+        if args.dry_run:
+            print(f"  would copy {src} -> {d}")
+            continue
+        d.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, d)
+        print(f"  copied {src.name} -> {d}")
+
+    for rel, dest_rel in SMALL_PAPER_COPIES_OPTIONAL:
+        src = plots_root / rel
+        d = figures_root / dest_rel
+        if not src.is_file():
+            print(
+                f"WARNING: skip (no source file — run plot_small_paper?): {src}"
             )
             continue
         if args.dry_run:

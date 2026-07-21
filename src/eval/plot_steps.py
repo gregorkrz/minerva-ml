@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Training curves: log10(FLOPs) vs validation loss and log10(steps) vs validation loss.
 
-BDT models (``BDT*``) appear as **horizontal dashed lines** (with seed error bands)
+BDT models (``BDT*``) are excluded from steps / FLOPs panels (see
+``is_steps_plot_excluded_model``). Other horizontal refs can still appear as
+**horizontal dashed lines** (with seed error bands)
 on classification and regression FLOPs and steps panels at mean final validation loss.
 The cut-based reco baseline (``Reco-baseline`` / Cut baseline) is never plotted.
 
@@ -540,6 +542,7 @@ def _validation_loss_y_limits(
     flop_cuts: dict[str, float] | None = None,
     flop_xmins: dict[str, float] | None = None,
     global_flops_xmin: float | None = None,
+    ignore_flops_xmin: set[str] | None = None,
     log_step_cuts: dict[str, float] | None = None,
     flops_per_step: dict[str, float] | None = None,
     pad_fraction_bottom: float = _VAL_LOSS_YLIM_PAD_BOTTOM,
@@ -587,6 +590,9 @@ def _validation_loss_y_limits(
                 global_flops_xmin is not None
                 and flops_per_step
                 and model in flops_per_step
+                and (
+                    ignore_flops_xmin is None or model not in ignore_flops_xmin
+                )
             ):
                 log10_cum_flops = np.log10(st_arr * flops_per_step[model] + 1.0)
                 flop_mask = log10_cum_flops >= global_flops_xmin
@@ -633,17 +639,24 @@ def _autoscale_x_from_plotted_data(
     *,
     flops_xmin: float | None = None,
     log_steps_xmin: float | None = None,
+    log_steps_xmax: float | None = None,
 ) -> None:
     """Recompute x limits from plotted data; keep the current y range."""
     ymin, ymax = ax.get_ylim()
     ax.relim()
     ax.autoscale_view(scalex=True, scaley=False)
+    data_xmin, data_xmax = ax.get_xlim()
+    xmin, xmax = data_xmin, data_xmax
     if flops_xmin is not None:
-        _, xmax = ax.get_xlim()
-        ax.set_xlim(flops_xmin, xmax)
+        # Keep a configured FLOPs floor, but expand left if plotted data goes below it.
+        xmin = min(flops_xmin, data_xmin)
     if log_steps_xmin is not None:
-        _, xmax = ax.get_xlim()
-        ax.set_xlim(log_steps_xmin, xmax)
+        # Same for steps: allow models that ignore the floor to pull the axis left.
+        xmin = min(log_steps_xmin, data_xmin)
+    if log_steps_xmax is not None:
+        xmax = log_steps_xmax
+    if flops_xmin is not None or log_steps_xmin is not None or log_steps_xmax is not None:
+        ax.set_xlim(xmin, xmax)
     ax.set_ylim(ymin, ymax)
 
 
@@ -745,6 +758,9 @@ def _draw_flops_curves(
     )
     flop_cuts = model_curve_cuts.flop_cut if model_curve_cuts is not None else {}
     flop_xmins = model_curve_cuts.flop_xmin if model_curve_cuts is not None else {}
+    ignore_flops_xmin = (
+        model_curve_cuts.ignore_flops_xmin if model_curve_cuts is not None else set()
+    )
 
     for model, series_list in curve_runs.items():
         color = colors.get(model, "tab:gray")
@@ -768,6 +784,14 @@ def _draw_flops_curves(
             mean_loss,
             sigma_loss,
             min_log10_flop=flop_xmins.get(model),
+        )
+        # Global config ``flops_xmin`` truncates every curve (unless ignored).
+        series_flops_xmin = None if model in ignore_flops_xmin else flops_xmin
+        x, mean_loss, sigma_loss = _apply_flop_xmin_mask(
+            x,
+            mean_loss,
+            sigma_loss,
+            min_log10_flop=series_flops_xmin,
         )
         x, mean_loss, sigma_loss = _apply_flop_cut_mask(
             x,
@@ -800,6 +824,7 @@ def _draw_flops_curves(
         flop_cuts=flop_cuts,
         flop_xmins=flop_xmins,
         global_flops_xmin=flops_xmin,
+        ignore_flops_xmin=ignore_flops_xmin,
         flops_per_step=flops_per_step,
     )
     if effective_ylim:
@@ -825,6 +850,7 @@ def _plot_steps_vs_loss(
     figsize: tuple[float, float] = (8, 5),
     global_flops_xmin: float | None = None,
     log_steps_xmin: float | None = None,
+    log_steps_xmax: float | None = None,
     curve_end: CurveEndConfig | None = None,
     model_curve_cuts: ModelCurveCuts | None = None,
     horizontal_ref_models: set[str] | None = None,
@@ -842,6 +868,7 @@ def _plot_steps_vs_loss(
         ylabel=ylabel,
         global_flops_xmin=global_flops_xmin,
         log_steps_xmin=log_steps_xmin,
+        log_steps_xmax=log_steps_xmax,
         curve_end=curve_end,
         model_curve_cuts=model_curve_cuts,
         horizontal_ref_models=horizontal_ref_models,
@@ -893,6 +920,9 @@ def _draw_steps_curves(
     log_step_cuts = (
         model_curve_cuts.log_step_cut if model_curve_cuts is not None else {}
     )
+    ignore_log_steps_xmin = (
+        model_curve_cuts.ignore_log_steps_xmin if model_curve_cuts is not None else set()
+    )
 
     for model, series_list in curve_runs.items():
         color = colors.get(model, "tab:gray")
@@ -907,38 +937,33 @@ def _draw_steps_curves(
             sigma_loss,
             max_step=model_step_cutoffs.get(model),
         )
-        # flop_xmin / flops_xmin apply on FLOPs panels only; steps use log_steps_xmin.
-        if fps is not None:
-            if flop_cuts.get(model) is not None:
-                steps_grid, mean_loss, sigma_loss = _apply_flop_cut_step_mask(
-                    steps_grid,
-                    mean_loss,
-                    sigma_loss,
-                    flops_per_step=fps,
-                    max_log10_flop=flop_cuts.get(model),
-                )
-            elif log_step_cuts.get(model) is not None:
-                steps_grid, mean_loss, sigma_loss = _apply_log_step_cut_mask(
-                    steps_grid,
-                    mean_loss,
-                    sigma_loss,
-                    max_log10_step=log_step_cuts.get(model),
-                )
-        elif log_step_cuts.get(model) is not None:
+        # On steps panels prefer ``log_step_cut``; fall back to flop_cut→step mapping.
+        if log_step_cuts.get(model) is not None:
             steps_grid, mean_loss, sigma_loss = _apply_log_step_cut_mask(
                 steps_grid,
                 mean_loss,
                 sigma_loss,
                 max_log10_step=log_step_cuts.get(model),
             )
+        elif fps is not None and flop_cuts.get(model) is not None:
+            steps_grid, mean_loss, sigma_loss = _apply_flop_cut_step_mask(
+                steps_grid,
+                mean_loss,
+                sigma_loss,
+                flops_per_step=fps,
+                max_log10_flop=flop_cuts.get(model),
+            )
         if len(steps_grid) == 0:
             continue
         log_steps_plot = np.log10(steps_grid + 1)
+        series_xmin = (
+            None if model in ignore_log_steps_xmin else log_steps_xmin
+        )
         log_steps_plot, mean_loss, sigma_loss = _mask_log_steps_series(
             log_steps_plot,
             mean_loss,
             sigma_loss,
-            log_steps_xmin=log_steps_xmin,
+            log_steps_xmin=series_xmin,
             log_steps_xmax=log_steps_xmax,
         )
         if len(log_steps_plot) == 0:
@@ -979,7 +1004,9 @@ def _draw_steps_curves(
         steps_xmin = _global_flops_xmin_as_log_steps(
             global_flops_xmin, curve_runs, flops_per_step
         )
-    _autoscale_x_from_plotted_data(ax, log_steps_xmin=steps_xmin)
+    _autoscale_x_from_plotted_data(
+        ax, log_steps_xmin=steps_xmin, log_steps_xmax=log_steps_xmax
+    )
 
 
 def _strip_inset_axis_decorations(ax: plt.Axes) -> None:
@@ -1284,7 +1311,7 @@ def _plot_combined_flops_row(
         ylim_c,
         "Classification",
         label_fn,
-        flops_xmin=None,
+        flops_xmin=flops_xmin,
         step_cutoff=step_cutoff,
         curve_end=curve_end,
         model_curve_cuts=model_curve_cuts_c,
@@ -1332,6 +1359,7 @@ def _plot_combined_steps_row(
     label_fn: Callable[[str], str] | None = None,
     flops_xmin: float | None = None,
     log_steps_xmin: float | None = None,
+    log_steps_xmax: float | None = None,
     legend_label_order: list[str] | None = None,
     legend_column_stacks: list[list[str]] | None = None,
     curve_end: CurveEndConfig | None = None,
@@ -1376,6 +1404,7 @@ def _plot_combined_steps_row(
         None,
         label_fn=label_fn,
         log_steps_xmin=log_steps_xmin,
+        log_steps_xmax=log_steps_xmax,
         global_flops_xmin=flops_xmin,
         curve_end=curve_end,
         model_curve_cuts=model_curve_cuts_r,
@@ -1427,6 +1456,7 @@ def _plot_variant_bundle(
     step_cutoff: int | None = None,
     flops_xmin: float | None = None,
     log_steps_xmin: float | None = None,
+    log_steps_xmax: float | None = None,
     label_fn: Callable[[str], str] | None = None,
     legend_label_order: list[str] | None = None,
     legend_column_stacks: list[list[str]] | None = None,
@@ -1508,6 +1538,7 @@ def _plot_variant_bundle(
         label_fn,
         flops_xmin=flops_xmin,
         log_steps_xmin=log_steps_xmin,
+        log_steps_xmax=log_steps_xmax,
         legend_label_order=legend_label_order,
         legend_column_stacks=legend_column_stacks,
         curve_end=curve_end,
@@ -1530,7 +1561,7 @@ def _plot_variant_bundle(
             legend_label_order=legend_label_order,
             ylabel="Validation loss (classification)",
             figsize=_SINGLE_PANEL_FIGSIZE,
-            flops_xmin=None,
+            flops_xmin=flops_xmin,
             step_cutoff=step_cutoff,
             curve_end=curve_end,
             model_curve_cuts=model_curve_cuts_c,
@@ -1583,6 +1614,7 @@ def _plot_variant_bundle(
             figsize=_SINGLE_PANEL_FIGSIZE,
             global_flops_xmin=flops_xmin,
             log_steps_xmin=log_steps_xmin,
+            log_steps_xmax=log_steps_xmax,
             curve_end=curve_end,
             model_curve_cuts=model_curve_cuts_r,
             horizontal_ref_models=horizontal_ref_models_r,
@@ -1601,7 +1633,7 @@ def _plot_variant_bundle(
         ylim_c,
         clf_out / "log_flops_vs_val_loss.pdf",
         legend_outside=True,
-        flops_xmin=None,
+        flops_xmin=flops_xmin,
         step_cutoff=step_cutoff,
         curve_end=curve_end,
         model_curve_cuts=model_curve_cuts_c,
@@ -1713,7 +1745,7 @@ def write_classification_val_loss_log_flops_steps_pdf(
         "",
         label_fn=label_fn,
         ylabel="Validation loss (classification)",
-        flops_xmin=None,
+        flops_xmin=flops_xmin,
         step_cutoff=step_cutoff,
         curve_end=curve_end,
         model_curve_cuts=model_curve_cuts,
@@ -1844,6 +1876,8 @@ def main(argv: list[str] | None = None) -> None:
         )
         config_horizontal_refs_c = _config_horizontal_ref_names(cfg, "classification")
         config_horizontal_refs_r = _config_horizontal_ref_names(cfg, "regression")
+        ylim_c = cfg.ylim_classification
+        ylim_r = cfg.ylim_regression
         _plot_variant_bundle(
             variant,
             lh_c,
@@ -1859,6 +1893,7 @@ def main(argv: list[str] | None = None) -> None:
             step_cutoff=cfg.step_cutoff,
             flops_xmin=cfg.flops_xmin,
             log_steps_xmin=cfg.log_steps_xmin,
+            log_steps_xmax=cfg.log_steps_xmax,
             model_curve_cuts_c=cfg.model_curve_cuts("classification"),
             model_curve_cuts_r=cfg.model_curve_cuts("regression"),
             label_fn=label_fn,

@@ -139,8 +139,12 @@ STEPS_PLOT_EXCLUDED_MODELS: frozenset[str] = frozenset({"Reco-baseline"})
 
 
 def is_steps_plot_excluded_model(name: str) -> bool:
-    """Models never drawn on steps / FLOPs validation-loss panels."""
-    return name in STEPS_PLOT_EXCLUDED_MODELS
+    """Models never drawn on steps / FLOPs validation-loss panels.
+
+    Excludes cut baselines and all BDT* horizontal references (classification /
+    regression metric plots may still include BDT).
+    """
+    return name in STEPS_PLOT_EXCLUDED_MODELS or is_bdt_model(name)
 
 
 def is_base_steps_model(name: str) -> bool:

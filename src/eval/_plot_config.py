@@ -20,8 +20,9 @@ overlay of ``BDT-binnedW`` as ``BDT-binnedW-train``).
 
 ``display_name`` is optional per-model; when omitted :func:`plot_model_label` is used.
 ``step_cutoff`` (int or null) clips every model at this training step (legacy global cap).
-``flops_xmin`` (float or null) sets the minimum x-axis on log-FLOPs plots (``log10`` FLOPs);
-prefer per-model ``flop_cut`` for curve truncation instead.
+``flops_xmin`` (float or null) floors log-FLOPs plots (``log10`` FLOPs): truncates every
+curve to ``x >= flops_xmin`` and sets the axis left edge. Per-model ``flop_cut`` /
+``flop_xmin`` still apply on top.
 
 Per-model curve truncation (on each entry in ``models``)::
 
@@ -121,6 +122,10 @@ class ModelEntry:
     step_cut_policy: str | None = None
     step_cut_match: str | None = None
     classification_horizontal_ref: bool = False
+    # When true, skip the global ``log_steps_xmin`` floor for this model on steps panels.
+    ignore_log_steps_xmin: bool = False
+    # When true, skip the global ``flops_xmin`` floor for this model on FLOPs panels.
+    ignore_flops_xmin: bool = False
 
 
 @dataclass
@@ -133,6 +138,8 @@ class ModelCurveCuts:
     log_step_cut: dict[str, float] = field(default_factory=dict)
     step_cut_policy: dict[str, str] = field(default_factory=dict)
     step_cut_match: dict[str, str] = field(default_factory=dict)
+    ignore_log_steps_xmin: set[str] = field(default_factory=set)
+    ignore_flops_xmin: set[str] = field(default_factory=set)
     legacy_global_min_val_loss: bool = False
     legacy_match: dict[str, str] = field(default_factory=dict)
 
@@ -144,6 +151,8 @@ class ModelCurveCuts:
         log_step_cut: dict[str, float] = {}
         step_cut_policy: dict[str, str] = {}
         step_cut_match: dict[str, str] = {}
+        ignore_log_steps_xmin: set[str] = set()
+        ignore_flops_xmin: set[str] = set()
         for m in cfg.models:
             if m.step_cut is not None:
                 step_cut[m.name] = float(m.step_cut)
@@ -163,6 +172,10 @@ class ModelCurveCuts:
                 step_cut_policy[m.name] = m.step_cut_policy
             if m.step_cut_match:
                 step_cut_match[m.name] = m.step_cut_match
+            if m.ignore_log_steps_xmin:
+                ignore_log_steps_xmin.add(m.name)
+            if m.ignore_flops_xmin:
+                ignore_flops_xmin.add(m.name)
         legacy_global = (
             cfg.curve_end is not None and cfg.curve_end.policy == "min_val_loss"
         )
@@ -174,6 +187,8 @@ class ModelCurveCuts:
             log_step_cut=log_step_cut,
             step_cut_policy=step_cut_policy,
             step_cut_match=step_cut_match,
+            ignore_log_steps_xmin=ignore_log_steps_xmin,
+            ignore_flops_xmin=ignore_flops_xmin,
             legacy_global_min_val_loss=legacy_global,
             legacy_match=legacy_match,
         )
@@ -186,6 +201,8 @@ class ModelCurveCuts:
             or self.log_step_cut
             or self.step_cut_policy
             or self.step_cut_match
+            or self.ignore_log_steps_xmin
+            or self.ignore_flops_xmin
             or self.legacy_global_min_val_loss
             or self.legacy_match
         )
@@ -198,6 +215,9 @@ class PlotConfig:
     step_cutoff: int | None = None
     flops_xmin: float | None = None
     log_steps_xmin: float | None = None
+    log_steps_xmax: float | None = None
+    ylim_classification: tuple[float, float] | None = None
+    ylim_regression: tuple[float, float] | None = None
     curve_end: CurveEndConfig = field(default_factory=CurveEndConfig)
     legend_column_stacks: list[list[str]] = field(default_factory=list)
 
@@ -289,9 +309,32 @@ class PlotConfig:
     def legend_labels(
         self,
         tail: tuple[str, ...] = ("Transformer-xsmall", "Transformer-small", "MLP"),
+        *,
+        include_baseline: bool = False,
     ) -> list[str]:
-        """Display labels in :meth:`ordered_model_names` order."""
-        return [self.label_for(n) for n in self.ordered_model_names(tail)]
+        """Display labels in stack / config order (optionally with ``Baseline`` last).
+
+        When ``legend_column_stacks`` is set, flatten those stacks first (so
+        OL ±rw, then HyperScale ±rw, …), then append any remaining models in
+        :meth:`ordered_model_names` order.
+        """
+        names = self.model_names()
+        name_set = set(names)
+        ordered: list[str] = []
+        if self.legend_column_stacks:
+            for stack in self.legend_column_stacks:
+                for n in stack:
+                    if n in name_set and n not in ordered:
+                        ordered.append(n)
+            for n in self.ordered_model_names(tail):
+                if n not in ordered:
+                    ordered.append(n)
+        else:
+            ordered = self.ordered_model_names(tail)
+        labels = [self.label_for(n) for n in ordered]
+        if include_baseline:
+            labels.append("Baseline")
+        return labels
 
     def model_curve_cuts(self, task: TaskName) -> ModelCurveCuts:
         """Per-model step / FLOP curve truncation specs for one task."""
@@ -338,6 +381,8 @@ class PlotConfig:
                 classification_horizontal_ref=bool(
                     m.get("classification_horizontal_ref", False)
                 ),
+                ignore_log_steps_xmin=bool(m.get("ignore_log_steps_xmin", False)),
+                ignore_flops_xmin=bool(m.get("ignore_flops_xmin", False)),
             )
             for m in data.get("models", [])
         ]
@@ -350,12 +395,25 @@ class PlotConfig:
             policy=curve_raw.get("policy", "none"),
             match=dict(curve_raw.get("match") or {}),
         )
+
+        def _parse_ylim(raw) -> tuple[float, float] | None:
+            if raw is None:
+                return None
+            if not isinstance(raw, (list, tuple)) or len(raw) != 2:
+                raise ValueError(
+                    f"ylim must be [ymin, ymax], got {raw!r}"
+                )
+            return float(raw[0]), float(raw[1])
+
         return cls(
             models=models,
             eval_split=data.get("eval_split", "test"),
             step_cutoff=data.get("step_cutoff"),
             flops_xmin=data.get("flops_xmin"),
             log_steps_xmin=data.get("log_steps_xmin"),
+            log_steps_xmax=data.get("log_steps_xmax"),
+            ylim_classification=_parse_ylim(data.get("ylim_classification")),
+            ylim_regression=_parse_ylim(data.get("ylim_regression")),
             curve_end=curve_end,
             legend_column_stacks=legend_column_stacks,
         )

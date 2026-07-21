@@ -114,17 +114,27 @@ def test_loss_values_in_log_steps_window():
     assert win.tolist() == [0.04, 0.035]
 
 
-def test_runs_per_model_excludes_reco_baseline():
+def test_runs_per_model_excludes_reco_baseline_and_bdt():
     from src.eval.plot_steps import _runs_per_model
 
     lh = {
         "MLP": [(np.array([1000.0]), np.array([1.0]))],
+        "BDT": [(np.array([0.0]), np.array([1.26]))],
         "Reco-baseline": [(np.array([0.0]), np.array([0.08]))],
     }
-    flops = {"MLP": 1e9, "Reco-baseline": 0.0}
+    flops = {"MLP": 1e9, "BDT": 2.6e9, "Reco-baseline": 0.0}
     runs = _runs_per_model(lh, flops)
     assert "MLP" in runs
+    assert "BDT" not in runs
     assert "Reco-baseline" not in runs
+
+
+def test_is_steps_plot_excluded_model_covers_bdt():
+    from src.eval._constants import is_steps_plot_excluded_model
+
+    assert is_steps_plot_excluded_model("BDT")
+    assert is_steps_plot_excluded_model("BDT-binnedW")
+    assert not is_steps_plot_excluded_model("MLP")
 
 
 def test_split_mlp_horizontal_ref_classification_only():

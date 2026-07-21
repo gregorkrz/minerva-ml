@@ -182,6 +182,12 @@ def _save_regression_q3_compact(
         label_fn=cfg.label_for,
         compact_figsize=SMALL_PAPER_COMPACT_IQR_MPV_FIGSIZE_INCHES,
         compact_style=True,
+        legend_label_order=cfg.legend_labels(),
+        legend_column_stacks=(
+            [[cfg.label_for(n) for n in stack] for stack in cfg.legend_column_stacks]
+            if cfg.legend_column_stacks
+            else None
+        ),
     )
     out_pdf.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_pdf, bbox_inches="tight")
@@ -234,12 +240,18 @@ def _save_classification_tpr_baseline(
         print("Skip (no classification task rows):", out_pdf)
         return
 
+    legend_column_stacks = (
+        [[cfg.label_for(n) for n in stack] for stack in cfg.legend_column_stacks]
+        if cfg.legend_column_stacks
+        else None
+    )
     fig = _figure_metrics_3tasks_tpr_baseline(
         task_rows,
         {**clrs, **cfg.colors()},
         label_fn=cfg.label_for,
         model_order=cfg.ordered_model_names(),
         legend_label_order=cfg.legend_labels(),
+        legend_column_stacks=legend_column_stacks,
     )
     _save_single_fig(fig, out_pdf)
 
@@ -425,12 +437,18 @@ def _save_classification_tpr_baseline_perbin_cutfpr(
         print("Skip (no per-bin-FPR task rows):", out_pdf)
         return
 
+    legend_column_stacks = (
+        [[cfg.label_for(n) for n in stack] for stack in cfg.legend_column_stacks]
+        if cfg.legend_column_stacks
+        else None
+    )
     fig = _figure_metrics_3tasks_tpr_baseline(
         task_rows,
         {**clrs, **cfg.colors()},
         label_fn=cfg.label_for,
         model_order=cfg.ordered_model_names(),
         legend_label_order=cfg.legend_labels(),
+        legend_column_stacks=legend_column_stacks,
     )
     _save_single_fig(fig, out_pdf)
 

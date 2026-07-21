@@ -22,6 +22,7 @@ from pathlib import Path
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.lines import Line2D
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
@@ -163,6 +164,34 @@ def main(argv: list[str] | None = None) -> None:
             k: v for k, v in runs_by_model_cap.items() if k in config_model_names
         }
 
+    label_fn = cfg.label_for if cfg is not None else None
+    # IQR legends: flat reading order (OL ±rw, HS ±rw, …, MLP, Baseline).
+    # Column stacks are for shared multi-panel figure legends, not the in-axes IQR box.
+    iqr_legend_order = (
+        cfg.legend_labels(include_baseline=True) if cfg is not None else None
+    )
+    ratio_legend_order = cfg.legend_labels() if cfg is not None else None
+    ratio_legend_stacks = (
+        [[cfg.label_for(n) for n in stack] for stack in cfg.legend_column_stacks]
+        if cfg is not None and cfg.legend_column_stacks
+        else None
+    )
+    iqr_legend_kw = dict(
+        label_fn=label_fn,
+        legend_label_order=iqr_legend_order,
+        legend_column_stacks=None,
+    )
+    ratio_legend_kw = dict(
+        label_fn=label_fn,
+        legend_label_order=ratio_legend_order,
+        legend_column_stacks=ratio_legend_stacks,
+    )
+    residuals_legend_kw = dict(
+        label_fn=label_fn,
+        legend_label_order=iqr_legend_order,
+        legend_column_stacks=ratio_legend_stacks,
+    )
+
     fig_i = plot_rms_iqr_with_uncertainty(
         CKPT_DIR=CKPT_DIR,
         training_names=training_names_full_no_rw,
@@ -177,6 +206,7 @@ def main(argv: list[str] | None = None) -> None:
         colors=clrs,
         text="",
         data=data_no_rw,
+        **iqr_legend_kw,
     )
     fig_i.savefig(out_dir / "q3_vs_iqr_rms_full_1A.pdf", bbox_inches="tight")
     plt.close(fig_i)
@@ -186,13 +216,6 @@ def main(argv: list[str] | None = None) -> None:
         ratio_playlists = sorted(data_first["mc_E"].keys())
     else:
         ratio_playlists = ["1A"]
-    ratio_label_fn = cfg.label_for if cfg is not None else None
-    ratio_legend_order = cfg.legend_labels() if cfg is not None else None
-    ratio_legend_stacks = (
-        [[cfg.label_for(n) for n in stack] for stack in cfg.legend_column_stacks]
-        if cfg is not None and cfg.legend_column_stacks
-        else None
-    )
     for pl in ratio_playlists:
         fig_q = plot_ratio_histogram_q3_two_panels(
             CKPT_DIR=CKPT_DIR,
@@ -204,9 +227,7 @@ def main(argv: list[str] | None = None) -> None:
             colors=clrs,
             suppress_errors=suppress,
             data=data_first,
-            label_fn=ratio_label_fn,
-            legend_label_order=ratio_legend_order,
-            legend_column_stacks=ratio_legend_stacks,
+            **ratio_legend_kw,
         )
         out_q = small_paper_dir / f"regression_e_ratio_hist_q3_0_1_and_1_2_{pl}.pdf"
         fig_q.savefig(out_q, bbox_inches="tight")
@@ -227,6 +248,7 @@ def main(argv: list[str] | None = None) -> None:
         colors=clrs,
         text="",
         data=data_no_rw,
+        **iqr_legend_kw,
     )
     fig_i.savefig(
         out_dir / "q3_vs_iqr_rms_full_muon_selection_only.pdf", bbox_inches="tight"
@@ -246,6 +268,7 @@ def main(argv: list[str] | None = None) -> None:
         colors=clrs,
         text="",
         data=data_no_rw,
+        **iqr_legend_kw,
     )
     fig_i.savefig(out_dir / "q3_vs_iqr_rms_full_1B.pdf", bbox_inches="tight")
     plt.close(fig_i)
@@ -279,6 +302,7 @@ def main(argv: list[str] | None = None) -> None:
         suppress_errors=suppress,
         return_values=True,
         data=data_no_rw,
+        **iqr_legend_kw,
     )
     plt.close(fig_1A)
 
@@ -291,50 +315,85 @@ def main(argv: list[str] | None = None) -> None:
         suppress_errors=suppress,
         return_values=True,
         data=data_no_rw,
+        **iqr_legend_kw,
     )
     plt.close(fig_1B)
 
     q3 = vals_1A["q3_bin_mids"]
-    fig_both, ax = plt.subplots(figsize=(5.5, 4.5))
+    fig_both, ax = plt.subplots(figsize=(4.8, 3.9))
+    # Color = model; linestyle = playlist (1A dashed, 1B solid). Separate legends.
+    model_proxies: dict[str, Line2D] = {}
     for loss in vals_1A:
         if loss in ("q3_bin_mids", "baseline"):
             continue
         for cfg_label, vA in vals_1A[loss].items():
             method = cfg_label.split()[0]
             color = clrs.get(method, "tab:gray")
-            ax.plot(
-                q3,
-                vA["iqr_mean"],
-                "--",
-                color=color,
-                label=f"{plot_model_label(method)} (1A)",
-            )
+            lab = label_fn(method) if label_fn is not None else plot_model_label(method)
+            ax.plot(q3, vA["iqr_mean"], "--", color=color)
             vB = vals_1B.get(loss, {}).get(cfg_label)
             if vB is not None:
-                ax.plot(
-                    q3,
-                    vB["iqr_mean"],
-                    "-",
-                    color=color,
-                    label=f"{plot_model_label(method)} (1B)",
+                ax.plot(q3, vB["iqr_mean"], "-", color=color)
+            if lab not in model_proxies:
+                model_proxies[lab] = Line2D(
+                    [], [], color=color, linestyle="-", linewidth=2.0
                 )
 
     if "baseline" in vals_1A:
-        bl = vals_1A["baseline"]
-        ax.plot(q3, bl["iqr"], "k:", label="Baseline (1A)")
+        ax.plot(q3, vals_1A["baseline"]["iqr"], "k--")
     if "baseline" in vals_1B:
-        bl = vals_1B["baseline"]
-        ax.plot(q3, bl["iqr"], "k--", label="Baseline (1B)")
+        ax.plot(q3, vals_1B["baseline"]["iqr"], "k-")
+    if "baseline" in vals_1A or "baseline" in vals_1B:
+        model_proxies.setdefault(
+            "Baseline", Line2D([], [], color="k", linestyle="-", linewidth=2.0)
+        )
+
+    if iqr_legend_order:
+        model_labels = [lab for lab in iqr_legend_order if lab in model_proxies]
+        model_labels.extend(
+            lab for lab in model_proxies if lab not in model_labels
+        )
+    else:
+        model_labels = list(model_proxies.keys())
+    model_handles = [model_proxies[lab] for lab in model_labels]
 
     ax.set(
         xlabel=r"True $q_3$ [GeV]",
         ylabel=r"25-75 IQR of $E_{\mathrm{available}}^{\mathrm{reco}}/E_{\mathrm{available}}^{\mathrm{true}}$",
     )
-    selection_text = ""
-    leg1 = ax.legend(title=selection_text, fontsize=9, loc="upper right")
-    leg1.set_title(selection_text)
+    style_handles = [
+        Line2D([], [], color="0.45", linestyle="--", linewidth=2.0),
+        Line2D([], [], color="0.45", linestyle="-", linewidth=2.0),
+    ]
+    # Stack: 1A/1B style box on top, model colors directly below (upper right).
+    leg_style = ax.legend(
+        style_handles,
+        ["1A", "1B"],
+        fontsize=9,
+        loc="upper right",
+        ncol=2,
+        framealpha=0.9,
+    )
+    ax.add_artist(leg_style)
     ax.grid(True)
     fig_both.tight_layout()
+    fig_both.canvas.draw()
+    renderer = fig_both.canvas.get_renderer()
+    style_bb = leg_style.get_window_extent(renderer)
+    # ~8 pt clear air between the two legend frames (display pixels).
+    gap_px = 8.0 * fig_both.dpi / 72.0
+    x1, y_anchor = ax.transAxes.inverted().transform(
+        (style_bb.x1, style_bb.y0 - gap_px)
+    )
+    ax.legend(
+        model_handles,
+        model_labels,
+        fontsize=9,
+        loc="upper right",
+        bbox_to_anchor=(x1, y_anchor),
+        borderaxespad=0.0,
+        framealpha=0.9,
+    )
     fig_both.savefig(out_dir / "q3_vs_iqr_rms_full_1A_1B.pdf", bbox_inches="tight")
     plt.close(fig_both)
     print("Saved:", out_dir / "q3_vs_iqr_rms_full_1A_1B.pdf")
@@ -362,6 +421,7 @@ def main(argv: list[str] | None = None) -> None:
         colors=clrs,
         suppress_errors=suppress,
         data=data_first,
+        **residuals_legend_kw,
     )
     fig_ii_q3.savefig(
         out_dir / "residuals_by_q3_select_events_by_E_recoil_CCinc.pdf",
@@ -381,6 +441,7 @@ def main(argv: list[str] | None = None) -> None:
         suppress_errors=suppress,
         use_cc_selection=1,
         data=data_first,
+        **residuals_legend_kw,
     )
     fig_ii_q3.savefig(
         out_dir / "residuals_by_q3_select_events_by_muons.pdf", bbox_inches="tight"

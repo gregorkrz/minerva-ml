@@ -47,6 +47,8 @@ def plot_rms_iqr_with_uncertainty(
     label_fn: Callable[[str], str] | None = None,
     compact_figsize: tuple[float, float] | None = None,
     compact_style: bool = False,
+    legend_label_order: list[str] | None = None,
+    legend_column_stacks: list[list[str]] | None = None,
 ) -> plt.Figure | tuple[plt.Figure, dict]:
     """RMS / IQR vs *q3* with ±1 std-dev uncertainty bands across seeds.
 
@@ -447,11 +449,35 @@ def plot_rms_iqr_with_uncertainty(
         legend_kwargs["title"] = text
         legend_kwargs["title_fontsize"] = 10
 
+    def _apply_legend(ax: plt.Axes) -> None:
+        handles, labels = ax.get_legend_handles_labels()
+        if not handles:
+            return
+        if legend_label_order:
+            by_label = dict(zip(labels, handles))
+            ordered = [lab for lab in legend_label_order if lab in by_label]
+            ordered.extend(lab for lab in labels if lab not in ordered)
+            handles = [by_label[lab] for lab in ordered]
+            labels = ordered
+        if legend_column_stacks:
+            from src.eval._legend import layout_legend_with_column_stacks
+
+            handles, labels, ncol = layout_legend_with_column_stacks(
+                handles,
+                labels,
+                tuple(tuple(s) for s in legend_column_stacks),
+            )
+            legend_kwargs["ncol"] = ncol
+        elif legend_label_order:
+            # Flat legend: one column so order reads top→bottom as requested.
+            legend_kwargs["ncol"] = 1
+        ax.legend(handles, labels, **legend_kwargs)
+
     if iqr_only:
-        ax_iqr.legend(**legend_kwargs)
+        _apply_legend(ax_iqr)
     else:
-        ax_rms.legend(**legend_kwargs)
-        ax_iqr.legend(**legend_kwargs)
+        _apply_legend(ax_rms)
+        _apply_legend(ax_iqr)
 
     ax_iqr.set(
         xlabel="" if (iqr_only and compact_style) else r"True $q_3$ [GeV]",

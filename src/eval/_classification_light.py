@@ -29,6 +29,7 @@ import numpy as np
 import numpy.ma as ma
 
 from src.eval._constants import plot_model_label
+from src.eval._legend import layout_legend_with_column_stacks
 from src.eval.classification_plots import (
     compute_all_metrics,
     compute_all_metrics_q3,
@@ -42,7 +43,6 @@ from src.eval.classification_plots import (
 from src.eval.classification_plots._constants import (
     TRUE_W_XLABEL,
     _baseline_legend_with_global_fpr,
-    _tpr_line_legend_label,
 )
 
 if TYPE_CHECKING:
@@ -105,6 +105,7 @@ def _shared_light_legend(
     *,
     legend_fs: int | None = None,
     label_order: list[str] | None = None,
+    column_stack_labels: list[list[str]] | None = None,
 ) -> None:
     """Shared legend below; model lines aggregated, Baseline (FPR …) stays on each panel."""
     legend_fs = _LEGEND_FS if legend_fs is None else legend_fs
@@ -156,8 +157,15 @@ def _shared_light_legend(
         ordered.extend(lab for lab in labels_order if lab not in ordered)
         labels_order = ordered
     handles = [by_label[k] for k in labels_order]
-    n = len(labels_order)
-    ncol = max(3, min(6, (n + 2) // 3)) if n > 2 else n
+    if column_stack_labels:
+        handles, labels_order, ncol = layout_legend_with_column_stacks(
+            handles,
+            labels_order,
+            tuple(tuple(s) for s in column_stack_labels),
+        )
+    else:
+        n = len(labels_order)
+        ncol = max(3, min(6, (n + 2) // 3)) if n > 2 else n
     legend_kw: dict = dict(
         ncol=ncol,
         fontsize=legend_fs,
@@ -203,11 +211,12 @@ def _draw_metrics_row_on_axes(
     show_xlabel: bool = True,
     xlabel: str = r"True $q_3$ [GeV]",
     log_x: bool = False,
+    model_order: list[str] | None = None,
 ) -> None:
     axes[0].plot(
         x, baseline_auprc, "o--", color="gray", label="Random baseline", zorder=1
     )
-    for model_name, agg in sorted(all_metrics.items(), key=lambda kv: kv[0]):
+    for model_name, agg in _iter_metrics_ordered(all_metrics, model_order):
         clr = {"color": colors.get(model_name, "tab:gray")}
         _plot_metric_line(axes[0], x, agg["auprc"], label_fn(model_name), True, **clr)
         _plot_metric_line(axes[1], x, agg["auroc"], label_fn(model_name), True, **clr)
@@ -250,6 +259,9 @@ def _figure_metrics_1x3(
     log_x: bool = False,
     reco_baseline_global_fpr: float | None = None,
     label_fn: Callable[[str], str] | None = None,
+    legend_label_order: list[str] | None = None,
+    legend_column_stacks: list[list[str]] | None = None,
+    model_order: list[str] | None = None,
 ) -> plt.Figure:
     """One row: AUPRC | AUROC | TPR vs a common *x* (global FPR only)."""
     if label_fn is None:
@@ -270,8 +282,14 @@ def _figure_metrics_1x3(
         show_xlabel=True,
         xlabel=xlabel,
         log_x=log_x,
+        model_order=model_order,
     )
-    _shared_light_legend(fig, axes.ravel())
+    _shared_light_legend(
+        fig,
+        axes.ravel(),
+        label_order=legend_label_order,
+        column_stack_labels=legend_column_stacks,
+    )
     return fig
 
 
@@ -396,6 +414,7 @@ def _figure_metrics_3tasks_tpr_baseline(
     label_fn: Callable[[str], str] | None = None,
     model_order: list[str] | None = None,
     legend_label_order: list[str] | None = None,
+    legend_column_stacks: list[list[str]] | None = None,
 ) -> plt.Figure:
     """One row, three columns: CC1π± | CCπ⁰ | CCNπ TPR; shared model legend below."""
     if label_fn is None:
@@ -422,6 +441,7 @@ def _figure_metrics_3tasks_tpr_baseline(
         axes,
         legend_fs=_SMALL_PAPER_TPR_LEGEND_FS,
         label_order=legend_label_order,
+        column_stack_labels=legend_column_stacks,
     )
     return fig
 
@@ -448,8 +468,15 @@ def _figure_metrics_2x3_pion(
     reco_label: str,
     reco_baseline_global_fpr: float,
     colors: dict[str, str],
+    *,
+    label_fn: Callable[[str], str] | None = None,
+    legend_label_order: list[str] | None = None,
+    legend_column_stacks: list[list[str]] | None = None,
+    model_order: list[str] | None = None,
 ) -> plt.Figure:
     """Two rows: pion *E* (top) and *θ* (bottom); matches ``plot_cc1pi_vs_pion_kinematics`` (3-col part)."""
+    if label_fn is None:
+        label_fn = plot_model_label
     fig, axes = plt.subplots(2, 3, figsize=(14.5, 8.0), constrained_layout=True)
 
     axes[0, 0].plot(
@@ -459,34 +486,16 @@ def _figure_metrics_2x3_pion(
         x_theta, baseline_theta, "o--", color="gray", label="Random baseline", zorder=1
     )
 
-    for model_name, m in sorted(all_metrics.items(), key=lambda kv: kv[0]):
+    for model_name, m in _iter_metrics_ordered(all_metrics, model_order):
         clr = {"color": colors.get(model_name, "tab:gray")}
+        lab = label_fn(model_name)
         agg_E, agg_th = m["E"], m["theta"]
-        _plot_metric_line(
-            axes[0, 0], x_E, agg_E["auprc"], plot_model_label(model_name), True, **clr
-        )
-        _plot_metric_line(
-            axes[0, 1], x_E, agg_E["auroc"], plot_model_label(model_name), True, **clr
-        )
-        _plot_metric_line(
-            axes[1, 0],
-            x_theta,
-            agg_th["auprc"],
-            plot_model_label(model_name),
-            True,
-            **clr,
-        )
-        _plot_metric_line(
-            axes[1, 1],
-            x_theta,
-            agg_th["auroc"],
-            plot_model_label(model_name),
-            True,
-            **clr,
-        )
+        _plot_metric_line(axes[0, 0], x_E, agg_E["auprc"], lab, True, **clr)
+        _plot_metric_line(axes[0, 1], x_E, agg_E["auroc"], lab, True, **clr)
+        _plot_metric_line(axes[1, 0], x_theta, agg_th["auprc"], lab, True, **clr)
+        _plot_metric_line(axes[1, 1], x_theta, agg_th["auroc"], lab, True, **clr)
         for fpr_val in fixed_fpr:
             key = f"tpr@{fpr_val}"
-            lab = _tpr_line_legend_label(model_name, fpr_val, True)
             _plot_metric_line(axes[0, 2], x_E, agg_E[key], lab, True, **clr)
             _plot_metric_line(axes[1, 2], x_theta, agg_th[key], lab, True, **clr)
 
@@ -511,7 +520,12 @@ def _figure_metrics_2x3_pion(
         if len(x_E) > 0 and np.all(np.isfinite(x_E[[0, -1]])):
             ax0.set_xlim(float(x_E[0]) * 0.8, float(x_E[-1]) * 1.2)
 
-    _shared_light_legend(fig, axes.ravel())
+    _shared_light_legend(
+        fig,
+        axes.ravel(),
+        label_order=legend_label_order,
+        column_stack_labels=legend_column_stacks,
+    )
     return fig
 
 
@@ -910,8 +924,20 @@ def draw_light_classification_from_cache(
     """
     out_dir.mkdir(parents=True, exist_ok=True)
     clrs = clrs_dict_full
+    label_fn = plot_model_label
+    legend_label_order: list[str] | None = None
+    legend_column_stacks: list[list[str]] | None = None
+    model_order: list[str] | None = None
     if cfg is not None:
         clrs = {**clrs, **cfg.colors()}
+        label_fn = cfg.label_for
+        legend_label_order = cfg.legend_labels()
+        model_order = cfg.ordered_model_names()
+        legend_column_stacks = (
+            [[cfg.label_for(n) for n in stack] for stack in cfg.legend_column_stacks]
+            if cfg.legend_column_stacks
+            else None
+        )
 
     for spec in specs:
         all_metrics: dict = spec["all_metrics"]
@@ -935,6 +961,10 @@ def draw_light_classification_from_cache(
                 clrs,
                 log_x=spec.get("log_x", False),
                 reco_baseline_global_fpr=spec.get("reco_baseline_global_fpr"),
+                label_fn=label_fn,
+                legend_label_order=legend_label_order,
+                legend_column_stacks=legend_column_stacks,
+                model_order=model_order,
             )
         elif spec["type"] == "2x3_pion":
             fig = _figure_metrics_2x3_pion(
@@ -949,6 +979,10 @@ def draw_light_classification_from_cache(
                 spec["reco_label"],
                 spec["reco_baseline_global_fpr"],
                 clrs,
+                label_fn=label_fn,
+                legend_label_order=legend_label_order,
+                legend_column_stacks=legend_column_stacks,
+                model_order=model_order,
             )
         else:
             raise ValueError(f"Unknown draw spec type: {spec['type']!r}")

@@ -53,8 +53,9 @@ def test_merge_config_horizontal_refs_regression_side():
         source_flops=flops,
         source_colors=colors,
     )
-    assert set(merged_lh) == {"MLP", "BDT"}
-    assert merged_lh["BDT"][0][1].tolist() == [0.05]
+    # BDT and Reco-baseline are excluded from steps plots entirely.
+    assert set(merged_lh) == {"MLP"}
+    assert "BDT" not in merged_lh
     assert "Reco-baseline" not in merged_lh
 
 
