@@ -1,0 +1,64 @@
+{
+  "_comment": "OL + HyperScale scaling: small / small-rw / medium (frozen backbone for OL-medium).",
+  "models": [
+    {
+      "name": "OmniLearned-small",
+      "color": "#c2410c"
+    },
+    {
+      "name": "OmniLearned-small-rw",
+      "color": "#ff7f0e"
+    },
+    {
+      "name": "OmniLearned-medium",
+      "color": "#9467bd",
+      "display_name": "OL-medium-frozen"
+    },
+    {
+      "name": "HyperScale-small",
+      "color": "#0369a1",
+      "flop_cut": {
+        "classification": 16.6
+      }
+    },
+    {
+      "name": "HyperScale-small-rw",
+      "color": "#60a5fa",
+      "flop_cut": {
+        "classification": 16.6
+      }
+    },
+    {
+      "name": "HyperScale-medium",
+      "color": "#86198f",
+      "flop_cut": {
+        "classification": 17.4,
+        "regression": 17.6
+      }
+    },
+    {
+      "name": "HyperScale-medium-rw",
+      "color": "#e879f9",
+      "flop_cut": {
+        "classification": 17.4,
+        "regression": 17.6
+      }
+    }
+  ],
+  "flops_xmin": 16,
+  "legend_column_stacks": [
+    [
+      "OmniLearned-small",
+      "OmniLearned-small-rw",
+      "OmniLearned-medium"
+    ],
+    [
+      "HyperScale-small",
+      "HyperScale-small-rw"
+    ],
+    [
+      "HyperScale-medium",
+      "HyperScale-medium-rw"
+    ]
+  ]
+}

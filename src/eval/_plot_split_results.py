@@ -92,7 +92,7 @@ def load_overlay_results(
     """
     overlays = overlay_entries(cfg)
     if not overlays:
-        return {}, {}
+        return {}, {}, {}
 
     ckpt_dir = clf["ckpt_dir"]
     training_names = clf["training_names"]

@@ -192,13 +192,17 @@ def main(argv: list[str] | None = None) -> None:
         legend_column_stacks=ratio_legend_stacks,
     )
 
+    # Shared q3 edges for the 1A paper IQR/MPV figure and the 1A+1B overlay
+    # (must match so the 1A baseline/curves coincide on both PDFs).
+    q3_bins_paper = [0, 0.6, 1.2, 1.8, 2.4, 3.0, 100]
+
     fig_i = plot_rms_iqr_with_uncertainty(
         CKPT_DIR=CKPT_DIR,
         training_names=training_names_full_no_rw,
         playlists=["1A"],
         dataset_to_plot="1A",
         baseline_run=baseline_run,
-        q3_bins=[0, 0.6, 1.2, 1.8, 2.4, 3.0, 100],
+        q3_bins=q3_bins_paper,
         show_q3_histograms=True,
         return_hist_fig=False,
         suppress_errors=suppress,
@@ -240,7 +244,7 @@ def main(argv: list[str] | None = None) -> None:
         playlists=["1A"],
         dataset_to_plot="1A",
         baseline_run=baseline_run,
-        q3_bins=[0, 0.6, 1.2, 1.8, 2.4, 3.0, 100],
+        q3_bins=q3_bins_paper,
         show_q3_histograms=True,
         return_hist_fig=False,
         suppress_errors=suppress,
@@ -299,8 +303,11 @@ def main(argv: list[str] | None = None) -> None:
         playlists=["1A"],
         dataset_to_plot="1A",
         baseline_run=baseline_run,
+        q3_bins=q3_bins_paper,
+        use_cc_selection=2,
         suppress_errors=suppress,
         return_values=True,
+        colors=clrs,
         data=data_no_rw,
         **iqr_legend_kw,
     )
@@ -312,8 +319,11 @@ def main(argv: list[str] | None = None) -> None:
         playlists=["1B"],
         dataset_to_plot="1B",
         baseline_run=baseline_run,
+        q3_bins=q3_bins_paper,
+        use_cc_selection=2,
         suppress_errors=suppress,
         return_values=True,
+        colors=clrs,
         data=data_no_rw,
         **iqr_legend_kw,
     )
@@ -322,6 +332,7 @@ def main(argv: list[str] | None = None) -> None:
     q3 = vals_1A["q3_bin_mids"]
     fig_both, ax = plt.subplots(figsize=(4.8, 3.9))
     # Color = model; linestyle = playlist (1A dashed, 1B solid). Separate legends.
+    # Curves use seed-averaged IQR/MPV (same as plot_rms_iqr_with_uncertainty).
     model_proxies: dict[str, Line2D] = {}
     for loss in vals_1A:
         if loss in ("q3_bin_mids", "baseline"):
@@ -330,19 +341,27 @@ def main(argv: list[str] | None = None) -> None:
             method = cfg_label.split()[0]
             color = clrs.get(method, "tab:gray")
             lab = label_fn(method) if label_fn is not None else plot_model_label(method)
-            ax.plot(q3, vA["iqr_mean"], "--", color=color)
+            with np.errstate(divide="ignore", invalid="ignore"):
+                yA = vA["iqr_mean"] / vA["mpv_mean"]
+            ax.plot(q3, yA, "--", color=color)
             vB = vals_1B.get(loss, {}).get(cfg_label)
             if vB is not None:
-                ax.plot(q3, vB["iqr_mean"], "-", color=color)
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    yB = vB["iqr_mean"] / vB["mpv_mean"]
+                ax.plot(q3, yB, "-", color=color)
             if lab not in model_proxies:
                 model_proxies[lab] = Line2D(
                     [], [], color=color, linestyle="-", linewidth=2.0
                 )
 
     if "baseline" in vals_1A:
-        ax.plot(q3, vals_1A["baseline"]["iqr"], "k--")
+        blA = vals_1A["baseline"]
+        with np.errstate(divide="ignore", invalid="ignore"):
+            ax.plot(q3, blA["iqr"] / blA["mpv"], "k--")
     if "baseline" in vals_1B:
-        ax.plot(q3, vals_1B["baseline"]["iqr"], "k-")
+        blB = vals_1B["baseline"]
+        with np.errstate(divide="ignore", invalid="ignore"):
+            ax.plot(q3, blB["iqr"] / blB["mpv"], "k-")
     if "baseline" in vals_1A or "baseline" in vals_1B:
         model_proxies.setdefault(
             "Baseline", Line2D([], [], color="k", linestyle="-", linewidth=2.0)
@@ -359,7 +378,11 @@ def main(argv: list[str] | None = None) -> None:
 
     ax.set(
         xlabel=r"True $q_3$ [GeV]",
-        ylabel=r"25-75 IQR of $E_{\mathrm{available}}^{\mathrm{reco}}/E_{\mathrm{available}}^{\mathrm{true}}$",
+        ylabel=(
+            r"IQR / MPV of "
+            r"$E_{\mathrm{available}}^{\mathrm{reco}}/"
+            r"E_{\mathrm{available}}^{\mathrm{true}}$"
+        ),
     )
     style_handles = [
         Line2D([], [], color="0.45", linestyle="--", linewidth=2.0),
