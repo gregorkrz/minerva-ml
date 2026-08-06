@@ -11,7 +11,7 @@ import numpy as np
 
 from src.eval._constants import plot_model_label
 
-from ._constants import DEFAULT_BASELINE_KEY
+from ._constants import DEFAULT_BASELINE_KEY, MIN_ETRUE_GEV
 from ._load import _build_event_mask
 from ._grouped import (
     _extract_sample_count,
@@ -110,7 +110,7 @@ def plot_example_E_pred_true(
                     continue
                 true_vec = np.asarray(E_true_dict[dp][loss][flat_key]).flatten()
                 pred_vec = np.asarray(E_pred_dict[dp][loss][flat_key]).flatten()
-                valid = mask_sel & (true_vec > 0)
+                valid = mask_sel & (true_vec >= MIN_ETRUE_GEV)
                 idx = np.flatnonzero(valid)
                 if idx.size == 0:
                     if verbose:

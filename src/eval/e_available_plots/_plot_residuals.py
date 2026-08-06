@@ -16,6 +16,7 @@ from src.eval._legend import layout_legend_with_column_stacks, shared_figure_leg
 from ._grouped import _resolve_color_map, _SEED_SEP
 from ._constants import (
     DEFAULT_BASELINE_KEY,
+    MIN_ETRUE_GEV,
     SMALL_PAPER_COMPACT_IQR_MPV_FIGSIZE_INCHES,
     SMALL_PAPER_RATIO_HIST_FIG_SCALE,
 )
@@ -130,7 +131,7 @@ def plot_residuals_by_energy(
             mask = mask_e & mask_sel
             true = mc_E[dp][mask]
             baseline = Enu_baselines[dp][baseline_key][mask]
-            valid = true > 0
+            valid = true >= MIN_ETRUE_GEV
             ratio_bl = baseline[valid] / true[valid]
             ax[0, i].hist(
                 baseline - true,
@@ -339,7 +340,7 @@ def plot_residuals_by_q3(
         mask = mask_q & mask_sel
 
         true = mc_E[dp][mask]
-        valid = true > 0
+        valid = true >= MIN_ETRUE_GEV
 
         if has_baselines:
             baseline = Enu_baselines[dp][baseline_key][mask]
@@ -557,7 +558,7 @@ def plot_ratio_histogram_q3_two_panels(
     ) -> None:
         mask = mask_q3 & mask_sel
         true = mc_E[dp][mask]
-        valid = true > 0
+        valid = true >= MIN_ETRUE_GEV
         if has_baselines:
             baseline = Enu_baselines[dp][baseline_key][mask]
             ratio_bl = baseline[valid] / true[valid]

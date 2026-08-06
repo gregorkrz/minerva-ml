@@ -11,7 +11,11 @@ import numpy as np
 
 from src.eval._constants import plot_model_label
 
-from ._constants import DEFAULT_BASELINE_KEY, SMALL_PAPER_COMPACT_IQR_MPV_LEGEND_FS
+from ._constants import (
+    DEFAULT_BASELINE_KEY,
+    MIN_ETRUE_GEV,
+    SMALL_PAPER_COMPACT_IQR_MPV_LEGEND_FS,
+)
 from ._grouped import (
     _SEED_SEP,
     _resolve_color_map,
@@ -188,13 +192,14 @@ def plot_rms_iqr_with_uncertainty(
 
     ax_mpv_panel: plt.Axes | None = None
     if iqr_only:
-        # One column: IQR/MPV (top), MPV (bottom); same height ratio as full 2×2 bottom row.
+        # One column: IQR/MPV (top ~2/3), MPV (bottom ~1/3).
         _fs = compact_figsize if compact_figsize is not None else (4.8, 5.27)
         fig, axes_col = plt.subplots(
             2,
             1,
             figsize=_fs,
             gridspec_kw={"height_ratios": [2, 1]},
+            sharex=True,
         )
         ax_iqr = axes_col[0]
         ax_mpv_panel = axes_col[1]
@@ -222,7 +227,7 @@ def plot_rms_iqr_with_uncertainty(
         for i in range(n_plot_bins):
             true = mc_E[dp][bin_masks[i]]
             bl = Enu_baselines[dp][baseline_key][bin_masks[i]]
-            valid = true > 0
+            valid = true >= MIN_ETRUE_GEV
             ratio_bl = bl[valid] / true[valid]
             if ratio_bl.size > 0:
                 # Global in-range for RMS/IQR
@@ -297,7 +302,7 @@ def plot_rms_iqr_with_uncertainty(
                 for i in range(n_plot_bins):
                     true = true_vec[bin_masks[i]]
                     reco = pred_vec[bin_masks[i]]
-                    valid = true > 0
+                    valid = true >= MIN_ETRUE_GEV
                     ratio = reco[valid] / true[valid]
                     if ratio.size > 0:
                         # Global in-range for RMS/IQR
@@ -474,23 +479,23 @@ def plot_rms_iqr_with_uncertainty(
         ax.legend(handles, labels, **legend_kwargs)
 
     if iqr_only:
+        # Legend on the larger (top) IQR/MPV panel.
         _apply_legend(ax_iqr)
     else:
         _apply_legend(ax_rms)
         _apply_legend(ax_iqr)
 
-    ax_iqr.set(
-        xlabel="" if (iqr_only and compact_style) else r"True $q_3$ [GeV]",
-        ylabel=(
-            "IQR / MPV"
-            if (iqr_only and compact_style)
-            else "IQR / MPV of $E_{\\mathrm{available}}^{\\mathrm{reco}}/E_{\\mathrm{available}}^{\\mathrm{true}}$"
-        ),
-    )
-    ax_iqr.grid(True)
-    if iqr_only and compact_style:
-        ax_iqr.tick_params(labelbottom=False)
     if iqr_only:
+        ax_iqr.set(
+            xlabel="",
+            ylabel=(
+                "IQR / MPV"
+                if compact_style
+                else "IQR / MPV of $E_{\\mathrm{available}}^{\\mathrm{reco}}/E_{\\mathrm{available}}^{\\mathrm{true}}$"
+            ),
+        )
+        ax_iqr.tick_params(labelbottom=False)
+        ax_iqr.grid(True)
         ax_mpv_panel.set(
             xlabel=r"True $q_3$ [GeV]",
             ylabel=(
@@ -501,6 +506,11 @@ def plot_rms_iqr_with_uncertainty(
         )
         ax_mpv_panel.grid(True)
     else:
+        ax_iqr.set(
+            xlabel=r"True $q_3$ [GeV]",
+            ylabel="IQR / MPV of $E_{\\mathrm{available}}^{\\mathrm{reco}}/E_{\\mathrm{available}}^{\\mathrm{true}}$",
+        )
+        ax_iqr.grid(True)
         ax_rms.set(
             xlabel=r"True $q_3$ [GeV]",
             ylabel="RMS / MPV of $E_{\\mathrm{available}}^{\\mathrm{reco}}/E_{\\mathrm{available}}^{\\mathrm{true}}$",

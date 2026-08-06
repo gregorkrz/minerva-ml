@@ -330,10 +330,37 @@ def main(argv: list[str] | None = None) -> None:
     plt.close(fig_1B)
 
     q3 = vals_1A["q3_bin_mids"]
-    fig_both, ax = plt.subplots(figsize=(4.8, 3.9))
-    # Color = model; linestyle = playlist (1A dashed, 1B solid). Separate legends.
-    # Curves use seed-averaged IQR/MPV (same as plot_rms_iqr_with_uncertainty).
+    # Same two-panel layout as q3_vs_iqr_rms_full_1A.pdf (top ~2/3 IQR/MPV,
+    # bottom ~1/3 MPV). Color = model; linestyle = playlist (1A dashed, 1B solid).
+    fig_both, (ax_iqr, ax_mpv) = plt.subplots(
+        2,
+        1,
+        figsize=(4.8, 5.27),
+        gridspec_kw={"height_ratios": [2, 1]},
+        sharex=True,
+    )
     model_proxies: dict[str, Line2D] = {}
+
+    def _plot_playlist_curves(
+        ax: plt.Axes,
+        *,
+        yA: np.ndarray,
+        yA_lo: np.ndarray | None,
+        yA_hi: np.ndarray | None,
+        yB: np.ndarray | None,
+        yB_lo: np.ndarray | None,
+        yB_hi: np.ndarray | None,
+        color: str,
+        label: str | None = None,
+    ) -> None:
+        ax.plot(q3, yA, ".--", color=color, label=label)
+        if yA_lo is not None and yA_hi is not None:
+            ax.fill_between(q3, yA_lo, yA_hi, alpha=0.25, color=color)
+        if yB is not None:
+            ax.plot(q3, yB, ".-", color=color)
+            if yB_lo is not None and yB_hi is not None:
+                ax.fill_between(q3, yB_lo, yB_hi, alpha=0.25, color=color)
+
     for loss in vals_1A:
         if loss in ("q3_bin_mids", "baseline"):
             continue
@@ -342,13 +369,36 @@ def main(argv: list[str] | None = None) -> None:
             color = clrs.get(method, "tab:gray")
             lab = label_fn(method) if label_fn is not None else plot_model_label(method)
             with np.errstate(divide="ignore", invalid="ignore"):
-                yA = vA["iqr_mean"] / vA["mpv_mean"]
-            ax.plot(q3, yA, "--", color=color)
+                iqrA = vA["iqr_mean"] / vA["mpv_mean"]
+                mpvA = vA["mpv_mean"]
             vB = vals_1B.get(loss, {}).get(cfg_label)
+            iqrB = mpvB = None
             if vB is not None:
                 with np.errstate(divide="ignore", invalid="ignore"):
-                    yB = vB["iqr_mean"] / vB["mpv_mean"]
-                ax.plot(q3, yB, "-", color=color)
+                    iqrB = vB["iqr_mean"] / vB["mpv_mean"]
+                    mpvB = vB["mpv_mean"]
+            # No uncertainty bands on the 1A+1B overlay (lines only).
+            _plot_playlist_curves(
+                ax_iqr,
+                yA=iqrA,
+                yA_lo=None,
+                yA_hi=None,
+                yB=iqrB,
+                yB_lo=None,
+                yB_hi=None,
+                color=color,
+                label=lab,
+            )
+            _plot_playlist_curves(
+                ax_mpv,
+                yA=mpvA,
+                yA_lo=None,
+                yA_hi=None,
+                yB=mpvB,
+                yB_lo=None,
+                yB_hi=None,
+                color=color,
+            )
             if lab not in model_proxies:
                 model_proxies[lab] = Line2D(
                     [], [], color=color, linestyle="-", linewidth=2.0
@@ -357,11 +407,13 @@ def main(argv: list[str] | None = None) -> None:
     if "baseline" in vals_1A:
         blA = vals_1A["baseline"]
         with np.errstate(divide="ignore", invalid="ignore"):
-            ax.plot(q3, blA["iqr"] / blA["mpv"], "k--")
+            ax_iqr.plot(q3, blA["iqr"] / blA["mpv"], "k.--", label="Baseline")
+            ax_mpv.plot(q3, blA["mpv"], "k.--")
     if "baseline" in vals_1B:
         blB = vals_1B["baseline"]
         with np.errstate(divide="ignore", invalid="ignore"):
-            ax.plot(q3, blB["iqr"] / blB["mpv"], "k-")
+            ax_iqr.plot(q3, blB["iqr"] / blB["mpv"], "k.-")
+            ax_mpv.plot(q3, blB["mpv"], "k.-")
     if "baseline" in vals_1A or "baseline" in vals_1B:
         model_proxies.setdefault(
             "Baseline", Line2D([], [], color="k", linestyle="-", linewidth=2.0)
@@ -369,17 +421,23 @@ def main(argv: list[str] | None = None) -> None:
 
     if iqr_legend_order:
         model_labels = [lab for lab in iqr_legend_order if lab in model_proxies]
-        model_labels.extend(
-            lab for lab in model_proxies if lab not in model_labels
-        )
+        model_labels.extend(lab for lab in model_proxies if lab not in model_labels)
     else:
         model_labels = list(model_proxies.keys())
     model_handles = [model_proxies[lab] for lab in model_labels]
 
-    ax.set(
-        xlabel=r"True $q_3$ [GeV]",
+    ax_iqr.set(
         ylabel=(
             r"IQR / MPV of "
+            r"$E_{\mathrm{available}}^{\mathrm{reco}}/"
+            r"E_{\mathrm{available}}^{\mathrm{true}}$"
+        ),
+    )
+    ax_iqr.tick_params(labelbottom=False)
+    ax_mpv.set(
+        xlabel=r"True $q_3$ [GeV]",
+        ylabel=(
+            r"MPV of "
             r"$E_{\mathrm{available}}^{\mathrm{reco}}/"
             r"E_{\mathrm{available}}^{\mathrm{true}}$"
         ),
@@ -388,8 +446,8 @@ def main(argv: list[str] | None = None) -> None:
         Line2D([], [], color="0.45", linestyle="--", linewidth=2.0),
         Line2D([], [], color="0.45", linestyle="-", linewidth=2.0),
     ]
-    # Stack: 1A/1B style box on top, model colors directly below (upper right).
-    leg_style = ax.legend(
+    # Stack: 1A/1B style box on top, model colors directly below (upper right of IQR).
+    leg_style = ax_iqr.legend(
         style_handles,
         ["1A", "1B"],
         fontsize=9,
@@ -397,18 +455,18 @@ def main(argv: list[str] | None = None) -> None:
         ncol=2,
         framealpha=0.9,
     )
-    ax.add_artist(leg_style)
-    ax.grid(True)
+    ax_iqr.add_artist(leg_style)
+    ax_iqr.grid(True)
+    ax_mpv.grid(True)
     fig_both.tight_layout()
     fig_both.canvas.draw()
     renderer = fig_both.canvas.get_renderer()
     style_bb = leg_style.get_window_extent(renderer)
-    # ~8 pt clear air between the two legend frames (display pixels).
     gap_px = 8.0 * fig_both.dpi / 72.0
-    x1, y_anchor = ax.transAxes.inverted().transform(
+    x1, y_anchor = ax_iqr.transAxes.inverted().transform(
         (style_bb.x1, style_bb.y0 - gap_px)
     )
-    ax.legend(
+    ax_iqr.legend(
         model_handles,
         model_labels,
         fontsize=9,

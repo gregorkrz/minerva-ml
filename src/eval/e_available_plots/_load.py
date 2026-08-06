@@ -12,7 +12,7 @@ from typing import Any
 import numpy as np
 import torch
 
-from ._constants import DEFAULT_BASELINE_KEY, EAVAILABLE_SCALE
+from ._constants import DEFAULT_BASELINE_KEY, EAVAILABLE_SCALE, MIN_EPRED_GEV
 
 
 def load_eval_data(
@@ -91,7 +91,7 @@ def load_eval_data(
                         f"– checked {p1} and {p2}"
                     )
                 pred = results[loss][model][playlist]["prediction"]
-                pred[pred < 0] = 0
+                pred[pred < MIN_EPRED_GEV] = 0
 
                 settings_path = CKPT_DIR / run / "settings.json"
                 if settings_path.exists():

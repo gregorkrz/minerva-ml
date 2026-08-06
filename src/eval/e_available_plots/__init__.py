@@ -24,6 +24,8 @@ from __future__ import annotations
 from ._constants import (
     DEFAULT_BASELINE_KEY,
     EAVAILABLE_SCALE,
+    MIN_EPRED_GEV,
+    MIN_ETRUE_GEV,
     SMALL_PAPER_COMPACT_IQR_MPV_FIGSIZE_INCHES,
 )
 from ._grouped import flatten_grouped_training_names, load_eval_data_grouped
@@ -40,6 +42,8 @@ from ._plot_uncertainty import plot_rms_iqr_with_uncertainty
 __all__ = [
     "DEFAULT_BASELINE_KEY",
     "EAVAILABLE_SCALE",
+    "MIN_EPRED_GEV",
+    "MIN_ETRUE_GEV",
     "SMALL_PAPER_COMPACT_IQR_MPV_FIGSIZE_INCHES",
     "flatten_grouped_training_names",
     "load_eval_data",

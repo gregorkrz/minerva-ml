@@ -11,7 +11,7 @@ import numpy as np
 
 from src.eval._constants import plot_model_label
 
-from ._constants import DEFAULT_BASELINE_KEY
+from ._constants import DEFAULT_BASELINE_KEY, MIN_ETRUE_GEV
 from ._load import _build_event_mask, load_eval_data
 
 
@@ -129,7 +129,7 @@ def plot_rms_iqr(
         """Compute mean Huber loss between log1p(y_pred) and log1p(y_true)."""
         y_pred = np.asarray(y_pred, dtype=float)
         y_true = np.asarray(y_true, dtype=float)
-        mask_pos = y_true > 0
+        mask_pos = y_true >= MIN_ETRUE_GEV
         if not np.any(mask_pos):
             return float("nan")
         y_pred = y_pred[mask_pos]
@@ -211,7 +211,7 @@ def plot_rms_iqr(
 
             if has_baselines:
                 baseline = Enu_baselines[dp][baseline_key][mask]
-                valid_true_bl = true > 0
+                valid_true_bl = true >= MIN_ETRUE_GEV
                 ratio_bl = baseline[valid_true_bl] / true[valid_true_bl]
                 if ratio_bl.size > 0:
                     in_range_bl = (ratio_bl > 0) & (ratio_bl <= 20)
@@ -275,7 +275,7 @@ def plot_rms_iqr(
                     PCT_models_by_dp[dp][loss].setdefault(model, [])
 
                     reco = E_pred_dict[dp][loss][model][mask]
-                    valid_true = true > 0
+                    valid_true = true >= MIN_ETRUE_GEV
                     ratio = reco[valid_true] / true[valid_true]
                     if ratio.size > 0:
                         in_range = (ratio > 0) & (ratio <= 20)

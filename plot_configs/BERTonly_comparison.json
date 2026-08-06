@@ -1,0 +1,18 @@
+{
+  "_comment": "BERT-small ±rw vs ParticleViT-medium ±rw only.",
+  "models": [
+    {"name": "BERT-tiny",              "color": "#0f766e", "display_name": "BERT-small"},
+    {"name": "BERT-tiny-rw",           "color": "#5eead4", "display_name": "BERT-small-rw"},
+    {"name": "HyperScale-medium",      "color": "#86198f", "display_name": "ParticleViT-medium", "flop_cut": {"classification": 17.3, "regression": 17.5}, "log_step_cut": {"classification": 4.4, "regression": 4.75}},
+    {"name": "HyperScale-medium-rw",   "color": "#e879f9", "display_name": "ParticleViT-medium-rw", "flop_cut": {"classification": 17.3}, "log_step_cut": {"classification": 4.5}}
+  ],
+  "legend_column_stacks": [
+    ["BERT-tiny", "BERT-tiny-rw"],
+    ["HyperScale-medium", "HyperScale-medium-rw"]
+  ],
+  "step_cutoff": null,
+  "flops_xmin": null,
+  "log_steps_xmin": 3.6,
+  "ylim_classification": [0.93, 1.125],
+  "ylim_regression": [0.0275, 0.055]
+}

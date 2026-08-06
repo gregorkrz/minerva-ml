@@ -4,6 +4,10 @@ from __future__ import annotations
 
 EAVAILABLE_SCALE = 1.17  # E_available scale factor for blob recoil energy
 DEFAULT_BASELINE_KEY = "blob_recoil_E_scaled"
+# Predictions below this (GeV) are set to exactly 0 at load time.
+MIN_EPRED_GEV = 0.01
+# Drop events below this true available energy (GeV) for ratio / IQR / MPV plots.
+MIN_ETRUE_GEV = 0.05
 
 # Width (in) of the compact IQR/MPV small-paper column; used as the **height** of the
 # two-panel :math:`E_\mathrm{reco}/E_\mathrm{true}` ratio figure so they match in print.
